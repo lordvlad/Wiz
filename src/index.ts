@@ -219,5 +219,7 @@ export function protobufSchema<TTypes extends unknown[]>(
   throw new PluginInactiveError("protobufSchema");
 }
 
-export { wizPlugin } from "./plugin.ts";
+// `wizPlugin` is deliberately NOT re-exported here: it pulls in the TypeScript
+// compiler, and importing the runtime must never drag that into an app bundle.
+// Build tooling imports it from "wiz/plugin".
 export * from "./types.ts";

@@ -144,6 +144,27 @@ function asOperationCall(node: ts.Expression): ts.CallExpression | undefined {
   return name === "op" ? node : undefined;
 }
 
+/** `file:line:col` for a node, so a warning points at real source. */
+function locationOf(node: ts.Node, sourceFile: ts.SourceFile): string {
+  const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+    node.getStart(sourceFile)
+  );
+  return `${sourceFile.fileName}:${line + 1}:${character + 1}`;
+}
+
+/**
+ * Reports a route that exists at runtime but cannot reach the document.
+ * Silence is the wrong failure mode here: the server still works, so a missing
+ * path would otherwise only surface as a gap in generated clients.
+ */
+function warnUndocumentable(
+  message: string,
+  node: ts.Node,
+  sourceFile: ts.SourceFile
+): void {
+  console.warn(`[wiz] ${message}\n  at ${locationOf(node, sourceFile)}`);
+}
+
 /**
  * Harvests path descriptors from a Bun `routes` object literal. Purely a read:
  * the routes value is handed back to `Bun.serve` untouched.
@@ -158,7 +179,16 @@ function collectRouteOperations(
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile
 ): OpenApiOperationIR[] {
-  if (!arg || !ts.isObjectLiteralExpression(arg)) return [];
+  if (!arg) return [];
+  if (!ts.isObjectLiteralExpression(arg)) {
+    warnUndocumentable(
+      "routes must be an inline object literal to be documented; " +
+        "this value is only known at runtime, so no paths were collected",
+      arg,
+      sourceFile
+    );
+    return [];
+  }
 
   const operations: OpenApiOperationIR[] = [];
 
@@ -178,24 +208,82 @@ function collectRouteOperations(
   };
 
   for (const property of arg.properties) {
-    if (!ts.isPropertyAssignment(property)) continue;
-    if (!ts.isStringLiteralLike(property.name)) continue;
+    if (ts.isSpreadAssignment(property)) {
+      warnUndocumentable(
+        "spread routes are resolved at runtime and cannot be documented; " +
+          "declare these paths inline to include them",
+        property,
+        sourceFile
+      );
+      continue;
+    }
+
+    if (!ts.isPropertyAssignment(property)) {
+      warnUndocumentable(
+        "only `\"/path\": value` entries can be documented",
+        property,
+        sourceFile
+      );
+      continue;
+    }
+
+    if (!ts.isStringLiteralLike(property.name)) {
+      warnUndocumentable(
+        "route keys must be string literals to be documented; " +
+          "a computed key has no statically known path",
+        property.name,
+        sourceFile
+      );
+      continue;
+    }
+
     const path = property.name.text;
     const value = property.initializer;
 
     // Method map: every key that names an HTTP verb becomes its own operation.
     if (ts.isObjectLiteralExpression(value)) {
       for (const methodProperty of value.properties) {
-        if (!ts.isPropertyAssignment(methodProperty)) continue;
+        if (!ts.isPropertyAssignment(methodProperty)) {
+          warnUndocumentable(
+            `route "${path}" has a method entry that cannot be documented`,
+            methodProperty,
+            sourceFile
+          );
+          continue;
+        }
         const methodName = ts.isIdentifier(methodProperty.name)
           ? methodProperty.name.text
           : ts.isStringLiteralLike(methodProperty.name)
             ? methodProperty.name.text
             : undefined;
-        if (!methodName || !HTTP_METHODS.has(methodName.toLowerCase())) continue;
+        if (!methodName || !HTTP_METHODS.has(methodName.toLowerCase())) {
+          warnUndocumentable(
+            `route "${path}" has an entry that is not an HTTP method`,
+            methodProperty.name,
+            sourceFile
+          );
+          continue;
+        }
         push(path, methodName.toLowerCase(), methodProperty.initializer);
       }
       continue;
+    }
+
+    // A referenced value that is not callable is almost certainly a method map
+    // held in a variable; documenting it as a bare GET would be a lie.
+    if (ts.isIdentifier(value) || ts.isPropertyAccessExpression(value)) {
+      const valueType = checker.getTypeAtLocation(value);
+      const callable = valueType.getCallSignatures().length > 0;
+      const isResponse = valueType.symbol?.name === "Response";
+      if (!callable && !isResponse) {
+        warnUndocumentable(
+          `route "${path}" refers to a value that cannot be introspected; ` +
+            "inline the handler or method map to document it",
+          value,
+          sourceFile
+        );
+        continue;
+      }
     }
 
     push(path, "get", value);

@@ -2,7 +2,8 @@
   "name": "wiz",
   "module": "src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./plugin": "./src/plugin.ts"
   },
   "type": "module",
   "devDependencies": {
