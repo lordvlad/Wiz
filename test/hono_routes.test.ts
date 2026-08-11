@@ -2,9 +2,10 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { plugin } from "bun";
 import { wizPlugin } from "../src/plugin.ts";
+import { silentLogger } from "../src/logger.ts";
 import { clearDocumentFragments } from "../src/document.ts";
 
-plugin(wizPlugin());
+plugin(wizPlugin({ logger: silentLogger }));
 
 describe("honoRoutes end-to-end", () => {
   let fixture: typeof import("./fixtures/honoFixture.ts");

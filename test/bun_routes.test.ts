@@ -2,13 +2,14 @@
 import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { plugin } from "bun";
 import { wizPlugin } from "../src/plugin.ts";
+import { silentLogger } from "../src/logger.ts";
 import {
   clearDocumentFragments,
   mergeDocumentFragment,
   mergedDocument,
 } from "../src/document.ts";
 
-plugin(wizPlugin());
+plugin(wizPlugin({ logger: silentLogger }));
 
 describe("merged document registry", () => {
   beforeEach(() => clearDocumentFragments());

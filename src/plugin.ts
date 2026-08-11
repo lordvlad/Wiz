@@ -2,6 +2,7 @@ import type { BunPlugin } from "bun";
 import ts from "typescript";
 import { extractTypeIR } from "./ir/extractor.ts";
 import type { OpenApiOperationIR } from "./generators/openapi.ts";
+import { defaultLogger, type WizLogger } from "./logger.ts";
 import { registerType, getTypeModule } from "./registry.ts";
 import {
   flattenObjectProperties,
@@ -158,11 +159,12 @@ function locationOf(node: ts.Node, sourceFile: ts.SourceFile): string {
  * path would otherwise only surface as a gap in generated clients.
  */
 function warnUndocumentable(
+  logger: WizLogger,
   message: string,
   node: ts.Node,
   sourceFile: ts.SourceFile
 ): void {
-  console.warn(`[wiz] ${message}\n  at ${locationOf(node, sourceFile)}`);
+  logger.warn(`[wiz] ${message}\n  at ${locationOf(node, sourceFile)}`);
 }
 
 /**
@@ -177,11 +179,13 @@ function warnUndocumentable(
 function collectRouteOperations(
   arg: ts.Expression | undefined,
   checker: ts.TypeChecker,
-  sourceFile: ts.SourceFile
+  sourceFile: ts.SourceFile,
+  logger: WizLogger
 ): OpenApiOperationIR[] {
   if (!arg) return [];
   if (!ts.isObjectLiteralExpression(arg)) {
     warnUndocumentable(
+      logger,
       "routes must be an inline object literal to be documented; " +
         "this value is only known at runtime, so no paths were collected",
       arg,
@@ -199,9 +203,11 @@ function collectRouteOperations(
   ) => {
     const call = value ? asOperationCall(value) : undefined;
     const optionsArg = call?.arguments[1];
+    const openApiPath = toOpenApiPath(path);
+    logger.trace(`[wiz] documented ${method.toUpperCase()} ${openApiPath}`);
     operations.push({
       method,
-      path: toOpenApiPath(path),
+      path: openApiPath,
       optionsSource: optionsArg ? optionsArg.getText(sourceFile) : undefined,
       ...(call ? readOperationSpec(call, checker) : {}),
     });
@@ -210,6 +216,7 @@ function collectRouteOperations(
   for (const property of arg.properties) {
     if (ts.isSpreadAssignment(property)) {
       warnUndocumentable(
+        logger,
         "spread routes are resolved at runtime and cannot be documented; " +
           "declare these paths inline to include them",
         property,
@@ -220,6 +227,7 @@ function collectRouteOperations(
 
     if (!ts.isPropertyAssignment(property)) {
       warnUndocumentable(
+        logger,
         "only `\"/path\": value` entries can be documented",
         property,
         sourceFile
@@ -229,6 +237,7 @@ function collectRouteOperations(
 
     if (!ts.isStringLiteralLike(property.name)) {
       warnUndocumentable(
+        logger,
         "route keys must be string literals to be documented; " +
           "a computed key has no statically known path",
         property.name,
@@ -245,6 +254,7 @@ function collectRouteOperations(
       for (const methodProperty of value.properties) {
         if (!ts.isPropertyAssignment(methodProperty)) {
           warnUndocumentable(
+            logger,
             `route "${path}" has a method entry that cannot be documented`,
             methodProperty,
             sourceFile
@@ -258,6 +268,7 @@ function collectRouteOperations(
             : undefined;
         if (!methodName || !HTTP_METHODS.has(methodName.toLowerCase())) {
           warnUndocumentable(
+            logger,
             `route "${path}" has an entry that is not an HTTP method`,
             methodProperty.name,
             sourceFile
@@ -277,6 +288,7 @@ function collectRouteOperations(
       const isResponse = valueType.symbol?.name === "Response";
       if (!callable && !isResponse) {
         warnUndocumentable(
+          logger,
           `route "${path}" refers to a value that cannot be introspected; ` +
             "inline the handler or method map to document it",
           value,
@@ -336,7 +348,18 @@ const COMPILER_OPTIONS: ts.CompilerOptions = {
  * `SourceFile` objects are shared by every per-file program the plugin creates.
  */
 const declarationFileCache = new Map<string, ts.SourceFile | undefined>();
-export function wizPlugin(): BunPlugin {
+export interface WizPluginOptions {
+  /**
+   * Where diagnostics go. Defaults to {@link defaultLogger}, which forwards
+   * `info`/`warn`/`error` to `console` and drops `trace`. Pass
+   * `consoleLogger` for verbose builds, `silentLogger` to mute the plugin, or
+   * any object with the four levels to route them somewhere else.
+   */
+  logger?: WizLogger;
+}
+
+export function wizPlugin(options: WizPluginOptions = {}): BunPlugin {
+  const logger = options.logger ?? defaultLogger;
   return {
     name: "wiz-plugin",
     setup(build) {
@@ -356,7 +379,9 @@ export function wizPlugin(): BunPlugin {
           .replace(/\.js$/, "");
         const contents = getTypeModule(hash);
         if (!contents) {
-          throw new Error(`[wiz] Virtual module for hash '${hash}' not found in registry.`);
+          const message = `[wiz] Virtual module for hash '${hash}' not found in registry.`;
+          logger.error(message);
+          throw new Error(message);
         }
         return {
           contents,
@@ -453,7 +478,8 @@ export function wizPlugin(): BunPlugin {
                 const routeOperations = collectRouteOperations(
                   routesArg,
                   checker,
-                  sourceFile
+                  sourceFile,
+                  logger
                 );
                 const callIR = extractTypeIR(
                   checker.getTypeAtLocation(node),

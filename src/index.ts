@@ -221,5 +221,12 @@ export function protobufSchema<TTypes extends unknown[]>(
 
 // `wizPlugin` is deliberately NOT re-exported here: it pulls in the TypeScript
 // compiler, and importing the runtime must never drag that into an app bundle.
-// Build tooling imports it from "wiz/plugin".
+// Build tooling imports it from "wiz/plugin". The logger contract is dependency
+// free, so it stays available to both sides.
+export {
+  consoleLogger,
+  defaultLogger,
+  silentLogger,
+  type WizLogger,
+} from "./logger.ts";
 export * from "./types.ts";
