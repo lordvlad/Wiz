@@ -1,0 +1,223 @@
+import { mergeDocumentFragment, mergedDocument } from "./document.ts";
+import type { ValidationError } from "./types.ts";
+
+export class PluginInactiveError extends Error {
+  constructor(fnName: string) {
+    super(
+      `[wiz] Function '${fnName}' called without active Bun plugin. Please enable 'wizPlugin()' in your Bun runtime or build configuration.`
+    );
+    this.name = "PluginInactiveError";
+  }
+}
+
+export function keysOf<T>(): (keyof T)[] {
+  throw new PluginInactiveError("keysOf");
+}
+
+export function requiredKeysOf<T>(): (keyof T)[] {
+  throw new PluginInactiveError("requiredKeysOf");
+}
+
+export function optionalKeysOf<T>(): (keyof T)[] {
+  throw new PluginInactiveError("optionalKeysOf");
+}
+
+export function schema<
+  T,
+  V extends "draft-2020-12" | "draft-07" = "draft-2020-12"
+>(_version?: V): Record<string, unknown> {
+  throw new PluginInactiveError("schema");
+}
+
+export function validate<T>(_arg: unknown): ValidationError[] {
+  throw new PluginInactiveError("validate");
+}
+
+export function is<T>(_arg: unknown): boolean {
+  throw new PluginInactiveError("is");
+}
+export type HttpMethod =
+  | "get"
+  | "post"
+  | "put"
+  | "patch"
+  | "delete"
+  | "head"
+  | "options"
+  | "trace";
+
+export interface OperationOptions {
+  tags?: string[];
+  summary?: string;
+  description?: string;
+  operationId?: string;
+  deprecated?: boolean;
+  [key: string]: unknown;
+}
+
+/**
+ * Compile-time descriptor produced by `openapiSchema.<method>()`.
+ * Instances never exist at runtime: the plugin folds them into the document.
+ */
+export interface OpenApiOperation {
+  method: HttpMethod;
+  path: string;
+}
+
+export interface OperationBuilder {
+  <TPathParams, TQueryParams, TResponse, TRequestBody>(
+    path: string,
+    options?: OperationOptions
+  ): OpenApiOperation;
+}
+
+export type OpenApiVersion = "3.0" | "3.1" | 3.0 | 3.1;
+
+export interface OpenApiSchemaBuilder {
+  <TTypes extends unknown[], V extends OpenApiVersion = "3.1">(
+    baseSchema?: Record<string, unknown>,
+    operations?: OpenApiOperation[]
+  ): Record<string, unknown>;
+  get: OperationBuilder;
+  post: OperationBuilder;
+  put: OperationBuilder;
+  patch: OperationBuilder;
+  delete: OperationBuilder;
+  head: OperationBuilder;
+  options: OperationBuilder;
+  trace: OperationBuilder;
+  /**
+   * Declares a Bun `routes` map to the document generator and returns it
+   * **verbatim** — runtime behaviour is identical to passing the literal
+   * straight to `Bun.serve`. The document is collected at compile time and
+   * read back through {@link openapiDocument}.
+   */
+  bunRoutes<TRoutes>(
+    baseSchema: Record<string, unknown>,
+    routes: TRoutes
+  ): TRoutes;
+  /**
+   * Mounts a route map onto any Hono-compatible app and returns the **app**
+   * verbatim. Handlers reach the router untouched; only registration is done
+   * here, so what is documented and what is mounted cannot drift.
+   */
+  honoRoutes<TApp>(
+    app: TApp,
+    baseSchema: Record<string, unknown>,
+    routes: RouteMap
+  ): TApp;
+  /** @internal Merge hook targeted by the plugin's rewritten callsites. */
+  __mergeDocument(fragment: Record<string, unknown>): void;
+}
+
+/** A route value is either a handler/response, or a map of method -> handler. */
+export type RouteMap = Record<string, unknown>;
+
+/**
+ * Minimal structural view of a router. Hono's own `on` signature is generic
+ * over env/path/schema in ways that cannot be restated here, so the app is
+ * narrowed to the one method the adapter actually calls.
+ */
+interface RouteRegistrar {
+  on(method: string, path: string, handler: unknown): unknown;
+}
+
+const HTTP_METHOD_NAMES = new Set([
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "HEAD",
+  "OPTIONS",
+  "TRACE",
+]);
+
+function mountRoutes(app: unknown, routes: RouteMap): void {
+  const registrar = app as unknown as RouteRegistrar;
+  if (typeof registrar?.on !== "function") return;
+
+  for (const [path, value] of Object.entries(routes)) {
+    if (typeof value === "function") {
+      // Bare handler: mounted as GET, matching how it is documented.
+      registrar.on("GET", path, value);
+      continue;
+    }
+    if (value === null || typeof value !== "object") continue;
+
+    for (const [method, handler] of Object.entries(value)) {
+      if (!HTTP_METHOD_NAMES.has(method.toUpperCase())) continue;
+      if (typeof handler !== "function") continue;
+      registrar.on(method.toUpperCase(), path, handler);
+    }
+  }
+}
+
+function operationStub(method: HttpMethod): OperationBuilder {
+  return () => {
+    throw new PluginInactiveError(`openapiSchema.${method}`);
+  };
+}
+
+export const openapiSchema: OpenApiSchemaBuilder = Object.assign(
+  (): Record<string, unknown> => {
+    throw new PluginInactiveError("openapiSchema");
+  },
+  {
+    get: operationStub("get"),
+    post: operationStub("post"),
+    put: operationStub("put"),
+    patch: operationStub("patch"),
+    delete: operationStub("delete"),
+    head: operationStub("head"),
+    options: operationStub("options"),
+    trace: operationStub("trace"),
+    // Identity by design: the plugin harvests descriptors from the callsite and
+    // never rewrites the routes value, so servers behave the same either way.
+    bunRoutes: <TRoutes>(
+      _baseSchema: Record<string, unknown>,
+      routes: TRoutes
+    ): TRoutes => routes,
+    honoRoutes: <TApp>(
+      app: TApp,
+      _baseSchema: Record<string, unknown>,
+      routes: RouteMap
+    ): TApp => {
+      mountRoutes(app, routes);
+      return app;
+    },
+    __mergeDocument: mergeDocumentFragment,
+  }
+);
+
+/**
+ * Per-operation type carrier. The generics are the whole point; at runtime this
+ * hands the handler straight back, so an app without the plugin still serves —
+ * it just has no document.
+ */
+export function op<TSpec>(
+  handler: unknown,
+  _options?: OperationOptions
+): typeof handler {
+  return handler;
+}
+
+/** The single merged OpenAPI document for every declared route in the program. */
+export function openapiDocument(): Record<string, unknown> {
+  return mergedDocument();
+}
+export function encodeProto<T>(_val: T, _buf: Uint8Array, _offset = 0): number {
+  throw new PluginInactiveError("encodeProto");
+}
+
+export function decodeProto<T>(_buf: Uint8Array, _offset = 0): T {
+  throw new PluginInactiveError("decodeProto");
+}
+export function protobufSchema<TTypes extends unknown[]>(
+  _options?: { indent?: string }
+): string {
+  throw new PluginInactiveError("protobufSchema");
+}
+
+export { wizPlugin } from "./plugin.ts";
+export * from "./types.ts";
