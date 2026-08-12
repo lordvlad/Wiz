@@ -117,10 +117,34 @@ describe("avro schema", () => {
     );
     expect(byName.tags).toEqual({ type: "array", items: "string" });
     expect(byName.lookup).toEqual({ type: "map", values: "double" });
+    // The codec indexes a table of enum *values*, so the schema must name the
+    // same things; symbols taken from the member names described data that
+    // never travelled.
     expect(byName.role).toEqual({
       type: "enum",
       name: "Role",
-      symbols: ["Admin", "User"],
+      symbols: ["admin", "user"],
+    });
+  });
+
+  test("a numeric enum falls back to member names, which Avro can spell", () => {
+    const schema = schemaFor(
+      `
+      export enum Level { Low, High }
+      export interface Shapes {
+        level: Level;
+      }
+    `,
+      "Shapes"
+    );
+
+    const byName = Object.fromEntries(
+      schema.fields.map((f: any) => [f.name, f.type])
+    );
+    expect(byName.level).toEqual({
+      type: "enum",
+      name: "Level",
+      symbols: ["Low", "High"],
     });
   });
 

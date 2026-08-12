@@ -1,7 +1,9 @@
 import {
   declaredFormat,
   flattenObjectProperties,
+  walkTypeIR,
   type Annotated,
+  type EnumMemberIR,
   type TypeIR,
 } from "../types.ts";
 
@@ -121,11 +123,64 @@ interface Ctx {
   next: () => number;
   /** Record names already defined, so Avro's "define once, reference by name" holds. */
   defined: Set<string>;
+  /**
+   * Resolves a `ref`, which the extractor emits the second time a named type
+   * appears. Avro references a repeated type by name, but only once the
+   * definition has been emitted, so the target still has to be reachable.
+   */
+  resolve: (ir: TypeIR) => TypeIR;
+  /**
+   * Record ids currently being inlined by the codec. `ref` is the extractor's
+   * cycle-breaker, so following one while its target is still open would make
+   * a recursive type recurse forever here instead of on the wire.
+   */
+  emitting: Set<string>;
 }
 
-function newCtx(): Ctx {
+function newCtx(roots: TypeIR[] = []): Ctx {
   let counter = 0;
-  return { prelude: [], next: () => counter++, defined: new Set() };
+  const byId = new Map<string, TypeIR>();
+  for (const root of roots) {
+    walkTypeIR(root, (node) => {
+      byId.set(node.id, node);
+    });
+  }
+  return {
+    prelude: [],
+    next: () => counter++,
+    defined: new Set(),
+    emitting: new Set(),
+    resolve: (ir) => (ir.kind === "ref" ? byId.get(ir.targetId) ?? ir : ir),
+  };
+}
+
+/**
+ * Resolves a `ref` for the codec, unless its target is still being inlined.
+ *
+ * An unresolved ref falls through to the JSON-text branch, which is what a
+ * recursive type did before refs were followed at all: wrong on the wire, but
+ * finite, where following it would never terminate.
+ */
+function resolveForEmit(ir: TypeIR, ctx: Ctx): TypeIR {
+  const resolved = ctx.resolve(ir);
+  return ctx.emitting.has(resolved.id) ? ir : resolved;
+}
+
+/**
+ * The symbols an enum travels as.
+ *
+ * The wire carries an index, so the schema and the codec must agree on the
+ * order *and* on what each position is called. Avro symbols must be names, so
+ * the runtime values are used when they qualify — which keeps the document
+ * consistent with the JSON Schema and OpenAPI output — and the declared member
+ * names otherwise, as for a numeric enum.
+ */
+function avroEnumSymbols(members: EnumMemberIR[]): string[] {
+  const values = members.map((m) => m.value);
+  const usable = values.every(
+    (v) => typeof v === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(v)
+  );
+  return usable ? (values as string[]) : members.map((m) => m.name);
 }
 
 // ---------------------------------------------------------------------------
@@ -138,7 +193,7 @@ function irToAvroSchema(
   carrier?: Annotated,
   fallbackName?: string
 ): unknown {
-  const { nullable, inner } = unwrapNullable(ir);
+  const { nullable, inner } = unwrapNullable(ctx.resolve(ir));
   if (nullable) {
     return ["null", irToAvroSchema(inner, ctx, carrier, fallbackName)];
   }
@@ -163,7 +218,7 @@ function irToAvroSchema(
       return {
         type: "enum",
         name,
-        symbols: inner.members.map((m) => m.name),
+        symbols: avroEnumSymbols(inner.members),
       };
     }
 
@@ -214,7 +269,7 @@ function irToAvroSchema(
 export function generateAvroSchemaCode(
   types: Array<{ name: string; ir: TypeIR }>
 ): string {
-  const ctx = newCtx();
+  const ctx = newCtx(types.map((t) => t.ir));
   const schemas = types.map(({ name, ir }) => irToAvroSchema(ir, ctx, undefined, name));
   // A .avsc file holds one schema; several roots form a union.
   const root = schemas.length === 1 ? schemas[0] : schemas;
@@ -237,7 +292,7 @@ function emitEncode(
   ctx: Ctx,
   carrier?: Annotated
 ): string[] {
-  const { nullable, inner } = unwrapNullable(ir);
+  const { nullable, inner } = unwrapNullable(resolveForEmit(ir, ctx));
   if (nullable) {
     return [
       `if (${expr} === undefined || ${expr} === null) {`,
@@ -330,6 +385,7 @@ function emitEncode(
     case "object":
     case "intersection": {
       const lines: string[] = [];
+      ctx.emitting.add(inner.id);
       for (const property of flattenObjectProperties(inner)) {
         const access = `${expr}[${JSON.stringify(property.name)}]`;
         const target = property.optional
@@ -340,6 +396,7 @@ function emitEncode(
           : property.type;
         lines.push(...emitEncode(target, access, ctx, property));
       }
+      ctx.emitting.delete(inner.id);
       return lines;
     }
 
@@ -355,7 +412,7 @@ function emitDecode(
   ctx: Ctx,
   carrier?: Annotated
 ): string[] {
-  const { nullable, inner } = unwrapNullable(ir);
+  const { nullable, inner } = unwrapNullable(resolveForEmit(ir, ctx));
   if (nullable) {
     const branch = `branch${ctx.next()}`;
     return [
@@ -476,6 +533,7 @@ function emitDecode(
     case "intersection": {
       const obj = `obj${ctx.next()}`;
       const lines: string[] = [`const ${obj} = {};`];
+      ctx.emitting.add(inner.id);
       for (const property of flattenObjectProperties(inner)) {
         const slot = `${obj}[${JSON.stringify(property.name)}]`;
         const source = property.optional
@@ -486,6 +544,7 @@ function emitDecode(
           : property.type;
         lines.push(...emitDecode(source, slot, ctx, property));
       }
+      ctx.emitting.delete(inner.id);
       lines.push(`${target} = ${obj};`);
       return lines;
     }
@@ -501,7 +560,7 @@ function emitDecode(
 }
 
 export function generateAvroCode(ir: TypeIR): string {
-  const ctx = newCtx();
+  const ctx = newCtx([ir]);
   const encodeBody = emitEncode(ir, "val", ctx);
   const decodeBody = emitDecode(ir, "out", ctx);
 

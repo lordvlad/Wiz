@@ -305,15 +305,21 @@ src/cli.ts              the wiz binary
 ### Verification
 
 Round-tripping wiz against itself proves nothing about a wire format: a codec
-wrong in both directions round-trips perfectly. So the binary and document
-output is checked against independent implementations —
-[protobuf.js](https://github.com/protobufjs/protobuf.js) parses the generated
-`.proto`, reads what wiz writes and writes what wiz reads, and generated
-OpenAPI documents are validated against the official OpenAPI schemas.
+wrong in both directions round-trips perfectly. Avro is worse still — it is
+schema-driven with no tags on the wire, so a field written one width and read
+another silently shifts everything after it.
 
-That is not a formality. It caught negative `int32` being truncated to two
-bytes instead of proto3's sign-extended ten, maps declared as `string`, and
-`repeated double` where the codec wrote `int32` — none of which wiz's own
+So the output is checked against independent implementations.
+[protobuf.js](https://github.com/protobufjs/protobuf.js) and
+[avsc](https://github.com/mtth/avsc) parse the generated `.proto` and `.avsc`,
+read what wiz writes and write what wiz reads; generated OpenAPI documents are
+validated against the official OpenAPI schemas.
+
+That is not a formality. It caught negative `int32` truncated to two bytes
+instead of proto3's sign-extended ten, maps declared as `string`, `repeated
+double` where the codec wrote `int32`, Avro enum symbols naming the members
+while the codec indexed their values, and the second use of a named type
+silently degrading to JSON in both back ends — none of which wiz's own
 round-trip tests could see.
 
 ## Tests
