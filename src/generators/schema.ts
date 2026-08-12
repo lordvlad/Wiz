@@ -1,10 +1,20 @@
-import type { Constraint, TypeIR } from "../types.ts";
+import type { Annotated, Constraint, TypeIR } from "../types.ts";
 
 function applyConstraints(schema: Record<string, unknown>, constraints?: Constraint[]) {
   if (!constraints) return;
   for (const c of constraints) {
     schema[c.kind] = c.value;
   }
+}
+
+/**
+ * Descriptive keywords. `examples` is an array in every draft from 06 onward,
+ * so both supported drafts take the same shape. `meta` is intentionally not
+ * emitted: arbitrary JSDoc tags are not JSON Schema keywords.
+ */
+function applyAnnotations(schema: Record<string, unknown>, node: Annotated) {
+  if (node.default !== undefined) schema.default = node.default;
+  if (node.examples && node.examples.length > 0) schema.examples = node.examples;
 }
 
 export function irToJsonSchema(
@@ -29,6 +39,7 @@ export function irToJsonSchema(
   }
 
   applyConstraints(schema, ir.constraints);
+  applyAnnotations(schema, ir);
 
   switch (ir.kind) {
     case "primitive": {
@@ -101,6 +112,7 @@ export function irToJsonSchema(
           }
         }
         applyConstraints(propSchema, prop.constraints);
+        applyAnnotations(propSchema, prop);
         propertiesSchema[prop.name] = propSchema;
 
         if (!prop.optional) {

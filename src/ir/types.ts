@@ -6,6 +6,11 @@ export interface ValidationError {
   actual?: unknown;
 }
 
+/**
+ * Constraints *validate*. Every kind here is enforced by the generated
+ * validator and maps onto a JSON Schema assertion keyword. Purely descriptive
+ * tags (`@example`, `@default`) are annotations instead — see {@link Annotated}.
+ */
 export type ConstraintKind =
   | "min"
   | "max"
@@ -17,7 +22,6 @@ export type ConstraintKind =
   | "maxLength"
   | "pattern"
   | "format"
-  | "default"
   | "multipleOf"
   | "minItems"
   | "maxItems"
@@ -33,12 +37,30 @@ export interface DeprecatedInfo {
   note?: string;
 }
 
-export interface BaseTypeIR {
-  id: string;
-  name?: string;
+/**
+ * Everything a JSDoc block can say about a type or property.
+ *
+ * `constraints` narrow the set of valid values; the rest only describe it.
+ * `meta` is the catch-all for tags wiz does not model — `@since`, `@author`,
+ * `@internal` and so on — so nothing in a doc comment is silently lost.
+ * A bare tag records `true`; a tag with text records that text. Repeated tags
+ * keep the last occurrence.
+ */
+export interface Annotated {
   description?: string;
   deprecated?: DeprecatedInfo;
   constraints?: Constraint[];
+  /** `@example` values, JSON-parsed when possible. */
+  examples?: unknown[];
+  /** `@default` value, JSON-parsed when possible. */
+  default?: unknown;
+  /** Unrecognised JSDoc tags, verbatim. */
+  meta?: Record<string, string | true>;
+}
+
+export interface BaseTypeIR extends Annotated {
+  id: string;
+  name?: string;
 }
 
 export interface PrimitiveTypeIR extends BaseTypeIR {
@@ -62,15 +84,12 @@ export interface LiteralTypeIR extends BaseTypeIR {
   value: string | number | boolean | bigint | null;
 }
 
-export interface PropertyIR {
+export interface PropertyIR extends Annotated {
   name: string;
   type: TypeIR;
   optional: boolean;
   readonly: boolean;
   fieldNumber?: number;
-  description?: string;
-  deprecated?: DeprecatedInfo;
-  constraints?: Constraint[];
 }
 
 export interface ObjectTypeIR extends BaseTypeIR {
@@ -152,6 +171,18 @@ export function fnv1a(str: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
+/** Annotation slice of the structural key, so docs cannot be lost to dedupe. */
+function normalizeAnnotations(node: Annotated): Record<string, unknown> {
+  return {
+    c: node.constraints ? normalizeConstraints(node.constraints) : undefined,
+    ex: node.examples ?? undefined,
+    def: node.default ?? undefined,
+    meta: node.meta
+      ? Object.entries(node.meta).sort(([a], [b]) => a.localeCompare(b))
+      : undefined,
+  };
+}
+
 /**
  * Computes a normalized, deterministic string representation of a TypeIR tree.
  */
@@ -161,13 +192,13 @@ export function normalizeTypeIR(ir: TypeIR): unknown {
       return {
         k: "primitive",
         t: ir.type,
-        c: ir.constraints ? normalizeConstraints(ir.constraints) : undefined,
+        ...normalizeAnnotations(ir),
       };
     case "literal":
       return {
         k: "literal",
         v: typeof ir.value === "bigint" ? ir.value.toString() + "n" : ir.value,
-        c: ir.constraints ? normalizeConstraints(ir.constraints) : undefined,
+        ...normalizeAnnotations(ir),
       };
     case "object":
       return {
@@ -181,7 +212,7 @@ export function normalizeTypeIR(ir: TypeIR): unknown {
             r: p.readonly,
             desc: p.description ?? null,
             dep: p.deprecated ? { d: p.deprecated.isDeprecated, n: p.deprecated.note ?? null } : null,
-            c: p.constraints ? normalizeConstraints(p.constraints) : [],
+            ...normalizeAnnotations(p),
           })),
         add: typeof ir.additionalProperties === "object"
           ? normalizeTypeIR(ir.additionalProperties)
@@ -191,7 +222,7 @@ export function normalizeTypeIR(ir: TypeIR): unknown {
       return {
         k: "array",
         e: normalizeTypeIR(ir.element),
-        c: ir.constraints ? normalizeConstraints(ir.constraints) : undefined,
+        ...normalizeAnnotations(ir),
       };
     case "tuple":
       return {

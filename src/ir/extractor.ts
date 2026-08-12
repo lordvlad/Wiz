@@ -1,5 +1,6 @@
 import ts from "typescript";
 import type {
+  Annotated,
   ArrayTypeIR,
   Constraint,
   ConstraintKind,
@@ -50,13 +51,6 @@ function parseJSDocValue(kind: ConstraintKind, text: string): unknown {
       if (trimmed === "false") return false;
       return true;
     }
-    case "default": {
-      try {
-        return JSON.parse(trimmed);
-      } catch {
-        return trimmed;
-      }
-    }
     case "pattern":
     case "format":
     default:
@@ -64,21 +58,57 @@ function parseJSDocValue(kind: ConstraintKind, text: string): unknown {
   }
 }
 
+/** Tags consumed elsewhere; they must not leak into `meta`. */
+const HANDLED_TAGS = new Set(["deprecated", "fieldnumber", "id", "tag", "example", "default"]);
+
+const CONSTRAINT_TAGS: Record<string, ConstraintKind> = {
+  min: "minimum",
+  minimum: "minimum",
+  max: "maximum",
+  maximum: "maximum",
+  exclusiveminimum: "exclusiveMinimum",
+  exclusivemaximum: "exclusiveMaximum",
+  minlength: "minLength",
+  maxlength: "maxLength",
+  pattern: "pattern",
+  format: "format",
+  multipleof: "multipleOf",
+  minitems: "minItems",
+  maxitems: "maxItems",
+  uniqueitems: "uniqueItems",
+};
+
+/** `@example { "id": 1 }` should land as an object, not the literal text. */
+function parseAnnotationValue(text: string): unknown {
+  const trimmed = text.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return trimmed;
+  }
+}
+
+export interface JSDocInfo extends Annotated {
+  constraints: Constraint[];
+  examples: unknown[];
+  meta: Record<string, string | true>;
+  fieldNumber?: number;
+}
+
 function extractJSDocInfo(
   symbol: ts.Symbol | undefined,
   checker: ts.TypeChecker
-): {
-  description?: string;
-  deprecated?: DeprecatedInfo;
-  constraints: Constraint[];
-  fieldNumber?: number;
-} {
+): JSDocInfo {
   const constraints: Constraint[] = [];
+  const examples: unknown[] = [];
+  const meta: Record<string, string | true> = {};
   let deprecated: DeprecatedInfo | undefined;
   let description: string | undefined;
+  let defaultValue: unknown;
   let fieldNumber: number | undefined;
+
   if (!symbol) {
-    return { constraints };
+    return { constraints, examples, meta };
   }
 
   const docComments = symbol.getDocumentationComment(checker);
@@ -88,74 +118,93 @@ function extractJSDocInfo(
       description = docStr;
     }
   }
+
+  // The checker drops `@fieldNumber` on some declarations, so the AST tags are
+  // read too. Only that one tag is recovered here to keep the sources apart.
   if (symbol.declarations) {
     for (const decl of symbol.declarations) {
-      const astTags = ts.getJSDocTags(decl);
-      for (const tag of astTags) {
+      for (const tag of ts.getJSDocTags(decl)) {
         const tagName = tag.tagName.text.toLowerCase();
+        if (tagName !== "fieldnumber" && tagName !== "id" && tagName !== "tag") {
+          continue;
+        }
         const tagText = (
           typeof tag.comment === "string"
             ? tag.comment
             : (tag.comment ?? []).map((part) => part.text).join("")
         ).trim();
-
-        if (tagName === "fieldnumber" || tagName === "id" || tagName === "tag") {
-          const parsedFn = parseInt(tagText, 10);
-          if (!Number.isNaN(parsedFn)) {
-            fieldNumber = parsedFn;
-          }
-        }
+        const parsed = parseInt(tagText, 10);
+        if (!Number.isNaN(parsed)) fieldNumber = parsed;
       }
     }
   }
 
-  const jsDocTags = symbol.getJsDocTags(checker);
-  for (const tag of jsDocTags) {
+  for (const tag of symbol.getJsDocTags(checker)) {
     const tagName = tag.name.toLowerCase();
     const tagText = displayPartsToString(tag.text).trim();
 
     if (tagName === "deprecated") {
-      deprecated = {
-        isDeprecated: true,
-        note: tagText || undefined,
-      };
+      deprecated = { isDeprecated: true, note: tagText || undefined };
       continue;
     }
 
     if (tagName === "fieldnumber" || tagName === "id" || tagName === "tag") {
-      const parsedFn = parseInt(tagText, 10);
-      if (!Number.isNaN(parsedFn)) {
-        fieldNumber = parsedFn;
-      }
+      const parsed = parseInt(tagText, 10);
+      if (!Number.isNaN(parsed)) fieldNumber = parsed;
       continue;
     }
 
-    const tagKindMap: Record<string, ConstraintKind> = {
-      min: "minimum",
-      minimum: "minimum",
-      max: "maximum",
-      maximum: "maximum",
-      exclusiveminimum: "exclusiveMinimum",
-      exclusivemaximum: "exclusiveMaximum",
-      minlength: "minLength",
-      maxlength: "maxLength",
-      pattern: "pattern",
-      format: "format",
-      default: "default",
-      multipleof: "multipleOf",
-      minitems: "minItems",
-      maxitems: "maxItems",
-      uniqueitems: "uniqueItems",
-    };
+    if (tagName === "example") {
+      examples.push(parseAnnotationValue(tagText));
+      continue;
+    }
 
-    const mappedKind = tagKindMap[tagName];
-    if (mappedKind) {
-      const val = parseJSDocValue(mappedKind, tagText);
-      constraints.push({ kind: mappedKind, value: val });
+    if (tagName === "default") {
+      defaultValue = parseAnnotationValue(tagText);
+      continue;
+    }
+
+    const constraintKind = CONSTRAINT_TAGS[tagName];
+    if (constraintKind) {
+      constraints.push({
+        kind: constraintKind,
+        value: parseJSDocValue(constraintKind, tagText),
+      });
+      continue;
+    }
+
+    // Anything wiz does not model is preserved rather than discarded.
+    if (!HANDLED_TAGS.has(tagName)) {
+      meta[tag.name] = tagText === "" ? true : tagText;
     }
   }
 
-  return { description, deprecated, constraints, fieldNumber };
+  return {
+    description,
+    deprecated,
+    constraints,
+    examples,
+    default: defaultValue,
+    meta,
+    fieldNumber,
+  };
+}
+
+/**
+ * The annotation fields every IR node carries, built once per extraction.
+ * `name` is omitted rather than set to `undefined`, because this object is
+ * spread last and would otherwise erase a name the caller already set.
+ */
+function annotationsOf(info: JSDocInfo, name?: string): Annotated & { name?: string } {
+  return {
+    ...(name === undefined ? {} : { name }),
+    description: info.description,
+    deprecated: info.deprecated,
+    constraints: info.constraints.length > 0 ? info.constraints : undefined,
+    examples: info.examples.length > 0 ? info.examples : undefined,
+    default: info.default,
+    meta: Object.keys(info.meta).length > 0 ? info.meta : undefined,
+  };
 }
 
 export function extractTypeIR(
@@ -182,7 +231,8 @@ export function extractTypeIR(
   // type, so it must not leak into generated schemas.
   const jsDocInfo = typeName
     ? extractJSDocInfo(symbol, checker)
-    : { constraints: [] as Constraint[] };
+    : { constraints: [], examples: [], meta: {} };
+  const annotations = annotationsOf(jsDocInfo, typeName);
 
   // Primitive Boolean (union of true and false)
   if (type.flags & ts.TypeFlags.Boolean) {
@@ -190,10 +240,7 @@ export function extractTypeIR(
       id: nextId(),
       kind: "primitive",
       type: "boolean",
-      name: typeName,
-      description: jsDocInfo.description,
-      deprecated: jsDocInfo.deprecated,
-      constraints: jsDocInfo.constraints.length > 0 ? jsDocInfo.constraints : undefined,
+      ...annotations,
     };
     cache.set(type, res);
     return res;
@@ -205,10 +252,7 @@ export function extractTypeIR(
       id: nextId(),
       kind: "primitive",
       type: "string",
-      name: typeName,
-      description: jsDocInfo.description,
-      deprecated: jsDocInfo.deprecated,
-      constraints: jsDocInfo.constraints.length > 0 ? jsDocInfo.constraints : undefined,
+      ...annotations,
     };
     cache.set(type, res);
     return res;
@@ -220,10 +264,7 @@ export function extractTypeIR(
       id: nextId(),
       kind: "primitive",
       type: "number",
-      name: typeName,
-      description: jsDocInfo.description,
-      deprecated: jsDocInfo.deprecated,
-      constraints: jsDocInfo.constraints.length > 0 ? jsDocInfo.constraints : undefined,
+      ...annotations,
     };
     cache.set(type, res);
     return res;
@@ -235,10 +276,7 @@ export function extractTypeIR(
       id: nextId(),
       kind: "primitive",
       type: "bigint",
-      name: typeName,
-      description: jsDocInfo.description,
-      deprecated: jsDocInfo.deprecated,
-      constraints: jsDocInfo.constraints.length > 0 ? jsDocInfo.constraints : undefined,
+      ...annotations,
     };
     cache.set(type, res);
     return res;
@@ -299,9 +337,7 @@ export function extractTypeIR(
       id: nextId(),
       kind: "literal",
       value: type.value,
-      description: jsDocInfo.description,
-      deprecated: jsDocInfo.deprecated,
-      constraints: jsDocInfo.constraints.length > 0 ? jsDocInfo.constraints : undefined,
+      ...annotations,
     };
     cache.set(type, res);
     return res;
@@ -312,9 +348,7 @@ export function extractTypeIR(
       id: nextId(),
       kind: "literal",
       value: type.value,
-      description: jsDocInfo.description,
-      deprecated: jsDocInfo.deprecated,
-      constraints: jsDocInfo.constraints.length > 0 ? jsDocInfo.constraints : undefined,
+      ...annotations,
     };
     cache.set(type, res);
     return res;
@@ -326,9 +360,7 @@ export function extractTypeIR(
       id: nextId(),
       kind: "literal",
       value: isTrue,
-      description: jsDocInfo.description,
-      deprecated: jsDocInfo.deprecated,
-      constraints: jsDocInfo.constraints.length > 0 ? jsDocInfo.constraints : undefined,
+      ...annotations,
     };
     cache.set(type, res);
     return res;
@@ -340,9 +372,7 @@ export function extractTypeIR(
       id: nextId(),
       kind: "literal",
       value: BigInt(`${bigintVal.negative ? "-" : ""}${bigintVal.base10Value}`),
-      description: jsDocInfo.description,
-      deprecated: jsDocInfo.deprecated,
-      constraints: jsDocInfo.constraints.length > 0 ? jsDocInfo.constraints : undefined,
+      ...annotations,
     };
     cache.set(type, res);
     return res;
@@ -369,8 +399,7 @@ export function extractTypeIR(
       kind: "enum",
       name: typeName,
       members,
-      description: jsDocInfo.description,
-      deprecated: jsDocInfo.deprecated,
+      ...annotations,
     };
     cache.set(type, res);
     return res;
@@ -385,9 +414,7 @@ export function extractTypeIR(
       kind: "array",
       element: { id: "placeholder", kind: "primitive", type: "any" },
       name: typeName,
-      description: jsDocInfo.description,
-      deprecated: jsDocInfo.deprecated,
-      constraints: jsDocInfo.constraints.length > 0 ? jsDocInfo.constraints : undefined,
+      ...annotations,
     };
     cache.set(type, placeholder);
 
@@ -407,8 +434,7 @@ export function extractTypeIR(
       kind: "tuple",
       elements: [],
       name: typeName,
-      description: jsDocInfo.description,
-      deprecated: jsDocInfo.deprecated,
+      ...annotations,
     };
     cache.set(type, placeholder);
 
@@ -469,8 +495,7 @@ function findDiscriminatorProperty(types: TypeIR[]): { propertyName: string } | 
       kind: "union",
       types: [],
       name: typeName,
-      description: jsDocInfo.description,
-      deprecated: jsDocInfo.deprecated,
+      ...annotations,
     };
     cache.set(type, placeholder);
 
@@ -487,8 +512,7 @@ function findDiscriminatorProperty(types: TypeIR[]): { propertyName: string } | 
       kind: "intersection",
       types: [],
       name: typeName,
-      description: jsDocInfo.description,
-      deprecated: jsDocInfo.deprecated,
+      ...annotations,
     };
     cache.set(type, placeholder);
 
@@ -514,8 +538,7 @@ function findDiscriminatorProperty(types: TypeIR[]): { propertyName: string } | 
       },
       valueType: { id: "placeholder", kind: "primitive", type: "any" },
       name: typeName,
-      description: jsDocInfo.description,
-      deprecated: jsDocInfo.deprecated,
+      ...annotations,
     };
     cache.set(type, placeholder);
 
@@ -530,10 +553,7 @@ function findDiscriminatorProperty(types: TypeIR[]): { propertyName: string } | 
     kind: "object",
     properties: [],
     additionalProperties: stringIndexType ? true : undefined,
-    name: typeName,
-    description: jsDocInfo.description,
-    deprecated: jsDocInfo.deprecated,
-    constraints: jsDocInfo.constraints.length > 0 ? jsDocInfo.constraints : undefined,
+    ...annotations,
   };
   cache.set(type, objectPlaceholder);
 
@@ -562,9 +582,7 @@ function findDiscriminatorProperty(types: TypeIR[]): { propertyName: string } | 
       optional: Boolean(isOptional),
       readonly: isReadonly,
       fieldNumber: propDocInfo.fieldNumber,
-      description: propDocInfo.description,
-      deprecated: propDocInfo.deprecated,
-      constraints: propDocInfo.constraints.length > 0 ? propDocInfo.constraints : undefined,
+      ...annotationsOf(propDocInfo),
     });
   }
 
