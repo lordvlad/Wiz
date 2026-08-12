@@ -73,10 +73,19 @@ export function generateProtobufCode(ir: TypeIR): string {
       decodeCases.push(`        obj[${jsonProp}] = Boolean(res);`);
       decodeCases.push(`        break;`);
       decodeCases.push(`      }`);
-    } else if (
-      pType.kind === "primitive" &&
-      (pType.type === "number" || pType.type === "bigint")
-    ) {
+    } else if (pType.kind === "primitive" && pType.type === "bigint") {
+      const tag = (fn << 3) | 0;
+      encodeLines.push(`  if (val[${jsonProp}] !== undefined) {`);
+      encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
+      encodeLines.push(`    o += writeVarint64(buf, o, val[${jsonProp}]);`);
+      encodeLines.push(`  }`);
+
+      decodeCases.push(`      case ${fn}: {`);
+      decodeCases.push(`        let res; [res, o] = readVarint64(buf, o);`);
+      decodeCases.push(`        obj[${jsonProp}] = res;`);
+      decodeCases.push(`        break;`);
+      decodeCases.push(`      }`);
+    } else if (pType.kind === "primitive" && pType.type === "number") {
       const tag = (fn << 3) | 0;
       encodeLines.push(`  if (val[${jsonProp}] !== undefined) {`);
       encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
@@ -153,13 +162,15 @@ export function generateProtobufCode(ir: TypeIR): string {
     `var textDecoder = typeof textDecoder !== "undefined" ? textDecoder : new TextDecoder();`,
     `function writeVarint(buf, offset, val) {`,
     `  let o = offset;`,
-    `  let v = typeof val === "bigint" ? Number(val) : Number(val);`,
-    `  if (Number.isNaN(v)) v = 0;`,
+    `  let v = Number(val);`,
+    `  if (!Number.isFinite(v)) v = 0;`,
+    `  // % rather than & 0x7f: bitwise operands are coerced to int32, which`,
+    `  // silently truncates anything past 2^31.`,
     `  while (v >= 0x80) {`,
-    `    buf[o++] = (v & 0x7f) | 0x80;`,
+    `    buf[o++] = (v % 128) | 0x80;`,
     `    v = Math.floor(v / 128);`,
     `  }`,
-    `  buf[o++] = v & 0x7f;`,
+    `  buf[o++] = v % 128;`,
     `  return o - offset;`,
     `}`,
     ``,
@@ -174,6 +185,34 @@ export function generateProtobufCode(ir: TypeIR): string {
     `    shift += 7;`,
     `  }`,
     `  return [res, o];`,
+    `}`,
+    ``,
+    `// 64-bit fields go through BigInt end to end. Number would round anything`,
+    `// past 2^53, which is exactly the range int64 exists to carry.`,
+    `function writeVarint64(buf, offset, val) {`,
+    `  let o = offset;`,
+    `  let v = typeof val === "bigint" ? val : BigInt(Math.trunc(Number(val) || 0));`,
+    `  // Negative int64 travels as its two's complement, per protobuf.`,
+    `  v = BigInt.asUintN(64, v);`,
+    `  while (v >= 0x80n) {`,
+    `    buf[o++] = Number((v & 0x7fn) | 0x80n);`,
+    `    v >>= 7n;`,
+    `  }`,
+    `  buf[o++] = Number(v & 0x7fn);`,
+    `  return o - offset;`,
+    `}`,
+    ``,
+    `function readVarint64(buf, offset) {`,
+    `  let o = offset;`,
+    `  let res = 0n;`,
+    `  let shift = 0n;`,
+    `  while (true) {`,
+    `    const b = buf[o++];`,
+    `    res |= BigInt(b & 0x7f) << shift;`,
+    `    if ((b & 0x80) === 0) break;`,
+    `    shift += 7n;`,
+    `  }`,
+    `  return [BigInt.asIntN(64, res), o];`,
     `}`,
     ``,
     `function writeString(buf, offset, str) {`,

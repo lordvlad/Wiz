@@ -83,8 +83,13 @@ export function irToOpenApiSchema(
           schema.type = "boolean";
           break;
         case "bigint":
-          schema.type = "integer";
+          // JSON numbers are doubles in practice, and `JSON.stringify` refuses
+          // BigInt outright, so a 64-bit integer can only travel as a string.
+          // This is the same choice proto3's canonical JSON mapping makes, and
+          // what protoc-gen-openapi emits for int64.
+          schema.type = "string";
           schema.format = "int64";
+          schema.pattern = "^-?\\d+$";
           break;
         case "null":
           if (version === "3.0") {
@@ -109,7 +114,8 @@ export function irToOpenApiSchema(
 
     case "literal": {
       if (typeof ir.value === "bigint") {
-        schema.type = "integer";
+        schema.type = "string";
+        schema.format = "int64";
         schema.enum = [ir.value.toString()];
       } else {
         if (version === "3.1") {

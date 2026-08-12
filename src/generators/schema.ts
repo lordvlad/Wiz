@@ -54,8 +54,12 @@ export function irToJsonSchema(
           schema.type = "boolean";
           break;
         case "bigint":
-          schema.type = "integer";
+          // JSON numbers are doubles in practice, and `JSON.stringify` refuses
+          // BigInt outright, so a 64-bit integer can only travel as a string.
+          // This is the same choice proto3's canonical JSON mapping makes.
+          schema.type = "string";
           schema.format = "int64";
+          schema.pattern = "^-?\\d+$";
           break;
         case "null":
           schema.type = "null";
@@ -78,7 +82,8 @@ export function irToJsonSchema(
 
     case "literal": {
       if (typeof ir.value === "bigint") {
-        schema.type = "integer";
+        schema.type = "string";
+        schema.format = "int64";
         schema.const = ir.value.toString();
       } else {
         schema.const = ir.value;
