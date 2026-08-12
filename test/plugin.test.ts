@@ -59,7 +59,10 @@ describe("wizPlugin End-to-End", () => {
     // Test protobufSchema
     expect(fixture.protoSchemaString).toBeDefined();
     expect(fixture.protoSchemaString).toContain('syntax = "proto3";');
-    expect(fixture.protoSchemaString).toContain('message ProtoUser {\n    int32 id = 1;\n    string name = 2;\n}');
+    expect(fixture.protoSchemaString).toContain("message ProtoUser {");
+    // @format int32 narrows the JS number; without it a number is a double.
+    expect(fixture.protoSchemaString).toContain("int32 id = 1;");
+    expect(fixture.protoSchemaString).toContain("string name = 2;");
   });
 
   test("deduplicates virtual modules across different files", async () => {

@@ -1,8 +1,68 @@
 import {
   collectNamedTypes,
+  declaredFormat,
   flattenObjectProperties,
+  type Annotated,
   type TypeIR,
 } from "../types.ts";
+
+/**
+ * How a numeric field travels. protobuf has three encodings, and picking the
+ * wrong one corrupts data silently: writing 3.14 as a varint truncates it to 3,
+ * because the bytes land in a Uint8Array.
+ *
+ * `wire` is the protobuf wire type: 0 varint, 1 fixed 64-bit, 5 fixed 32-bit.
+ */
+interface ProtoNumeric {
+  proto: string;
+  wire: 0 | 1 | 5;
+  write: (target: string) => string;
+  read: string;
+}
+
+const PROTO_NUMERICS: Record<string, ProtoNumeric> = {
+  int32: {
+    proto: "int32",
+    wire: 0,
+    write: (t) => `o += writeVarint(buf, o, ${t});`,
+    read: `let res; [res, o] = readVarint(buf, o);`,
+  },
+  int64: {
+    proto: "int64",
+    wire: 0,
+    write: (t) => `o += writeVarint64(buf, o, ${t});`,
+    read: `let res; [res, o] = readVarint64(buf, o);`,
+  },
+  float: {
+    proto: "float",
+    wire: 5,
+    write: (t) => `view.setFloat32(o, Number(${t}), true); o += 4;`,
+    read: `const res = view.getFloat32(o, true); o += 4;`,
+  },
+  double: {
+    proto: "double",
+    wire: 1,
+    write: (t) => `view.setFloat64(o, Number(${t}), true); o += 8;`,
+    read: `const res = view.getFloat64(o, true); o += 8;`,
+  },
+};
+
+/**
+ * A JS number is a double, so that is the default. `@format` narrows it, using
+ * the same OpenAPI registry values the avro codec reads. A bigint is 64-bit by
+ * definition and defaults to int64.
+ */
+function protoNumericFor(
+  ir: TypeIR,
+  carrier?: Annotated
+): ProtoNumeric | undefined {
+  if (ir.kind !== "primitive") return undefined;
+  const format = declaredFormat(carrier, ir);
+  const declared = format ? PROTO_NUMERICS[format] : undefined;
+  if (ir.type === "bigint") return declared ?? PROTO_NUMERICS.int64!;
+  if (ir.type === "number") return declared ?? PROTO_NUMERICS.double!;
+  return undefined;
+}
 
 export function generateProtobufCode(ir: TypeIR): string {
   const typeName = ir.name ?? "Target";
@@ -73,28 +133,22 @@ export function generateProtobufCode(ir: TypeIR): string {
       decodeCases.push(`        obj[${jsonProp}] = Boolean(res);`);
       decodeCases.push(`        break;`);
       decodeCases.push(`      }`);
-    } else if (pType.kind === "primitive" && pType.type === "bigint") {
-      const tag = (fn << 3) | 0;
+    } else if (protoNumericFor(pType, p)) {
+      const numeric = protoNumericFor(pType, p)!;
+      const tag = (fn << 3) | numeric.wire;
       encodeLines.push(`  if (val[${jsonProp}] !== undefined) {`);
       encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
-      encodeLines.push(`    o += writeVarint64(buf, o, val[${jsonProp}]);`);
+      encodeLines.push(`    ${numeric.write(`val[${jsonProp}]`)}`);
       encodeLines.push(`  }`);
 
       decodeCases.push(`      case ${fn}: {`);
-      decodeCases.push(`        let res; [res, o] = readVarint64(buf, o);`);
-      decodeCases.push(`        obj[${jsonProp}] = res;`);
-      decodeCases.push(`        break;`);
-      decodeCases.push(`      }`);
-    } else if (pType.kind === "primitive" && pType.type === "number") {
-      const tag = (fn << 3) | 0;
-      encodeLines.push(`  if (val[${jsonProp}] !== undefined) {`);
-      encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
-      encodeLines.push(`    o += writeVarint(buf, o, val[${jsonProp}]);`);
-      encodeLines.push(`  }`);
-
-      decodeCases.push(`      case ${fn}: {`);
-      decodeCases.push(`        let res; [res, o] = readVarint(buf, o);`);
-      decodeCases.push(`        obj[${jsonProp}] = res;`);
+      decodeCases.push(`        ${numeric.read}`);
+      // The wire width is chosen by @format; the JS type decides what returns.
+      decodeCases.push(
+        pType.kind === "primitive" && pType.type === "bigint"
+          ? `        obj[${jsonProp}] = res;`
+          : `        obj[${jsonProp}] = Number(res);`
+      );
       decodeCases.push(`        break;`);
       decodeCases.push(`      }`);
     } else if (pType.kind === "enum") {
@@ -127,18 +181,23 @@ export function generateProtobufCode(ir: TypeIR): string {
         decodeCases.push(`        break;`);
         decodeCases.push(`      }`);
       } else {
-        const tag = (fn << 3) | 0;
+        const elemNumeric = protoNumericFor(elemType, undefined) ?? PROTO_NUMERICS.double!;
+        const tag = (fn << 3) | elemNumeric.wire;
         encodeLines.push(`  if (Array.isArray(val[${jsonProp}])) {`);
         encodeLines.push(`    for (const item of val[${jsonProp}]) {`);
         encodeLines.push(`      o += writeVarint(buf, o, ${tag});`);
-        encodeLines.push(`      o += writeVarint(buf, o, item);`);
+        encodeLines.push(`      ${elemNumeric.write("item")}`);
         encodeLines.push(`    }`);
         encodeLines.push(`  }`);
 
         decodeCases.push(`      case ${fn}: {`);
-        decodeCases.push(`        let res; [res, o] = readVarint(buf, o);`);
+        decodeCases.push(`        ${elemNumeric.read}`);
         decodeCases.push(`        obj[${jsonProp}] = obj[${jsonProp}] || [];`);
-        decodeCases.push(`        obj[${jsonProp}].push(res);`);
+        decodeCases.push(
+          elemType.kind === "primitive" && elemType.type === "bigint"
+            ? `        obj[${jsonProp}].push(res);`
+            : `        obj[${jsonProp}].push(Number(res));`
+        );
         decodeCases.push(`        break;`);
         decodeCases.push(`      }`);
       }
@@ -231,12 +290,14 @@ export function generateProtobufCode(ir: TypeIR): string {
     ``,
     `export function encodeProto(val, buf, offset = 0) {`,
     `  let o = offset;`,
+    `  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);`,
     encodeLines.join("\n"),
     `  return o - offset;`,
     `}`,
     ``,
     `export function decodeProto(buf, offset = 0) {`,
     `  let o = offset;`,
+    `  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);`,
     `  const end = buf.length;`,
     `  const obj = {};`,
     `  while (o < end) {`,
@@ -260,17 +321,16 @@ export function generateProtobufCode(ir: TypeIR): string {
   ].join("\n");
 }
 
-function mapIRToProtoType(ir: TypeIR): string {
+function mapIRToProtoType(ir: TypeIR, carrier?: Annotated): string {
+  const numeric = protoNumericFor(ir, carrier);
+  if (numeric) return numeric.proto;
+
   switch (ir.kind) {
     case "primitive":
       switch (ir.type) {
         case "string":
         case "symbol":
           return "string";
-        case "number":
-          return "int32";
-        case "bigint":
-          return "int64";
         case "boolean":
           return "bool";
         default:
@@ -278,7 +338,8 @@ function mapIRToProtoType(ir: TypeIR): string {
       }
     case "literal":
       if (typeof ir.value === "boolean") return "bool";
-      if (typeof ir.value === "number" || typeof ir.value === "bigint") return "int32";
+      if (typeof ir.value === "bigint") return "int64";
+      if (typeof ir.value === "number") return "double";
       return "string";
     case "enum":
       return ir.name ?? "int32";
@@ -375,7 +436,7 @@ export function generateProtobufSchemaCode(
           }
           return {
             name: p.name,
-            type: mapIRToProtoType(p.type),
+            type: mapIRToProtoType(p.type, p),
             fieldNumber: p.fieldNumber!,
             comments,
             options,

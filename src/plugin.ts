@@ -170,6 +170,7 @@ const SPEC_SLOTS = new Set([
   "cookie",
   "body",
   "response",
+  "responses",
   "status",
 ]);
 
@@ -243,16 +244,49 @@ function readOperationSpec(
       ? statusSlot.type.value
       : undefined;
 
+  const responses: ServiceMethodResponseIR[] = [];
+
+  // `response` is the shorthand for the success case.
   const response = slotType("response");
-  const responses: ServiceMethodResponseIR[] = [
-    response
-      ? {
-          protocol: "http",
-          status: status ?? 200,
-          body: [{ mimetype: JSON_MIME, content: response }],
-        }
-      : { protocol: "http", status: status ?? 204 },
-  ];
+  if (response) {
+    responses.push({
+      protocol: "http",
+      status: status ?? 200,
+      body: [{ mimetype: JSON_MIME, content: response }],
+    });
+  }
+
+  // `responses: { 404: NotFound }` covers everything else. A method really does
+  // have several responses at once, so these accumulate rather than replace.
+  const responsesSlot = slots.get("responses");
+  if (responsesSlot) {
+    for (const entry of flattenObjectProperties(responsesSlot.type)) {
+      const status =
+        entry.name === "default" ? ("default" as const) : Number(entry.name);
+      if (status !== "default" && !Number.isInteger(status)) {
+        warnUndocumentable(
+          logger,
+          `response key "${entry.name}" is not a status code or "default"`,
+          specNode,
+          sourceFile
+        );
+        continue;
+      }
+      responses.push({
+        protocol: "http",
+        status,
+        // The key's own JSDoc becomes the response description.
+        ...(entry.description ? { description: entry.description } : {}),
+        ...(isAbsent(entry.type)
+          ? {}
+          : { body: [{ mimetype: JSON_MIME, content: entry.type }] }),
+      });
+    }
+  }
+
+  if (responses.length === 0) {
+    responses.push({ protocol: "http", status: status ?? 204 });
+  }
 
   return { request, responses };
 }

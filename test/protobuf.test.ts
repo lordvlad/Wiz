@@ -97,8 +97,9 @@ describe("Protobuf Generator", () => {
 
     const protoStr = fnModule({ indent: "    " });
     expect(protoStr).toContain('syntax = "proto3";');
-    expect(protoStr).toContain('message User {\n    int32 id = 1;\n    repeated Book books = 2;\n}');
-    expect(protoStr).toContain('message Book {\n    int32 id = 1;\n    string title = 2;\n}');
+    // A plain `number` is a double; `@format int32` opts into a compact int.
+    expect(protoStr).toContain('message User {\n    double id = 1;\n    repeated Book books = 2;\n}');
+    expect(protoStr).toContain('message Book {\n    double id = 1;\n    string title = 2;\n}');
   });
   test("includes description, constraints, and options in protobuf schema string", () => {
     const ir = getIRForSource(
@@ -140,7 +141,7 @@ describe("Protobuf Generator", () => {
     expect(protoStr).toContain("// User account record");
     expect(protoStr).toContain("// Unique ID");
     expect(protoStr).toContain("// @minimum 1");
-    expect(protoStr).toContain("int32 id = 1;");
+    expect(protoStr).toContain("double id = 1;");
     expect(protoStr).toContain("// User full name");
     expect(protoStr).toContain("// @minLength 2");
     expect(protoStr).toContain("string name = 2;");

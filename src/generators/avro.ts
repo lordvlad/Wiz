@@ -1,4 +1,5 @@
 import {
+  declaredFormat,
   flattenObjectProperties,
   type Annotated,
   type TypeIR,
@@ -29,14 +30,6 @@ const FORMAT_TO_AVRO: Record<string, AvroPrimitive> = {
   float: "float",
   double: "double",
 };
-
-function declaredFormat(...carriers: Array<Annotated | undefined>): string | undefined {
-  for (const carrier of carriers) {
-    const format = carrier?.constraints?.find((c) => c.kind === "format");
-    if (typeof format?.value === "string") return format.value;
-  }
-  return undefined;
-}
 
 /** `T | undefined` is how an optional property reaches us; Avro spells it `["null", T]`. */
 function unwrapNullable(ir: TypeIR): { nullable: boolean; inner: TypeIR } {

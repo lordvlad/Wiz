@@ -32,7 +32,11 @@ export interface Book {
   title: string;
 }
 export interface ProtoUser {
-  /** @fieldNumber 1 */
+  /**
+   * A plain `number` is a double; `@format` narrows it to a compact int.
+   * @fieldNumber 1
+   * @format int32
+   */
   id: number;
   /** @fieldNumber 2 */
   name: string;

@@ -407,3 +407,21 @@ export function flattenObjectProperties(ir: TypeIR): PropertyIR[] {
   }
   return [];
 }
+/**
+ * Reads `@format` from the first carrier that declares one.
+ *
+ * Numeric width is expressed with the OpenAPI Format Registry values —
+ * `int32`, `int64`, `float`, `double` — rather than a per-backend tag, so one
+ * annotation decides the JSON Schema output, the OpenAPI output and the binary
+ * width chosen by the protobuf and avro codecs. Carriers are checked in order,
+ * which lets a property override the type it refers to.
+ */
+export function declaredFormat(
+  ...carriers: Array<Annotated | undefined>
+): string | undefined {
+  for (const carrier of carriers) {
+    const format = carrier?.constraints?.find((c) => c.kind === "format");
+    if (typeof format?.value === "string") return format.value;
+  }
+  return undefined;
+}
