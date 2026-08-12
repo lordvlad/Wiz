@@ -319,12 +319,19 @@ the same verdict as the generated validator on every case in a shared corpus —
 the schema and the validator come from one IR, so nothing else was checking
 that they agree.
 
+Agreeing with another implementation only shows the two reach the same answer,
+so the validator is also driven by the official
+[JSON Schema Test Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite),
+which pins it to the standard instead.
+
 That is not a formality. It caught negative `int32` truncated to two bytes
 instead of proto3's sign-extended ten, maps declared as `string`, `repeated
 double` where the codec wrote `int32`, Avro enum symbols naming the members
 while the codec indexed their values, the second use of a named type silently
-degrading to JSON in both back ends, and `@multipleOf` emitted into every
-schema but enforced by nothing — none of which wiz's own tests could see.
+degrading to JSON in both back ends, `@multipleOf` emitted into every schema
+but enforced by nothing, string lengths counted in UTF-16 units rather than
+characters, and `uniqueItems` comparing objects by reference — none of which
+wiz's own tests could see.
 
 ## Tests
 
