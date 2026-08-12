@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { extractTypeIR } from "../src/ir/extractor.ts";
+import { extractTypeIR } from "../src/extractors/typescript.ts";
 import type { TypeIR } from "../src/types.ts";
 import type {
   HttpMethodName,

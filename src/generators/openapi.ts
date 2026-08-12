@@ -466,7 +466,9 @@ export function generateOpenApiSchemaCode(
     `  return {`,
     `    openapi: ${JSON.stringify(openapiVersion)},`,
     `    ...baseSchema,`,
-    `    ...(Object.keys(paths).length > 0 ? { paths } : {}),`,
+    // 3.0 lists `paths` as required, so a components-only document still needs
+    // it; 3.1 made it optional, and inventing one there would be noise.
+    `    ...(Object.keys(paths).length > 0 || ${JSON.stringify(version === "3.0")} ? { paths } : {}),`,
     `    components: {`,
     `      ...components,`,
     `      schemas: {`,

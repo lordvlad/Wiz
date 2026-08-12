@@ -1,14 +1,19 @@
 {
   "name": "wiz",
   "module": "src/index.ts",
+  "bin": {
+    "wiz": "./src/cli.ts"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./plugin": "./src/plugin.ts"
   },
   "type": "module",
   "devDependencies": {
+    "@seriousme/openapi-schema-validator": "^2.9.1",
     "@types/bun": "latest",
     "hono": "^4.13.1",
+    "protobufjs": "^8.7.2",
     "typescript": "^5.7.3"
   },
   "peerDependencies": {

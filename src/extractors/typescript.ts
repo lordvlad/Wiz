@@ -14,8 +14,8 @@ import type {
   TupleTypeIR,
   TypeIR,
   UnionTypeIR,
-} from "./types.ts";
-import { isUserNamedType } from "./types.ts";
+} from "../ir/types.ts";
+import { isUserNamedType } from "../ir/types.ts";
 
 let idCounter = 0;
 function nextId(): string {

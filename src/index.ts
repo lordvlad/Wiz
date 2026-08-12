@@ -51,7 +51,12 @@ export function validate<T>(_arg: unknown): ValidationError[] {
   throw new PluginInactiveError("validate");
 }
 
-export function is<T>(_arg: unknown): boolean {
+/**
+ * Narrows `arg` to `T` when the generated structural check passes.
+ *
+ * The same check `validate` runs, without building the error list.
+ */
+export function is<T>(_arg: unknown): _arg is T {
   throw new PluginInactiveError("is");
 }
 export type HttpMethod =

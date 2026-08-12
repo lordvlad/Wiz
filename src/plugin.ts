@@ -1,6 +1,6 @@
 import type { BunPlugin } from "bun";
 import ts from "typescript";
-import { extractTypeIR } from "./ir/extractor.ts";
+import { extractTypeIR } from "./extractors/typescript.ts";
 import {
   type HttpMethodName,
   type ServiceMethodBodyIR,
@@ -557,18 +557,21 @@ export function wizPlugin(options: WizPluginOptions = {}): BunPlugin {
         };
       });
 
-      build.onLoad({ filter: /\.[jt]sx?$/ }, async (args) => {
-        // Bun's runtime loader rejects an `undefined` onLoad result, so every
-        // bail-out below hands back the untouched source instead.
-        const loader: "ts" | "tsx" = args.path.endsWith(".tsx") ? "tsx" : "ts";
-        const passthrough = async () => ({
-          contents: await Bun.file(args.path).text(),
-          loader,
-        });
-
-        if (args.path.includes("node_modules")) {
-          return passthrough();
-        }
+      // `node_modules` is excluded in the filter rather than bailed out of
+      // inside the callback. Returning contents at all makes Bun treat the
+      // module as ESM, so a CommonJS dependency loses its `default` export
+      // even when handed straight back — the filter is the only real opt-out.
+      // It also spares us reading every dependency file we would never touch.
+      build.onLoad({ filter: /^(?!.*node_modules).*\.[jt]sx?$/ }, async (args) => {
+        // The loader must follow the extension: labelling a `.js` file as `ts`
+        // breaks CommonJS the same way.
+        const loader: "ts" | "tsx" | "js" | "jsx" = args.path.endsWith(".tsx")
+          ? "tsx"
+          : args.path.endsWith(".jsx")
+            ? "jsx"
+            : args.path.endsWith(".ts")
+              ? "ts"
+              : "js";
 
         const fileContents = await Bun.file(args.path).text();
 

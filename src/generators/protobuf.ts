@@ -2,6 +2,7 @@ import {
   collectNamedTypes,
   declaredFormat,
   flattenObjectProperties,
+  walkTypeIR,
   type Annotated,
   type PropertyIR,
   type TypeIR,
@@ -28,7 +29,9 @@ const PROTO_NUMERICS: Record<string, ProtoNumeric> = {
     proto: "int32",
     wire: 0,
     write: (t) => `o += writeVarint(buf, o, ${t});`,
-    read: `let res; [res, o] = readVarint(buf, o);`,
+    // A negative int32 arrives sign-extended across ten bytes, well past what
+    // Number can accumulate exactly, so it is narrowed back through BigInt.
+    read: `let res; [res, o] = readVarint64(buf, o); res = Number(BigInt.asIntN(32, res));`,
   },
   int64: {
     proto: "int64",
@@ -139,7 +142,7 @@ interface MessagePlan {
 }
 
 /** Root first, then every nested object reachable through its fields. */
-function planMessages(root: TypeIR): MessagePlan[] {
+function planMessages(root: TypeIR, resolve: Resolve): MessagePlan[] {
   const plans: MessagePlan[] = [];
   const seen = new Map<TypeIR, number>();
 
@@ -155,7 +158,7 @@ function planMessages(root: TypeIR): MessagePlan[] {
       const oneof = oneofFor(property.type);
       const reachable = oneof ? oneof.types : [property.type];
       for (const candidate of reachable) {
-        const target = messageTarget(candidate);
+        const target = messageTarget(candidate, resolve);
         if (target) visit(target, target.name ?? `${name}_${property.name}`);
       }
     }
@@ -166,11 +169,26 @@ function planMessages(root: TypeIR): MessagePlan[] {
   return plans;
 }
 
+/**
+ * Resolves a `ref`, which the extractor emits the second time a named type
+ * appears. Left unresolved, the second use of a message looks like a shape
+ * protobuf cannot express and falls back to JSON.
+ */
+type Resolve = (ir: TypeIR) => TypeIR;
+
+function refResolver(root: TypeIR): Resolve {
+  const byId = new Map<string, TypeIR>();
+  walkTypeIR(root, (node) => {
+    byId.set(node.id, node);
+  });
+  return (ir) => (ir.kind === "ref" ? byId.get(ir.targetId) ?? ir : ir);
+}
+
 /** The object a field embeds, if it embeds one (directly or per array item). */
-function messageTarget(ir: TypeIR): TypeIR | undefined {
+function messageTarget(ir: TypeIR, resolve: Resolve): TypeIR | undefined {
   // An optional message still embeds; absence is field omission.
-  const unwrapped = unwrapNullable(ir);
-  const candidate = unwrapped.kind === "array" ? unwrapped.element : unwrapped;
+  const unwrapped = unwrapNullable(resolve(ir));
+  const candidate = resolve(unwrapped.kind === "array" ? unwrapped.element : unwrapped);
   if (candidate.kind === "object" || candidate.kind === "intersection") {
     return flattenObjectProperties(candidate).length > 0 ? candidate : undefined;
   }
@@ -360,8 +378,13 @@ function literalExpression(value: unknown): string {
  * discriminant property decides where the union has one, and the required
  * property names decide otherwise.
  */
-function variantCheck(variant: TypeIR, union: UnionTypeIR, local: string): string {
-  const target = unwrapNullable(variant);
+function variantCheck(
+  variant: TypeIR,
+  union: UnionTypeIR,
+  local: string,
+  resolve: Resolve
+): string {
+  const target = resolve(unwrapNullable(variant));
   if (target.kind !== "object" && target.kind !== "intersection") {
     return generateTypeCheckExpression(target, local);
   }
@@ -416,7 +439,7 @@ function nestedUnionBlocker(p: PropertyIR, typeName: string): string | undefined
  * Reported up front rather than per field, so the generated module fails with
  * a single actionable message instead of encoding something unreadable.
  */
-function protobufBlocker(plans: MessagePlan[]): string | undefined {
+function protobufBlocker(plans: MessagePlan[], resolve: Resolve): string | undefined {
   for (const plan of plans) {
     const props = flattenObjectProperties(plan.ir);
     if (props.length === 0) {
@@ -479,9 +502,10 @@ function protobufBlocker(plans: MessagePlan[]): string | undefined {
   return undefined;
 }
 export function generateProtobufCode(ir: TypeIR): string {
-  const plans = planMessages(ir);
+  const resolve = refResolver(ir);
+  const plans = planMessages(ir, resolve);
 
-  const blocker = protobufBlocker(plans);
+  const blocker = protobufBlocker(plans, resolve);
   if (blocker) {
     return [
       `export function encodeProto(val, buf, offset = 0) {`,
@@ -524,8 +548,8 @@ export function generateProtobufCode(ir: TypeIR): string {
 
         oneof.types.forEach((variant, index) => {
           const n = oneof.fieldNumbers![index]!;
-          const nested = messageId.get(messageTarget(variant) ?? variant);
-          const check = variantCheck(variant, oneof, local);
+          const nested = messageId.get(messageTarget(variant, resolve) ?? variant);
+          const check = variantCheck(variant, oneof, local, resolve);
           const branch = index === 0 ? "if" : "} else if";
 
           encodeLines.push(`    ${branch} (${check}) {`);
@@ -562,7 +586,7 @@ export function generateProtobufCode(ir: TypeIR): string {
       const fn = p.fieldNumber!;
       const pType = wireFieldType(p.type);
 
-      const embedded = messageTarget(pType);
+      const embedded = messageTarget(pType, resolve);
 
       // ---- repeated -------------------------------------------------------
       if (pType.kind === "array") {
@@ -644,7 +668,7 @@ export function generateProtobufCode(ir: TypeIR): string {
       if (pType.kind === "record") {
         // `@format` on the property describes the map's value type.
         const valueCodec = scalarCodecFor(pType.valueType, p) ?? JSON_FALLBACK;
-        const valueMsg = messageTarget(pType.valueType);
+        const valueMsg = messageTarget(pType.valueType, resolve);
         const valueId = valueMsg ? messageId.get(valueMsg) : undefined;
         const tag = (fn << 3) | 2;
 
@@ -764,9 +788,13 @@ export function generateProtobufCode(ir: TypeIR): string {
     `var textEncoder = typeof textEncoder !== "undefined" ? textEncoder : new TextEncoder();`,
     `var textDecoder = typeof textDecoder !== "undefined" ? textDecoder : new TextDecoder();`,
     `function writeVarint(buf, offset, val) {`,
-    `  let o = offset;`,
     `  let v = Number(val);`,
     `  if (!Number.isFinite(v)) v = 0;`,
+    `  // proto3 sign-extends a negative int32 to 64 bits, so it always occupies`,
+    `  // ten bytes. Truncating it to the low group instead produces a number no`,
+    `  // other implementation can read back.`,
+    `  if (v < 0) return writeVarint64(buf, offset, BigInt(Math.trunc(v)));`,
+    `  let o = offset;`,
     `  // % rather than & 0x7f: bitwise operands are coerced to int32, which`,
     `  // silently truncates anything past 2^31.`,
     `  while (v >= 0x80) {`,
@@ -906,8 +934,14 @@ function mapIRToProtoType(ir: TypeIR, carrier?: Annotated): string {
     case "enum":
       return ir.name ?? "int32";
     case "array":
-      return `repeated ${mapIRToProtoType(ir.element)}`;
+      // The carrier travels with the element: `@format` sits on the property
+      // but describes what the repeated field holds, and the codec reads it
+      // that way. Dropping it here described an int32 field as a double.
+      return `repeated ${mapIRToProtoType(wireFieldType(ir.element), carrier)}`;
+    case "record":
+      return `map<${mapIRToProtoType(ir.keyType)}, ${mapIRToProtoType(wireFieldType(ir.valueType), carrier)}>`;
     case "object":
+    case "intersection":
       return ir.name ?? "bytes";
     case "ref":
       return ir.name ?? ir.targetId;
