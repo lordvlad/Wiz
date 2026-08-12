@@ -1,0 +1,978 @@
+{
+  "_source": "https://github.com/json-schema-org/JSON-Schema-Test-Suite (MIT, (c) 2012 Julian Berman)",
+  "_draft": "draft2020-12",
+  "_note": "Groups isolating a single keyword, with instances narrowed to the JS type a wiz property declares. Extracted verbatim; do not hand-edit.",
+  "keywords": {
+    "minLength": {
+      "ts": "string",
+      "groups": [
+        {
+          "value": 2,
+          "tests": [
+            {
+              "data": "foo",
+              "valid": true,
+              "description": "longer is valid"
+            },
+            {
+              "data": "fo",
+              "valid": true,
+              "description": "exact length is valid"
+            },
+            {
+              "data": "f",
+              "valid": false,
+              "description": "too short is invalid"
+            },
+            {
+              "data": "💩",
+              "valid": false,
+              "description": "one grapheme is not long enough"
+            }
+          ]
+        },
+        {
+          "value": 2,
+          "tests": [
+            {
+              "data": "foo",
+              "valid": true,
+              "description": "longer is valid"
+            },
+            {
+              "data": "f",
+              "valid": false,
+              "description": "too short is invalid"
+            }
+          ]
+        }
+      ]
+    },
+    "maxLength": {
+      "ts": "string",
+      "groups": [
+        {
+          "value": 2,
+          "tests": [
+            {
+              "data": "f",
+              "valid": true,
+              "description": "shorter is valid"
+            },
+            {
+              "data": "fo",
+              "valid": true,
+              "description": "exact length is valid"
+            },
+            {
+              "data": "foo",
+              "valid": false,
+              "description": "too long is invalid"
+            },
+            {
+              "data": "💩💩",
+              "valid": true,
+              "description": "two graphemes is long enough"
+            }
+          ]
+        },
+        {
+          "value": 2,
+          "tests": [
+            {
+              "data": "f",
+              "valid": true,
+              "description": "shorter is valid"
+            },
+            {
+              "data": "foo",
+              "valid": false,
+              "description": "too long is invalid"
+            }
+          ]
+        }
+      ]
+    },
+    "pattern": {
+      "ts": "string",
+      "groups": [
+        {
+          "value": "^a*$",
+          "tests": [
+            {
+              "data": "aaa",
+              "valid": true,
+              "description": "a matching pattern is valid"
+            },
+            {
+              "data": "abc",
+              "valid": false,
+              "description": "a non-matching pattern is invalid"
+            }
+          ]
+        },
+        {
+          "value": "a+",
+          "tests": [
+            {
+              "data": "xxaayy",
+              "valid": true,
+              "description": "matches a substring"
+            }
+          ]
+        }
+      ]
+    },
+    "minimum": {
+      "ts": "number",
+      "groups": [
+        {
+          "value": 1.1,
+          "tests": [
+            {
+              "data": 2.6,
+              "valid": true,
+              "description": "above the minimum is valid"
+            },
+            {
+              "data": 1.1,
+              "valid": true,
+              "description": "boundary point is valid"
+            },
+            {
+              "data": 0.6,
+              "valid": false,
+              "description": "below the minimum is invalid"
+            }
+          ]
+        },
+        {
+          "value": -2,
+          "tests": [
+            {
+              "data": -1,
+              "valid": true,
+              "description": "negative above the minimum is valid"
+            },
+            {
+              "data": 0,
+              "valid": true,
+              "description": "positive above the minimum is valid"
+            },
+            {
+              "data": -2,
+              "valid": true,
+              "description": "boundary point is valid"
+            },
+            {
+              "data": -2,
+              "valid": true,
+              "description": "boundary point with float is valid"
+            },
+            {
+              "data": -2.0001,
+              "valid": false,
+              "description": "float below the minimum is invalid"
+            },
+            {
+              "data": -3,
+              "valid": false,
+              "description": "int below the minimum is invalid"
+            }
+          ]
+        }
+      ]
+    },
+    "maximum": {
+      "ts": "number",
+      "groups": [
+        {
+          "value": 3,
+          "tests": [
+            {
+              "data": 2.6,
+              "valid": true,
+              "description": "below the maximum is valid"
+            },
+            {
+              "data": 3,
+              "valid": true,
+              "description": "boundary point is valid"
+            },
+            {
+              "data": 3.5,
+              "valid": false,
+              "description": "above the maximum is invalid"
+            }
+          ]
+        },
+        {
+          "value": 300,
+          "tests": [
+            {
+              "data": 299.97,
+              "valid": true,
+              "description": "below the maximum is valid"
+            },
+            {
+              "data": 300,
+              "valid": true,
+              "description": "boundary point integer is valid"
+            },
+            {
+              "data": 300,
+              "valid": true,
+              "description": "boundary point float is valid"
+            },
+            {
+              "data": 300.5,
+              "valid": false,
+              "description": "above the maximum is invalid"
+            }
+          ]
+        }
+      ]
+    },
+    "exclusiveMinimum": {
+      "ts": "number",
+      "groups": [
+        {
+          "value": 1.1,
+          "tests": [
+            {
+              "data": 1.2,
+              "valid": true,
+              "description": "above the exclusiveMinimum is valid"
+            },
+            {
+              "data": 1.1,
+              "valid": false,
+              "description": "boundary point is invalid"
+            },
+            {
+              "data": 0.6,
+              "valid": false,
+              "description": "below the exclusiveMinimum is invalid"
+            }
+          ]
+        }
+      ]
+    },
+    "exclusiveMaximum": {
+      "ts": "number",
+      "groups": [
+        {
+          "value": 3,
+          "tests": [
+            {
+              "data": 2.2,
+              "valid": true,
+              "description": "below the exclusiveMaximum is valid"
+            },
+            {
+              "data": 3,
+              "valid": false,
+              "description": "boundary point is invalid"
+            },
+            {
+              "data": 3.5,
+              "valid": false,
+              "description": "above the exclusiveMaximum is invalid"
+            }
+          ]
+        }
+      ]
+    },
+    "multipleOf": {
+      "ts": "number",
+      "groups": [
+        {
+          "value": 2,
+          "tests": [
+            {
+              "data": 10,
+              "valid": true,
+              "description": "int by int"
+            },
+            {
+              "data": 7,
+              "valid": false,
+              "description": "int by int fail"
+            }
+          ]
+        },
+        {
+          "value": 1.5,
+          "tests": [
+            {
+              "data": 0,
+              "valid": true,
+              "description": "zero is multiple of anything"
+            },
+            {
+              "data": 4.5,
+              "valid": true,
+              "description": "4.5 is multiple of 1.5"
+            },
+            {
+              "data": -4.5,
+              "valid": true,
+              "description": "-4.5 is multiple of 1.5"
+            },
+            {
+              "data": 35,
+              "valid": false,
+              "description": "35 is not multiple of 1.5"
+            }
+          ]
+        },
+        {
+          "value": 0.0001,
+          "tests": [
+            {
+              "data": 0.0075,
+              "valid": true,
+              "description": "0.0075 is multiple of 0.0001"
+            },
+            {
+              "data": 0.00751,
+              "valid": false,
+              "description": "0.00751 is not multiple of 0.0001"
+            }
+          ]
+        }
+      ]
+    },
+    "minItems": {
+      "ts": "unknown[]",
+      "groups": [
+        {
+          "value": 1,
+          "tests": [
+            {
+              "data": [
+                1,
+                2
+              ],
+              "valid": true,
+              "description": "longer is valid"
+            },
+            {
+              "data": [
+                1
+              ],
+              "valid": true,
+              "description": "exact length is valid"
+            },
+            {
+              "data": [],
+              "valid": false,
+              "description": "too short is invalid"
+            }
+          ]
+        },
+        {
+          "value": 1,
+          "tests": [
+            {
+              "data": [
+                1,
+                2
+              ],
+              "valid": true,
+              "description": "longer is valid"
+            },
+            {
+              "data": [],
+              "valid": false,
+              "description": "too short is invalid"
+            }
+          ]
+        }
+      ]
+    },
+    "maxItems": {
+      "ts": "unknown[]",
+      "groups": [
+        {
+          "value": 2,
+          "tests": [
+            {
+              "data": [
+                1
+              ],
+              "valid": true,
+              "description": "shorter is valid"
+            },
+            {
+              "data": [
+                1,
+                2
+              ],
+              "valid": true,
+              "description": "exact length is valid"
+            },
+            {
+              "data": [
+                1,
+                2,
+                3
+              ],
+              "valid": false,
+              "description": "too long is invalid"
+            }
+          ]
+        },
+        {
+          "value": 2,
+          "tests": [
+            {
+              "data": [
+                1
+              ],
+              "valid": true,
+              "description": "shorter is valid"
+            },
+            {
+              "data": [
+                1,
+                2,
+                3
+              ],
+              "valid": false,
+              "description": "too long is invalid"
+            }
+          ]
+        }
+      ]
+    },
+    "uniqueItems": {
+      "ts": "unknown[]",
+      "groups": [
+        {
+          "value": true,
+          "tests": [
+            {
+              "data": [
+                1,
+                2
+              ],
+              "valid": true,
+              "description": "unique array of integers is valid"
+            },
+            {
+              "data": [
+                1,
+                1
+              ],
+              "valid": false,
+              "description": "non-unique array of integers is invalid"
+            },
+            {
+              "data": [
+                1,
+                2,
+                1
+              ],
+              "valid": false,
+              "description": "non-unique array of more than two integers is invalid"
+            },
+            {
+              "data": [
+                1,
+                1,
+                1
+              ],
+              "valid": false,
+              "description": "numbers are unique if mathematically unequal"
+            },
+            {
+              "data": [
+                0,
+                false
+              ],
+              "valid": true,
+              "description": "false is not equal to zero"
+            },
+            {
+              "data": [
+                1,
+                true
+              ],
+              "valid": true,
+              "description": "true is not equal to one"
+            },
+            {
+              "data": [
+                "foo",
+                "bar",
+                "baz"
+              ],
+              "valid": true,
+              "description": "unique array of strings is valid"
+            },
+            {
+              "data": [
+                "foo",
+                "bar",
+                "foo"
+              ],
+              "valid": false,
+              "description": "non-unique array of strings is invalid"
+            },
+            {
+              "data": [
+                {
+                  "foo": "bar"
+                },
+                {
+                  "foo": "baz"
+                }
+              ],
+              "valid": true,
+              "description": "unique array of objects is valid"
+            },
+            {
+              "data": [
+                {
+                  "foo": "bar"
+                },
+                {
+                  "foo": "bar"
+                }
+              ],
+              "valid": false,
+              "description": "non-unique array of objects is invalid"
+            },
+            {
+              "data": [
+                {
+                  "foo": "bar",
+                  "bar": "foo"
+                },
+                {
+                  "bar": "foo",
+                  "foo": "bar"
+                }
+              ],
+              "valid": false,
+              "description": "property order of array of objects is ignored"
+            },
+            {
+              "data": [
+                {
+                  "foo": {
+                    "bar": {
+                      "baz": true
+                    }
+                  }
+                },
+                {
+                  "foo": {
+                    "bar": {
+                      "baz": false
+                    }
+                  }
+                }
+              ],
+              "valid": true,
+              "description": "unique array of nested objects is valid"
+            },
+            {
+              "data": [
+                {
+                  "foo": {
+                    "bar": {
+                      "baz": true
+                    }
+                  }
+                },
+                {
+                  "foo": {
+                    "bar": {
+                      "baz": true
+                    }
+                  }
+                }
+              ],
+              "valid": false,
+              "description": "non-unique array of nested objects is invalid"
+            },
+            {
+              "data": [
+                [
+                  "foo"
+                ],
+                [
+                  "bar"
+                ]
+              ],
+              "valid": true,
+              "description": "unique array of arrays is valid"
+            },
+            {
+              "data": [
+                [
+                  "foo"
+                ],
+                [
+                  "foo"
+                ]
+              ],
+              "valid": false,
+              "description": "non-unique array of arrays is invalid"
+            },
+            {
+              "data": [
+                [
+                  "foo"
+                ],
+                [
+                  "bar"
+                ],
+                [
+                  "foo"
+                ]
+              ],
+              "valid": false,
+              "description": "non-unique array of more than two arrays is invalid"
+            },
+            {
+              "data": [
+                1,
+                true
+              ],
+              "valid": true,
+              "description": "1 and true are unique"
+            },
+            {
+              "data": [
+                0,
+                false
+              ],
+              "valid": true,
+              "description": "0 and false are unique"
+            },
+            {
+              "data": [
+                [
+                  1
+                ],
+                [
+                  true
+                ]
+              ],
+              "valid": true,
+              "description": "[1] and [true] are unique"
+            },
+            {
+              "data": [
+                [
+                  0
+                ],
+                [
+                  false
+                ]
+              ],
+              "valid": true,
+              "description": "[0] and [false] are unique"
+            },
+            {
+              "data": [
+                [
+                  [
+                    1
+                  ],
+                  "foo"
+                ],
+                [
+                  [
+                    true
+                  ],
+                  "foo"
+                ]
+              ],
+              "valid": true,
+              "description": "nested [1] and [true] are unique"
+            },
+            {
+              "data": [
+                [
+                  [
+                    0
+                  ],
+                  "foo"
+                ],
+                [
+                  [
+                    false
+                  ],
+                  "foo"
+                ]
+              ],
+              "valid": true,
+              "description": "nested [0] and [false] are unique"
+            },
+            {
+              "data": [
+                {},
+                [
+                  1
+                ],
+                true,
+                null,
+                1,
+                "{}"
+              ],
+              "valid": true,
+              "description": "unique heterogeneous types are valid"
+            },
+            {
+              "data": [
+                {},
+                [
+                  1
+                ],
+                true,
+                null,
+                {},
+                1
+              ],
+              "valid": false,
+              "description": "non-unique heterogeneous types are invalid"
+            },
+            {
+              "data": [
+                {
+                  "a": 1,
+                  "b": 2
+                },
+                {
+                  "a": 2,
+                  "b": 1
+                }
+              ],
+              "valid": true,
+              "description": "different objects are unique"
+            },
+            {
+              "data": [
+                {
+                  "a": 1,
+                  "b": 2
+                },
+                {
+                  "b": 2,
+                  "a": 1
+                }
+              ],
+              "valid": false,
+              "description": "objects are non-unique despite key order"
+            },
+            {
+              "data": [
+                {
+                  "a": false
+                },
+                {
+                  "a": 0
+                }
+              ],
+              "valid": true,
+              "description": "{\"a\": false} and {\"a\": 0} are unique"
+            },
+            {
+              "data": [
+                {
+                  "a": true
+                },
+                {
+                  "a": 1
+                }
+              ],
+              "valid": true,
+              "description": "{\"a\": true} and {\"a\": 1} are unique"
+            }
+          ]
+        },
+        {
+          "value": false,
+          "tests": [
+            {
+              "data": [
+                1,
+                2
+              ],
+              "valid": true,
+              "description": "unique array of integers is valid"
+            },
+            {
+              "data": [
+                1,
+                1
+              ],
+              "valid": true,
+              "description": "non-unique array of integers is valid"
+            },
+            {
+              "data": [
+                1,
+                1,
+                1
+              ],
+              "valid": true,
+              "description": "numbers are unique if mathematically unequal"
+            },
+            {
+              "data": [
+                0,
+                false
+              ],
+              "valid": true,
+              "description": "false is not equal to zero"
+            },
+            {
+              "data": [
+                1,
+                true
+              ],
+              "valid": true,
+              "description": "true is not equal to one"
+            },
+            {
+              "data": [
+                {
+                  "foo": "bar"
+                },
+                {
+                  "foo": "baz"
+                }
+              ],
+              "valid": true,
+              "description": "unique array of objects is valid"
+            },
+            {
+              "data": [
+                {
+                  "foo": "bar"
+                },
+                {
+                  "foo": "bar"
+                }
+              ],
+              "valid": true,
+              "description": "non-unique array of objects is valid"
+            },
+            {
+              "data": [
+                {
+                  "foo": {
+                    "bar": {
+                      "baz": true
+                    }
+                  }
+                },
+                {
+                  "foo": {
+                    "bar": {
+                      "baz": false
+                    }
+                  }
+                }
+              ],
+              "valid": true,
+              "description": "unique array of nested objects is valid"
+            },
+            {
+              "data": [
+                {
+                  "foo": {
+                    "bar": {
+                      "baz": true
+                    }
+                  }
+                },
+                {
+                  "foo": {
+                    "bar": {
+                      "baz": true
+                    }
+                  }
+                }
+              ],
+              "valid": true,
+              "description": "non-unique array of nested objects is valid"
+            },
+            {
+              "data": [
+                [
+                  "foo"
+                ],
+                [
+                  "bar"
+                ]
+              ],
+              "valid": true,
+              "description": "unique array of arrays is valid"
+            },
+            {
+              "data": [
+                [
+                  "foo"
+                ],
+                [
+                  "foo"
+                ]
+              ],
+              "valid": true,
+              "description": "non-unique array of arrays is valid"
+            },
+            {
+              "data": [
+                1,
+                true
+              ],
+              "valid": true,
+              "description": "1 and true are unique"
+            },
+            {
+              "data": [
+                0,
+                false
+              ],
+              "valid": true,
+              "description": "0 and false are unique"
+            },
+            {
+              "data": [
+                {},
+                [
+                  1
+                ],
+                true,
+                null,
+                1
+              ],
+              "valid": true,
+              "description": "unique heterogeneous types are valid"
+            },
+            {
+              "data": [
+                {},
+                [
+                  1
+                ],
+                true,
+                null,
+                {},
+                1
+              ],
+              "valid": true,
+              "description": "non-unique heterogeneous types are valid"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

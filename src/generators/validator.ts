@@ -105,17 +105,17 @@ function generateConstraintCheckStatements(
         break;
       case "minLength":
         statements.push(
-          `if (typeof ${varName} === "string" && ${varName}.length < ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected length >= " + ${jsonVal}, constraint: "minLength", expected: ">= " + ${jsonVal}, actual: ${varName}.length });`
+          `if (typeof ${varName} === "string" && __wizLength(${varName}) < ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected length >= " + ${jsonVal}, constraint: "minLength", expected: ">= " + ${jsonVal}, actual: __wizLength(${varName}) });`
         );
         break;
       case "maxLength":
         statements.push(
-          `if (typeof ${varName} === "string" && ${varName}.length > ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected length <= " + ${jsonVal}, constraint: "maxLength", expected: "<= " + ${jsonVal}, actual: ${varName}.length });`
+          `if (typeof ${varName} === "string" && __wizLength(${varName}) > ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected length <= " + ${jsonVal}, constraint: "maxLength", expected: "<= " + ${jsonVal}, actual: __wizLength(${varName}) });`
         );
         break;
       case "pattern":
         statements.push(
-          `if (typeof ${varName} === "string" && !new RegExp(${jsonVal}).test(${varName})) errors.push({ path: ${pathVar}, message: "Expected string matching pattern " + ${jsonVal}, constraint: "pattern", expected: ${jsonVal}, actual: ${varName} });`
+          `if (typeof ${varName} === "string" && !__wizPattern(${jsonVal}).test(${varName})) errors.push({ path: ${pathVar}, message: "Expected string matching pattern " + ${jsonVal}, constraint: "pattern", expected: ${jsonVal}, actual: ${varName} });`
         );
         break;
       case "format": {
@@ -149,8 +149,10 @@ function generateConstraintCheckStatements(
         );
         break;
       case "uniqueItems":
+        // `@uniqueItems false` states no requirement, so it must not impose one.
+        if (val === false) break;
         statements.push(
-          `if (Array.isArray(${varName}) && new Set(${varName}).size !== ${varName}.length) errors.push({ path: ${pathVar}, message: "Array items must be unique", constraint: "uniqueItems", actual: ${varName} });`
+          `if (Array.isArray(${varName}) && !__wizUnique(${varName})) errors.push({ path: ${pathVar}, message: "Array items must be unique", constraint: "uniqueItems", actual: ${varName} });`
         );
         break;
     }
@@ -381,10 +383,71 @@ function generateValidationBlock(
   return lines.join("\n");
 }
 
+/**
+ * Helpers the checks rely on, emitted once per module.
+ *
+ * Both exist because the obvious JS spelling is not what JSON Schema means:
+ * `String.length` counts UTF-16 units, and `Set` compares objects by
+ * reference.
+ */
+const RUNTIME_HELPERS = [
+  `function __wizLength(str) {`,
+  `  // JSON Schema counts characters, so an astral character such as an emoji`,
+  `  // is one, where String.length would call it two.`,
+  `  let length = 0;`,
+  `  let pos = 0;`,
+  `  while (pos < str.length) {`,
+  `    length++;`,
+  `    const value = str.charCodeAt(pos++);`,
+  `    if (value >= 0xd800 && value <= 0xdbff && pos < str.length) {`,
+  `      if ((str.charCodeAt(pos) & 0xfc00) === 0xdc00) pos++;`,
+  `    }`,
+  `  }`,
+  `  return length;`,
+  `}`,
+  ``,
+  `function __wizEqual(a, b) {`,
+  `  if (a === b) return true;`,
+  `  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;`,
+  `  if (Array.isArray(a) !== Array.isArray(b)) return false;`,
+  `  if (Array.isArray(a)) {`,
+  `    if (a.length !== b.length) return false;`,
+  `    return a.every((item, i) => __wizEqual(item, b[i]));`,
+  `  }`,
+  `  const keys = Object.keys(a);`,
+  `  if (keys.length !== Object.keys(b).length) return false;`,
+  `  // Key order carries no meaning in JSON, so it carries none here.`,
+  `  return keys.every((k) => Object.hasOwn(b, k) && __wizEqual(a[k], b[k]));`,
+  `}`,
+  ``,
+  `function __wizUnique(items) {`,
+  `  for (let i = 1; i < items.length; i++) {`,
+  `    for (let j = 0; j < i; j++) {`,
+  `      if (__wizEqual(items[i], items[j])) return false;`,
+  `    }`,
+  `  }`,
+  `  return true;`,
+  `}`,
+  ``,
+  `const __wizPatterns = new Map();`,
+  `function __wizPattern(src) {`,
+  `  // A pattern is a constant, so compiling it per call is pure waste; a Map`,
+  `  // rather than an object so a pattern of "__proto__" cannot reach one.`,
+  `  let re = __wizPatterns.get(src);`,
+  `  if (re === undefined) {`,
+  `    re = new RegExp(src);`,
+  `    __wizPatterns.set(src, re);`,
+  `  }`,
+  `  return re;`,
+  `}`,
+].join("\n");
+
 export function generateValidatorCode(ir: TypeIR): string {
   const validationBody = generateValidationBlock(ir, "arg", "path", 0);
 
   return [
+    RUNTIME_HELPERS,
+    ``,
     `export function validate(arg, path = "") {`,
     `  const errors = [];`,
     validationBody
