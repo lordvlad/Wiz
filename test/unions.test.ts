@@ -286,6 +286,102 @@ describe("unions protobuf cannot express are refused", () => {
     `;
     expect(message(src)).toContain("already numbers each variant");
   });
+  test("a repeated union is refused: proto3 has no repeated oneof", () => {
+    const src = `
+      ${SHAPES}
+      export interface M {
+        /**
+         * @fieldNumber 1
+         */
+        shapes: Shape[];
+      }
+    `;
+    expect(message(src)).toContain("no repeated field of 'oneof'");
+    expect(message(src)).toContain("element type of 'shapes'");
+    expect(() => protoSchema(src)).toThrow("no repeated field of 'oneof'");
+  });
+
+  test("numbering the variants does not make a repeated union legal", () => {
+    // The numbers are fine; the container is the problem.
+    const src = `
+      ${SHAPES}
+      export interface M {
+        /**
+         * @fieldNumber 1
+         */
+        shapes: Shape[];
+      }
+    `;
+    expect(message(src)).not.toContain("NumberedUnion<{ 1: A; 2: B }>");
+  });
+
+  test("a mapped union is refused for the same reason", () => {
+    const src = `
+      ${SHAPES}
+      export interface M {
+        /**
+         * @fieldNumber 1
+         */
+        byName: Record<string, Shape>;
+      }
+    `;
+    expect(message(src)).toContain("no map of 'oneof'");
+    expect(message(src)).toContain("value type of 'byName'");
+  });
+
+  test("wrapping the union in a message is the way out, and it works", () => {
+    const src = `
+      ${SHAPES}
+      export interface Slot {
+        shape: Shape;
+      }
+      export interface M {
+        /**
+         * @fieldNumber 1
+         */
+        slots: Slot[];
+      }
+    `;
+    expect(message(src)).toBe("");
+    const value = {
+      slots: [{ shape: { kind: "circle", radius: 1 } }, { shape: { kind: "square", side: 2 } }],
+    };
+    expect(trip(proto(src), value).decoded).toEqual(value);
+  });
+
+  test("nested types that are not unions are untouched", () => {
+    const src = `
+      export interface Inner {
+        /**
+         * @fieldNumber 1
+         */
+        a: string;
+      }
+      export interface M {
+        /**
+         * @fieldNumber 1
+         */
+        list: string[];
+        /**
+         * @fieldNumber 2
+         */
+        optionals: (string | undefined)[];
+        /**
+         * @fieldNumber 3
+         */
+        literals: ("a" | "b")[];
+        /**
+         * @fieldNumber 4
+         */
+        counts: Record<string, string>;
+        /**
+         * @fieldNumber 5
+         */
+        items: Inner[];
+      }
+    `;
+    expect(message(src)).toBe("");
+  });
 });
 
 describe("literal unions are not oneofs", () => {

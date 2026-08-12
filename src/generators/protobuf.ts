@@ -387,6 +387,30 @@ function variantCheck(variant: TypeIR, union: UnionTypeIR, local: string): strin
 }
 
 /**
+ * Why a union nested inside a field cannot be encoded, or undefined.
+ *
+ * proto3 has no repeated or mapped `oneof`: a variant set is only expressible
+ * as a group of fields on a message, and a message has one of each. Left to
+ * the JSON fallback these become text no other implementation can read, so
+ * they are refused with the shape that does work.
+ */
+function nestedUnionBlocker(p: PropertyIR, typeName: string): string | undefined {
+  const field = wireFieldType(p.type);
+
+  const nested =
+    field.kind === "array"
+      ? { position: "element", ir: wireFieldType(field.element) }
+      : field.kind === "record"
+        ? { position: "value", ir: wireFieldType(field.valueType) }
+        : undefined;
+
+  if (!nested || nested.ir.kind !== "union") return undefined;
+
+  const container = field.kind === "array" ? "repeated field" : "map";
+  return `[wiz] The ${nested.position} type of '${p.name}' on type '${typeName}' is a union, and protobuf has no ${container} of 'oneof'. Wrap the variants in their own type, so the oneof sits inside a message that can be repeated.`;
+}
+
+/**
  * The one reason this type cannot be encoded, or undefined.
  *
  * Reported up front rather than per field, so the generated module fails with
@@ -411,8 +435,10 @@ function protobufBlocker(plans: MessagePlan[]): string | undefined {
     };
 
     for (const p of props) {
-      const oneof = oneofFor(p.type);
+      const nestedUnion = nestedUnionBlocker(p, plan.name);
+      if (nestedUnion) return nestedUnion;
 
+      const oneof = oneofFor(p.type);
       if (!oneof) {
         if (p.fieldNumber === undefined || Number.isNaN(p.fieldNumber)) {
           return `[wiz] Property '${p.name}' on type '${plan.name}' is missing required '@fieldNumber <N>' JSDoc tag for protobuf encoding/decoding.`;
@@ -923,19 +949,19 @@ export function generateProtobufSchemaCode(
   for (const [typeName, typeIR] of allNamedTypes.entries()) {
     for (const prop of flattenObjectProperties(typeIR)) {
       const oneof = oneofFor(prop.type);
-      if (oneof && !oneof.fieldNumbers) {
-        const errMessage = `[wiz] Property '${prop.name}' on type '${typeName}' is a union, which protobuf encodes as a 'oneof' and so needs a field number per variant. Declare it as NumberedUnion<{ 1: A; 2: B }> instead of A | B.`;
+      const blocker =
+        nestedUnionBlocker(prop, typeName) ??
+        (oneof && !oneof.fieldNumbers
+          ? `[wiz] Property '${prop.name}' on type '${typeName}' is a union, which protobuf encodes as a 'oneof' and so needs a field number per variant. Declare it as NumberedUnion<{ 1: A; 2: B }> instead of A | B.`
+          : undefined) ??
+        (!oneof && (prop.fieldNumber === undefined || Number.isNaN(prop.fieldNumber))
+          ? `[wiz] Property '${prop.name}' on type '${typeName}' is missing required '@fieldNumber <N>' JSDoc tag for protobuf schema generation.`
+          : undefined);
+
+      if (blocker) {
         return [
           `export function protobufSchema(options = {}) {`,
-          `  throw new Error(${JSON.stringify(errMessage)});`,
-          `}`,
-        ].join("\n");
-      }
-      if (!oneof && (prop.fieldNumber === undefined || Number.isNaN(prop.fieldNumber))) {
-        const errMessage = `[wiz] Property '${prop.name}' on type '${typeName}' is missing required '@fieldNumber <N>' JSDoc tag for protobuf schema generation.`;
-        return [
-          `export function protobufSchema(options = {}) {`,
-          `  throw new Error(${JSON.stringify(errMessage)});`,
+          `  throw new Error(${JSON.stringify(blocker)});`,
           `}`,
         ].join("\n");
       }
