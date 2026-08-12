@@ -140,6 +140,14 @@ function generateConstraintCheckStatements(
           `if (Array.isArray(${varName}) && ${varName}.length > ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected array items count <= " + ${jsonVal}, constraint: "maxItems", expected: "<= " + ${jsonVal}, actual: ${varName}.length });`
         );
         break;
+      case "multipleOf":
+        // Integer division rather than a remainder, matching JSON Schema and
+        // Ajv: `0.3 % 0.1` is not 0 in binary floating point, and a tolerance
+        // here would accept values the schema rejects.
+        statements.push(
+          `if (typeof ${varName} === "number" && !Number.isInteger(${varName} / ${jsonVal})) errors.push({ path: ${pathVar}, message: "Expected a multiple of " + ${jsonVal}, constraint: "multipleOf", expected: "multiple of " + ${jsonVal}, actual: ${varName} });`
+        );
+        break;
       case "uniqueItems":
         statements.push(
           `if (Array.isArray(${varName}) && new Set(${varName}).size !== ${varName}.length) errors.push({ path: ${pathVar}, message: "Array items must be unique", constraint: "uniqueItems", actual: ${varName} });`

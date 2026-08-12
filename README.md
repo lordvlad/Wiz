@@ -312,15 +312,19 @@ another silently shifts everything after it.
 So the output is checked against independent implementations.
 [protobuf.js](https://github.com/protobufjs/protobuf.js) and
 [avsc](https://github.com/mtth/avsc) parse the generated `.proto` and `.avsc`,
-read what wiz writes and write what wiz reads; generated OpenAPI documents are
-validated against the official OpenAPI schemas.
+read what wiz writes and write what wiz reads. Generated OpenAPI documents are
+validated against the official OpenAPI schemas, and
+[Ajv](https://ajv.js.org) compiles the generated JSON Schema and must reach
+the same verdict as the generated validator on every case in a shared corpus —
+the schema and the validator come from one IR, so nothing else was checking
+that they agree.
 
 That is not a formality. It caught negative `int32` truncated to two bytes
 instead of proto3's sign-extended ten, maps declared as `string`, `repeated
 double` where the codec wrote `int32`, Avro enum symbols naming the members
-while the codec indexed their values, and the second use of a named type
-silently degrading to JSON in both back ends — none of which wiz's own
-round-trip tests could see.
+while the codec indexed their values, the second use of a named type silently
+degrading to JSON in both back ends, and `@multipleOf` emitted into every
+schema but enforced by nothing — none of which wiz's own tests could see.
 
 ## Tests
 

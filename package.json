@@ -12,6 +12,8 @@
   "devDependencies": {
     "@seriousme/openapi-schema-validator": "^2.9.1",
     "@types/bun": "latest",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "avsc": "^5.7.9",
     "hono": "^4.13.1",
     "protobufjs": "^8.7.2",
