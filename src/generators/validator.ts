@@ -18,6 +18,10 @@ function generateTypeCheckExpression(ir: TypeIR, varName: string): string {
           return `${varName} === undefined`;
         case "symbol":
           return `typeof ${varName} === "symbol"`;
+        case "bytes":
+          return `${varName} instanceof Uint8Array || ${varName} instanceof ArrayBuffer`;
+        case "date":
+          return `${varName} instanceof Date && !Number.isNaN(${varName}.getTime())`;
         case "unknown":
         case "any":
           return `true`;

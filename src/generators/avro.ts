@@ -23,12 +23,36 @@ export type AvroPrimitive =
  * Numeric width comes from `@format`, reusing the OpenAPI Format Registry
  * values rather than a format-specific tag. One annotation drives the JSON
  * Schema output, the OpenAPI output and the binary width chosen here.
+ *
+ * Avro has no unsigned types, so the unsigned widths widen to the next signed
+ * type that can hold their full range.
  */
 const FORMAT_TO_AVRO: Record<string, AvroPrimitive> = {
   int32: "int",
   int64: "long",
+  uint32: "long",
+  uint64: "long",
+  sint32: "int",
+  sint64: "long",
+  fixed32: "int",
+  sfixed32: "int",
+  fixed64: "long",
+  sfixed64: "long",
   float: "float",
   double: "double",
+  byte: "bytes",
+  binary: "bytes",
+};
+
+/**
+ * Avro annotates a primitive with a logical type rather than adding a new one,
+ * so a uuid is still a string and a timestamp is still a long.
+ */
+const FORMAT_TO_LOGICAL: Record<string, { type: AvroPrimitive; logicalType: string }> = {
+  uuid: { type: "string", logicalType: "uuid" },
+  date: { type: "int", logicalType: "date" },
+  time: { type: "int", logicalType: "time-millis" },
+  "date-time": { type: "long", logicalType: "timestamp-millis" },
 };
 
 /** `T | undefined` is how an optional property reaches us; Avro spells it `["null", T]`. */
@@ -44,25 +68,44 @@ function unwrapNullable(ir: TypeIR): { nullable: boolean; inner: TypeIR } {
   return { nullable: false, inner: ir };
 }
 
+/** A logical type when `@format` names one, otherwise undefined. */
+function avroLogicalFor(
+  ir: TypeIR,
+  carrier?: Annotated
+): { type: AvroPrimitive; logicalType: string } | undefined {
+  if (ir.kind === "primitive" && ir.type === "date") {
+    return { type: "long", logicalType: "timestamp-millis" };
+  }
+  if (ir.kind !== "primitive" || ir.type !== "string") return undefined;
+  const format = declaredFormat(carrier, ir);
+  return format ? FORMAT_TO_LOGICAL[format] : undefined;
+}
+
 function avroPrimitiveFor(
   ir: TypeIR,
   carrier?: Annotated
 ): AvroPrimitive | undefined {
   if (ir.kind !== "primitive") return undefined;
   const format = declaredFormat(carrier, ir);
+  const declared = format ? FORMAT_TO_AVRO[format] : undefined;
   switch (ir.type) {
     case "string":
     case "symbol":
-      return "string";
+      // `@format byte`/`binary` means the string is really opaque bytes.
+      return declared === "bytes" ? "bytes" : "string";
     case "boolean":
       return "boolean";
+    case "bytes":
+      return "bytes";
+    case "date":
+      return "long";
     case "bigint":
       // A JS bigint is 64-bit by definition; `@format int32` may still narrow it.
-      return format && FORMAT_TO_AVRO[format] ? FORMAT_TO_AVRO[format]! : "long";
+      return declared ?? "long";
     case "number":
       // A JS number *is* a double, so that is the honest default. `@format`
       // narrows it when the field is really an int32/int64/float.
-      return format && FORMAT_TO_AVRO[format] ? FORMAT_TO_AVRO[format]! : "double";
+      return declared ?? "double";
     case "null":
     case "undefined":
     case "void":
@@ -99,6 +142,9 @@ function irToAvroSchema(
   if (nullable) {
     return ["null", irToAvroSchema(inner, ctx, carrier, fallbackName)];
   }
+
+  const logical = avroLogicalFor(inner, carrier);
+  if (logical) return logical;
 
   const primitive = avroPrimitiveFor(inner, carrier);
   if (primitive) return primitive;
@@ -201,6 +247,11 @@ function emitEncode(
       ...emitEncode(inner, expr, ctx, carrier).map((l) => `  ${l}`),
       `}`,
     ];
+  }
+
+  // A Date is carried by its logical type's underlying long.
+  if (inner.kind === "primitive" && inner.type === "date") {
+    return [`o += writeLong(buf, o, BigInt(${expr}.getTime()));`];
   }
 
   const primitive = avroPrimitiveFor(inner, carrier);
@@ -314,6 +365,14 @@ function emitDecode(
       `} else {`,
       ...emitDecode(inner, target, ctx, carrier).map((l) => `  ${l}`),
       `}`,
+    ];
+  }
+
+  if (inner.kind === "primitive" && inner.type === "date") {
+    const tmp = `ms${ctx.next()}`;
+    return [
+      `let ${tmp}; [${tmp}, o] = readLong(buf, o);`,
+      `${target} = new Date(Number(${tmp}));`,
     ];
   }
 

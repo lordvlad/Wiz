@@ -33,6 +33,55 @@ const PROTO_NUMERICS: Record<string, ProtoNumeric> = {
     write: (t) => `o += writeVarint64(buf, o, ${t});`,
     read: `let res; [res, o] = readVarint64(buf, o);`,
   },
+  uint32: {
+    proto: "uint32",
+    wire: 0,
+    write: (t) => `o += writeVarint(buf, o, ${t});`,
+    read: `let res; [res, o] = readVarint(buf, o);`,
+  },
+  uint64: {
+    proto: "uint64",
+    wire: 0,
+    write: (t) => `o += writeVarint64(buf, o, ${t});`,
+    read: `let res; [res, o] = readVarint64(buf, o);`,
+  },
+  // sint uses zig-zag, which is what makes small negatives cheap.
+  sint32: {
+    proto: "sint32",
+    wire: 0,
+    write: (t) => `o += writeZigZag(buf, o, ${t});`,
+    read: `let res; [res, o] = readZigZag(buf, o);`,
+  },
+  sint64: {
+    proto: "sint64",
+    wire: 0,
+    write: (t) => `o += writeZigZag(buf, o, ${t});`,
+    read: `let res; [res, o] = readZigZag(buf, o);`,
+  },
+  fixed32: {
+    proto: "fixed32",
+    wire: 5,
+    write: (t) => `view.setUint32(o, Number(${t}), true); o += 4;`,
+    read: `const res = view.getUint32(o, true); o += 4;`,
+  },
+  sfixed32: {
+    proto: "sfixed32",
+    wire: 5,
+    write: (t) => `view.setInt32(o, Number(${t}), true); o += 4;`,
+    read: `const res = view.getInt32(o, true); o += 4;`,
+  },
+  fixed64: {
+    proto: "fixed64",
+    wire: 1,
+    write: (t) => `view.setBigUint64(o, BigInt(${t}), true); o += 8;`,
+    read: `const res = view.getBigUint64(o, true); o += 8;`,
+  },
+  sfixed64: {
+    proto: "sfixed64",
+    wire: 1,
+    write: (t) => `view.setBigInt64(o, BigInt(${t}), true); o += 8;`,
+    read: `const res = view.getBigInt64(o, true); o += 8;`,
+  },
   float: {
     proto: "float",
     wire: 5,
@@ -46,6 +95,9 @@ const PROTO_NUMERICS: Record<string, ProtoNumeric> = {
     read: `const res = view.getFloat64(o, true); o += 8;`,
   },
 };
+
+/** Widths that must round-trip as BigInt rather than Number. */
+const BIGINT_FORMATS = new Set(["int64", "uint64", "fixed64", "sfixed64", "sint64"]);
 
 /**
  * A JS number is a double, so that is the default. `@format` narrows it, using
@@ -61,159 +113,398 @@ function protoNumericFor(
   const declared = format ? PROTO_NUMERICS[format] : undefined;
   if (ir.type === "bigint") return declared ?? PROTO_NUMERICS.int64!;
   if (ir.type === "number") return declared ?? PROTO_NUMERICS.double!;
+  if (ir.type === "date") return PROTO_NUMERICS.int64!;
   return undefined;
 }
 
-export function generateProtobufCode(ir: TypeIR): string {
-  const typeName = ir.name ?? "Target";
-  const props = flattenObjectProperties(ir);
+/** Does this field's JS value come back as a BigInt? */
+function readsAsBigInt(ir: TypeIR, carrier?: Annotated): boolean {
+  if (ir.kind !== "primitive") return false;
+  if (ir.type === "bigint") {
+    const format = declaredFormat(carrier, ir);
+    return !format || BIGINT_FORMATS.has(format);
+  }
+  const format = declaredFormat(carrier, ir);
+  return Boolean(format && BIGINT_FORMATS.has(format) && format !== "int64");
+}
 
-  // Check if any property is missing @fieldNumber
-  const missingProp = props.find(
-    (p) => p.fieldNumber === undefined || Number.isNaN(p.fieldNumber)
-  );
+/** An object type that becomes its own protobuf message. */
+interface MessagePlan {
+  id: number;
+  ir: TypeIR;
+  name: string;
+}
 
-  if (missingProp || props.length === 0) {
-    const errMessage = missingProp
-      ? `[wiz] Property '${missingProp.name}' on type '${typeName}' is missing required '@fieldNumber <N>' JSDoc tag for protobuf encoding/decoding.`
-      : `[wiz] Type '${typeName}' has no properties for protobuf encoding/decoding.`;
+/** Root first, then every nested object reachable through its fields. */
+function planMessages(root: TypeIR): MessagePlan[] {
+  const plans: MessagePlan[] = [];
+  const seen = new Map<TypeIR, number>();
 
-    return [
-      `export function encodeProto(val, buf, offset = 0) {`,
-      `  throw new Error(${JSON.stringify(errMessage)});`,
-      `}`,
-      ``,
-      `export function decodeProto(buf, offset = 0) {`,
-      `  throw new Error(${JSON.stringify(errMessage)});`,
-      `}`,
-    ].join("\n");
+  const visit = (ir: TypeIR, name: string): number => {
+    const existing = seen.get(ir);
+    if (existing !== undefined) return existing;
+
+    const id = plans.length;
+    seen.set(ir, id);
+    plans.push({ id, ir, name });
+
+    for (const property of flattenObjectProperties(ir)) {
+      const target = messageTarget(property.type);
+      if (target) visit(target, target.name ?? `${name}_${property.name}`);
+    }
+    return id;
+  };
+
+  visit(root, root.name ?? "Target");
+  return plans;
+}
+
+/** The object a field embeds, if it embeds one (directly or per array item). */
+function messageTarget(ir: TypeIR): TypeIR | undefined {
+  const candidate = ir.kind === "array" ? ir.element : ir;
+  if (candidate.kind === "object" || candidate.kind === "intersection") {
+    return flattenObjectProperties(candidate).length > 0 ? candidate : undefined;
+  }
+  return undefined;
+}
+
+/** Wraps `body` so it is written length-delimited, as wire type 2 requires. */
+function lengthDelimited(body: string[], indent: string): string[] {
+  return [
+    `${indent}{`,
+    `${indent}  const lenPos = o;`,
+    `${indent}  o += 1;`,
+    `${indent}  const start = o;`,
+    ...body.map((l) => `${indent}  ${l}`),
+    `${indent}  const len = o - start;`,
+    `${indent}  const size = varintSize(len);`,
+    `${indent}  if (size !== 1) {`,
+    `${indent}    buf.copyWithin(start + size - 1, start, o);`,
+    `${indent}    o += size - 1;`,
+    `${indent}  }`,
+    `${indent}  writeVarint(buf, lenPos, len);`,
+    `${indent}}`,
+  ];
+}
+
+interface ScalarCodec {
+  wire: 0 | 1 | 2 | 5;
+  write: (expr: string) => string;
+  /** Leaves the value in `res`. */
+  read: string;
+  lift: (expr: string) => string;
+}
+
+/** How a non-message value travels, or undefined if it needs a sub-message. */
+function scalarCodecFor(
+  ir: TypeIR,
+  carrier?: Annotated
+): ScalarCodec | undefined {
+  if (ir.kind === "primitive") {
+    if (ir.type === "string" || ir.type === "symbol") {
+      return {
+        wire: 2,
+        write: (e) => `o += writeString(buf, o, String(${e}));`,
+        read: `let res; [res, o] = readString(buf, o);`,
+        lift: (e) => e,
+      };
+    }
+    if (ir.type === "bytes") {
+      return {
+        wire: 2,
+        write: (e) => `o += writeBytes(buf, o, ${e});`,
+        read: `let res; [res, o] = readBytes(buf, o);`,
+        lift: (e) => e,
+      };
+    }
+    if (ir.type === "boolean") {
+      return {
+        wire: 0,
+        write: (e) => `o += writeVarint(buf, o, ${e} ? 1 : 0);`,
+        read: `let res; [res, o] = readVarint(buf, o);`,
+        lift: (e) => `Boolean(${e})`,
+      };
+    }
+    if (ir.type === "date") {
+      return {
+        wire: 0,
+        write: (e) => `o += writeVarint64(buf, o, BigInt(${e}.getTime()));`,
+        read: `let res; [res, o] = readVarint64(buf, o);`,
+        lift: (e) => `new Date(Number(${e}))`,
+      };
+    }
   }
 
-  // Sort properties by field number
-  const sortedProps = [...props].sort(
-    (a, b) => a.fieldNumber! - b.fieldNumber!
-  );
+  if (ir.kind === "enum") {
+    return {
+      wire: 0,
+      write: (e) => `o += writeVarint(buf, o, ${e});`,
+      read: `let res; [res, o] = readVarint(buf, o);`,
+      lift: (e) => e,
+    };
+  }
 
-  const encodeLines: string[] = [];
-  const decodeCases: string[] = [];
+  const numeric = protoNumericFor(ir, carrier);
+  if (numeric) {
+    const asBigInt = readsAsBigInt(ir, carrier);
+    return {
+      wire: numeric.wire,
+      write: numeric.write,
+      read: numeric.read,
+      lift: (e) => (asBigInt ? `BigInt(${e})` : `Number(${e})`),
+    };
+  }
 
-  for (const p of sortedProps) {
-    const fn = p.fieldNumber!;
-    const propName = p.name;
-    const jsonProp = JSON.stringify(propName);
-    const pType = p.type;
+  return undefined;
+}
 
-    if (
-      pType.kind === "primitive" &&
-      (pType.type === "string" || pType.type === "symbol")
-    ) {
-      const tag = (fn << 3) | 2;
-      encodeLines.push(`  if (val[${jsonProp}] !== undefined) {`);
-      encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
-      encodeLines.push(`    o += writeString(buf, o, String(val[${jsonProp}]));`);
-      encodeLines.push(`  }`);
+/** JSON text is the last resort for shapes protobuf cannot express. */
+const JSON_FALLBACK: ScalarCodec = {
+  wire: 2,
+  write: (e) => `o += writeString(buf, o, JSON.stringify(${e}));`,
+  read: `let res; [res, o] = readString(buf, o);\n        try { res = JSON.parse(res); } catch {}`,
+  lift: (e) => e,
+};
 
-      decodeCases.push(`      case ${fn}: {`);
-      decodeCases.push(`        let res; [res, o] = readString(buf, o);`);
-      decodeCases.push(`        obj[${jsonProp}] = res;`);
-      decodeCases.push(`        break;`);
-      decodeCases.push(`      }`);
-    } else if (
-      pType.kind === "primitive" &&
-      pType.type === "boolean"
-    ) {
-      const tag = (fn << 3) | 0;
-      encodeLines.push(`  if (val[${jsonProp}] !== undefined) {`);
-      encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
-      encodeLines.push(`    o += writeVarint(buf, o, val[${jsonProp}] ? 1 : 0);`);
-      encodeLines.push(`  }`);
+export function generateProtobufCode(ir: TypeIR): string {
+  const plans = planMessages(ir);
 
-      decodeCases.push(`      case ${fn}: {`);
-      decodeCases.push(`        let res; [res, o] = readVarint(buf, o);`);
-      decodeCases.push(`        obj[${jsonProp}] = Boolean(res);`);
-      decodeCases.push(`        break;`);
-      decodeCases.push(`      }`);
-    } else if (protoNumericFor(pType, p)) {
-      const numeric = protoNumericFor(pType, p)!;
-      const tag = (fn << 3) | numeric.wire;
-      encodeLines.push(`  if (val[${jsonProp}] !== undefined) {`);
-      encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
-      encodeLines.push(`    ${numeric.write(`val[${jsonProp}]`)}`);
-      encodeLines.push(`  }`);
+  // Every message we will descend into must be fully numbered.
+  for (const plan of plans) {
+    const props = flattenObjectProperties(plan.ir);
+    const missing = props.find(
+      (p) => p.fieldNumber === undefined || Number.isNaN(p.fieldNumber)
+    );
+    if (missing || props.length === 0) {
+      const errMessage = missing
+        ? `[wiz] Property '${missing.name}' on type '${plan.name}' is missing required '@fieldNumber <N>' JSDoc tag for protobuf encoding/decoding.`
+        : `[wiz] Type '${plan.name}' has no properties for protobuf encoding/decoding.`;
+      return [
+        `export function encodeProto(val, buf, offset = 0) {`,
+        `  throw new Error(${JSON.stringify(errMessage)});`,
+        `}`,
+        ``,
+        `export function decodeProto(buf, offset = 0) {`,
+        `  throw new Error(${JSON.stringify(errMessage)});`,
+        `}`,
+      ].join("\n");
+    }
+  }
 
-      decodeCases.push(`      case ${fn}: {`);
-      decodeCases.push(`        ${numeric.read}`);
-      // The wire width is chosen by @format; the JS type decides what returns.
-      decodeCases.push(
-        pType.kind === "primitive" && pType.type === "bigint"
-          ? `        obj[${jsonProp}] = res;`
-          : `        obj[${jsonProp}] = Number(res);`
-      );
-      decodeCases.push(`        break;`);
-      decodeCases.push(`      }`);
-    } else if (pType.kind === "enum") {
-      const tag = (fn << 3) | 0;
-      encodeLines.push(`  if (val[${jsonProp}] !== undefined) {`);
-      encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
-      encodeLines.push(`    o += writeVarint(buf, o, val[${jsonProp}]);`);
-      encodeLines.push(`  }`);
+  const messageId = new Map<TypeIR, number>();
+  for (const plan of plans) messageId.set(plan.ir, plan.id);
 
-      decodeCases.push(`      case ${fn}: {`);
-      decodeCases.push(`        let res; [res, o] = readVarint(buf, o);`);
-      decodeCases.push(`        obj[${jsonProp}] = res;`);
-      decodeCases.push(`        break;`);
-      decodeCases.push(`      }`);
-    } else if (pType.kind === "array") {
-      const elemType = pType.element;
-      if (elemType.kind === "primitive" && elemType.type === "string") {
-        const tag = (fn << 3) | 2;
-        encodeLines.push(`  if (Array.isArray(val[${jsonProp}])) {`);
-        encodeLines.push(`    for (const item of val[${jsonProp}]) {`);
-        encodeLines.push(`      o += writeVarint(buf, o, ${tag});`);
-        encodeLines.push(`      o += writeString(buf, o, String(item));`);
-        encodeLines.push(`    }`);
+  const functions: string[] = [];
+
+  for (const plan of plans) {
+    const encodeLines: string[] = [];
+    const decodeCases: string[] = [];
+    const sorted = [...flattenObjectProperties(plan.ir)].sort(
+      (a, b) => a.fieldNumber! - b.fieldNumber!
+    );
+
+    for (const p of sorted) {
+      const fn = p.fieldNumber!;
+      const prop = JSON.stringify(p.name);
+      const access = `val[${prop}]`;
+      const pType = p.type;
+
+      const embedded = messageTarget(pType);
+
+      // ---- repeated -------------------------------------------------------
+      if (pType.kind === "array") {
+        const element = pType.element;
+        const nested = embedded ? messageId.get(embedded) : undefined;
+
+        if (nested !== undefined) {
+          // Repeated messages are never packed: each entry is its own record.
+          const tag = (fn << 3) | 2;
+          encodeLines.push(`  if (Array.isArray(${access})) {`);
+          encodeLines.push(`    for (const item of ${access}) {`);
+          encodeLines.push(`      o += writeVarint(buf, o, ${tag});`);
+          encodeLines.push(
+            ...lengthDelimited([`o = encodeMsg${nested}(item, buf, o, view);`], "      ")
+          );
+          encodeLines.push(`    }`);
+          encodeLines.push(`  }`);
+
+          decodeCases.push(`      case ${fn}: {`);
+          decodeCases.push(`        let len; [len, o] = readVarint(buf, o);`);
+          decodeCases.push(`        obj[${prop}] = obj[${prop}] || [];`);
+          decodeCases.push(`        obj[${prop}].push(decodeMsg${nested}(buf, o, o + len, view));`);
+          decodeCases.push(`        o += len;`);
+          decodeCases.push(`        break;`);
+          decodeCases.push(`      }`);
+          continue;
+        }
+
+        // `@format` sits on the property but describes each element.
+        const codec = scalarCodecFor(element, p) ?? JSON_FALLBACK;
+        // proto3 packs repeated scalars by default; only length-delimited
+        // element types stay unpacked, since they carry their own length.
+        const packable = codec.wire !== 2;
+        const tag = (fn << 3) | (packable ? 2 : codec.wire);
+
+        encodeLines.push(`  if (Array.isArray(${access}) && ${access}.length > 0) {`);
+        encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
+        if (packable) {
+          encodeLines.push(
+            ...lengthDelimited(
+              [`for (const item of ${access}) { ${codec.write("item")} }`],
+              "    "
+            )
+          );
+        } else {
+          encodeLines.push(`    ${codec.write(`${access}[0]`)}`);
+          encodeLines.push(`    for (let i = 1; i < ${access}.length; i++) {`);
+          encodeLines.push(`      o += writeVarint(buf, o, ${tag});`);
+          encodeLines.push(`      ${codec.write(`${access}[i]`)}`);
+          encodeLines.push(`    }`);
+        }
         encodeLines.push(`  }`);
 
         decodeCases.push(`      case ${fn}: {`);
-        decodeCases.push(`        let res; [res, o] = readString(buf, o);`);
-        decodeCases.push(`        obj[${jsonProp}] = obj[${jsonProp}] || [];`);
-        decodeCases.push(`        obj[${jsonProp}].push(res);`);
+        decodeCases.push(`        obj[${prop}] = obj[${prop}] || [];`);
+        if (packable) {
+          // A conformant reader accepts both framings regardless of what it writes.
+          decodeCases.push(`        if (wireType === 2) {`);
+          decodeCases.push(`          let len; [len, o] = readVarint(buf, o);`);
+          decodeCases.push(`          const stop = o + len;`);
+          decodeCases.push(`          while (o < stop) {`);
+          decodeCases.push(`            ${codec.read}`);
+          decodeCases.push(`            obj[${prop}].push(${codec.lift("res")});`);
+          decodeCases.push(`          }`);
+          decodeCases.push(`        } else {`);
+          decodeCases.push(`          ${codec.read}`);
+          decodeCases.push(`          obj[${prop}].push(${codec.lift("res")});`);
+          decodeCases.push(`        }`);
+        } else {
+          decodeCases.push(`        ${codec.read}`);
+          decodeCases.push(`        obj[${prop}].push(${codec.lift("res")});`);
+        }
         decodeCases.push(`        break;`);
         decodeCases.push(`      }`);
-      } else {
-        const elemNumeric = protoNumericFor(elemType, undefined) ?? PROTO_NUMERICS.double!;
-        const tag = (fn << 3) | elemNumeric.wire;
-        encodeLines.push(`  if (Array.isArray(val[${jsonProp}])) {`);
-        encodeLines.push(`    for (const item of val[${jsonProp}]) {`);
-        encodeLines.push(`      o += writeVarint(buf, o, ${tag});`);
-        encodeLines.push(`      ${elemNumeric.write("item")}`);
-        encodeLines.push(`    }`);
-        encodeLines.push(`  }`);
-
-        decodeCases.push(`      case ${fn}: {`);
-        decodeCases.push(`        ${elemNumeric.read}`);
-        decodeCases.push(`        obj[${jsonProp}] = obj[${jsonProp}] || [];`);
-        decodeCases.push(
-          elemType.kind === "primitive" && elemType.type === "bigint"
-            ? `        obj[${jsonProp}].push(res);`
-            : `        obj[${jsonProp}].push(Number(res));`
-        );
-        decodeCases.push(`        break;`);
-        decodeCases.push(`      }`);
+        continue;
       }
-    } else {
-      const tag = (fn << 3) | 2;
-      encodeLines.push(`  if (val[${jsonProp}] !== undefined) {`);
+
+      // ---- map ------------------------------------------------------------
+      if (pType.kind === "record") {
+        // `@format` on the property describes the map's value type.
+        const valueCodec = scalarCodecFor(pType.valueType, p) ?? JSON_FALLBACK;
+        const valueMsg = messageTarget(pType.valueType);
+        const valueId = valueMsg ? messageId.get(valueMsg) : undefined;
+        const tag = (fn << 3) | 2;
+
+        // A protobuf map entry is a message with key = 1 and value = 2.
+        const entryBody: string[] = [`o += writeVarint(buf, o, ${(1 << 3) | 2});`, `o += writeString(buf, o, mapKey);`];
+        if (valueId !== undefined) {
+          entryBody.push(`o += writeVarint(buf, o, ${(2 << 3) | 2});`);
+          entryBody.push(...lengthDelimited([`o = encodeMsg${valueId}(mapVal, buf, o, view);`], ""));
+        } else {
+          entryBody.push(`o += writeVarint(buf, o, ${(2 << 3) | valueCodec.wire});`);
+          entryBody.push(valueCodec.write("mapVal"));
+        }
+
+        encodeLines.push(`  if (${access} !== undefined && ${access} !== null) {`);
+        encodeLines.push(`    for (const [mapKey, mapVal] of Object.entries(${access})) {`);
+        encodeLines.push(`      o += writeVarint(buf, o, ${tag});`);
+        encodeLines.push(...lengthDelimited(entryBody, "      "));
+        encodeLines.push(`    }`);
+        encodeLines.push(`  }`);
+
+        decodeCases.push(`      case ${fn}: {`);
+        decodeCases.push(`        let len; [len, o] = readVarint(buf, o);`);
+        decodeCases.push(`        const stop = o + len;`);
+        decodeCases.push(`        let mapKey = "";`);
+        decodeCases.push(`        let mapVal;`);
+        decodeCases.push(`        while (o < stop) {`);
+        decodeCases.push(`          let entryTag; [entryTag, o] = readVarint(buf, o);`);
+        decodeCases.push(`          if ((entryTag >> 3) === 1) {`);
+        decodeCases.push(`            [mapKey, o] = readString(buf, o);`);
+        decodeCases.push(`          } else {`);
+        if (valueId !== undefined) {
+          decodeCases.push(`            let vlen; [vlen, o] = readVarint(buf, o);`);
+          decodeCases.push(`            mapVal = decodeMsg${valueId}(buf, o, o + vlen, view);`);
+          decodeCases.push(`            o += vlen;`);
+        } else {
+          decodeCases.push(`            ${valueCodec.read}`);
+          decodeCases.push(`            mapVal = ${valueCodec.lift("res")};`);
+        }
+        decodeCases.push(`          }`);
+        decodeCases.push(`        }`);
+        decodeCases.push(`        obj[${prop}] = obj[${prop}] || {};`);
+        decodeCases.push(`        obj[${prop}][mapKey] = mapVal;`);
+        decodeCases.push(`        break;`);
+        decodeCases.push(`      }`);
+        continue;
+      }
+
+      // ---- embedded message ------------------------------------------------
+      const nestedId = embedded ? messageId.get(embedded) : undefined;
+      if (nestedId !== undefined) {
+        const tag = (fn << 3) | 2;
+        encodeLines.push(`  if (${access} !== undefined && ${access} !== null) {`);
+        encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
+        encodeLines.push(
+          ...lengthDelimited([`o = encodeMsg${nestedId}(${access}, buf, o, view);`], "    ")
+        );
+        encodeLines.push(`  }`);
+
+        decodeCases.push(`      case ${fn}: {`);
+        decodeCases.push(`        let len; [len, o] = readVarint(buf, o);`);
+        decodeCases.push(`        obj[${prop}] = decodeMsg${nestedId}(buf, o, o + len, view);`);
+        decodeCases.push(`        o += len;`);
+        decodeCases.push(`        break;`);
+        decodeCases.push(`      }`);
+        continue;
+      }
+
+      // ---- scalar -----------------------------------------------------------
+      const codec = scalarCodecFor(pType, p) ?? JSON_FALLBACK;
+      const tag = (fn << 3) | codec.wire;
+      encodeLines.push(`  if (${access} !== undefined) {`);
       encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
-      encodeLines.push(`    o += writeString(buf, o, JSON.stringify(val[${jsonProp}]));`);
+      encodeLines.push(`    ${codec.write(access)}`);
       encodeLines.push(`  }`);
 
       decodeCases.push(`      case ${fn}: {`);
-      decodeCases.push(`        let res; [res, o] = readString(buf, o);`);
-      decodeCases.push(`        try { obj[${jsonProp}] = JSON.parse(res); } catch { obj[${jsonProp}] = res; }`);
+      decodeCases.push(`        ${codec.read}`);
+      decodeCases.push(`        obj[${prop}] = ${codec.lift("res")};`);
       decodeCases.push(`        break;`);
       decodeCases.push(`      }`);
     }
+
+    functions.push(
+      [
+        `function encodeMsg${plan.id}(val, buf, offset, view) {`,
+        `  let o = offset;`,
+        ...encodeLines,
+        `  return o;`,
+        `}`,
+        ``,
+        `function decodeMsg${plan.id}(buf, offset, end, view) {`,
+        `  let o = offset;`,
+        `  const obj = {};`,
+        `  while (o < end) {`,
+        `    let tag; [tag, o] = readVarint(buf, o);`,
+        `    if (tag === 0) break;`,
+        `    const fieldNum = tag >> 3;`,
+        `    const wireType = tag & 7;`,
+        `    switch (fieldNum) {`,
+        ...decodeCases,
+        `      default: {`,
+        `        if (wireType === 0) { let _; [_, o] = readVarint(buf, o); }`,
+        `        else if (wireType === 2) { let len; [len, o] = readVarint(buf, o); o += len; }`,
+        `        else if (wireType === 1) { o += 8; }`,
+        `        else if (wireType === 5) { o += 4; }`,
+        `        break;`,
+        `      }`,
+        `    }`,
+        `  }`,
+        `  return obj;`,
+        `}`,
+      ].join("\n")
+    );
   }
 
   return [
@@ -288,35 +579,51 @@ export function generateProtobufCode(ir: TypeIR): string {
     `  return [str, newOff + len];`,
     `}`,
     ``,
-    `export function encodeProto(val, buf, offset = 0) {`,
+    `// sint32/sint64: zig-zag maps small negatives onto small positives, so`,
+    `// -1 costs one byte instead of ten.`,
+    `function writeZigZag(buf, offset, value) {`,
+    `  const v = typeof value === "bigint" ? value : BigInt(Math.trunc(Number(value) || 0));`,
+    `  return writeVarint64(buf, offset, BigInt.asUintN(64, (v << 1n) ^ (v >> 63n)));`,
+    `}`,
+    ``,
+    `function readZigZag(buf, offset) {`,
+    `  const [raw, next] = readVarint64(buf, offset);`,
+    `  const u = BigInt.asUintN(64, raw);`,
+    `  return [(u >> 1n) ^ -(u & 1n), next];`,
+    `}`,
+    ``,
+    `function writeBytes(buf, offset, value) {`,
+    `  const bytes = value instanceof Uint8Array`,
+    `    ? value`,
+    `    : new Uint8Array(value ?? []);`,
     `  let o = offset;`,
+    `  o += writeVarint(buf, o, bytes.length);`,
+    `  buf.set(bytes, o);`,
+    `  return o + bytes.length - offset;`,
+    `}`,
+    ``,
+    `function readBytes(buf, offset) {`,
+    `  const [len, start] = readVarint(buf, offset);`,
+    `  return [buf.slice(start, start + len), start + len];`,
+    `}`,
+    ``,
+    `function varintSize(n) {`,
+    `  let size = 1;`,
+    `  let v = n;`,
+    `  while (v >= 0x80) { v = Math.floor(v / 128); size++; }`,
+    `  return size;`,
+    `}`,
+    ``,
+    ...functions,
+    ``,
+    `export function encodeProto(val, buf, offset = 0) {`,
     `  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);`,
-    encodeLines.join("\n"),
-    `  return o - offset;`,
+    `  return encodeMsg0(val, buf, offset, view) - offset;`,
     `}`,
     ``,
     `export function decodeProto(buf, offset = 0) {`,
-    `  let o = offset;`,
     `  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);`,
-    `  const end = buf.length;`,
-    `  const obj = {};`,
-    `  while (o < end) {`,
-    `    let tag; [tag, o] = readVarint(buf, o);`,
-    `    if (tag === 0) break;`,
-    `    const fieldNum = tag >> 3;`,
-    `    const wireType = tag & 7;`,
-    `    switch (fieldNum) {`,
-    decodeCases.join("\n"),
-    `      default: {`,
-    `        if (wireType === 0) { let _; [_, o] = readVarint(buf, o); }`,
-    `        else if (wireType === 2) { let len; [len, o] = readVarint(buf, o); o += len; }`,
-    `        else if (wireType === 1) { o += 8; }`,
-    `        else if (wireType === 5) { o += 4; }`,
-    `        break;`,
-    `      }`,
-    `    }`,
-    `  }`,
-    `  return obj;`,
+    `  return decodeMsg0(buf, offset, buf.length, view);`,
     `}`,
   ].join("\n");
 }
@@ -333,6 +640,8 @@ function mapIRToProtoType(ir: TypeIR, carrier?: Annotated): string {
           return "string";
         case "boolean":
           return "bool";
+        case "bytes":
+          return "bytes";
         default:
           return "string";
       }

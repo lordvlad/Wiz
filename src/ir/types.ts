@@ -63,7 +63,6 @@ export interface BaseTypeIR extends Annotated {
   id: string;
   name?: string;
 }
-
 export interface PrimitiveTypeIR extends BaseTypeIR {
   kind: "primitive";
   type:
@@ -77,7 +76,11 @@ export interface PrimitiveTypeIR extends BaseTypeIR {
     | "unknown"
     | "any"
     | "void"
-    | "never";
+    | "never"
+    /** `Uint8Array` and friends: opaque binary, not a struct of methods. */
+    | "bytes"
+    /** `Date`: an instant, not a struct of methods. */
+    | "date";
 }
 
 export interface LiteralTypeIR extends BaseTypeIR {
@@ -330,7 +333,6 @@ export function walkTypeIR(
     case "primitive":
     case "literal":
     case "enum":
-    case "ref":
       break;
   }
 }
@@ -366,6 +368,13 @@ export const BUILTIN_TYPE_NAMES = new Set([
   "Parameters",
   "ReturnType",
   "Awaited",
+  // Modelled as opaque scalars elsewhere; their lib documentation describes the
+  // class, not the field, so it must not reach a generated schema.
+  "Uint8Array",
+  "Uint8ClampedArray",
+  "ArrayBuffer",
+  "SharedArrayBuffer",
+  "Date",
 ]);
 
 export function isUserNamedType(name: string | undefined): boolean {

@@ -29,6 +29,18 @@ function displayPartsToString(
   if (typeof parts === "string") return parts;
   return parts.map((p) => p.text).join("");
 }
+/**
+ * Runtime classes every target treats as a scalar rather than a struct.
+ * Their structural shape is a list of methods, which is never what a schema
+ * should describe.
+ */
+const WELL_KNOWN_SCALARS: Record<string, "bytes" | "date"> = {
+  Uint8Array: "bytes",
+  Uint8ClampedArray: "bytes",
+  ArrayBuffer: "bytes",
+  SharedArrayBuffer: "bytes",
+  Date: "date",
+};
 
 function parseJSDocValue(kind: ConstraintKind, text: string): unknown {
   const trimmed = text.trim();
@@ -233,6 +245,22 @@ export function extractTypeIR(
     ? extractJSDocInfo(symbol, checker)
     : { constraints: [], examples: [], meta: {} };
   const annotations = annotationsOf(jsDocInfo, typeName);
+  // Runtime classes that are scalars to every schema language we target.
+  // Expanding them structurally yields a record of their own methods: a single
+  // `Uint8Array` field otherwise produced 45 component schemas.
+  const wellKnown = symbol ? WELL_KNOWN_SCALARS[symbol.name] : undefined;
+  if (wellKnown) {
+    const res: TypeIR = {
+      id: nextId(),
+      kind: "primitive",
+      type: wellKnown,
+      ...annotations,
+      // The class name is not a domain schema name.
+      name: undefined,
+    };
+    cache.set(type, res);
+    return res;
+  }
 
   // Primitive Boolean (union of true and false)
   if (type.flags & ts.TypeFlags.Boolean) {

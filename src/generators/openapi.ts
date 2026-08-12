@@ -91,6 +91,19 @@ export function irToOpenApiSchema(
           schema.format = "int64";
           schema.pattern = "^-?\\d+$";
           break;
+        case "bytes":
+          schema.type = "string";
+          // 3.0 has `format: byte`; 3.1 defers to JSON Schema's contentEncoding.
+          if (version === "3.0") {
+            schema.format = "byte";
+          } else {
+            schema.contentEncoding = "base64";
+          }
+          break;
+        case "date":
+          schema.type = "string";
+          schema.format = "date-time";
+          break;
         case "null":
           if (version === "3.0") {
             schema.nullable = true;

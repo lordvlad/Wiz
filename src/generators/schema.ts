@@ -61,6 +61,19 @@ export function irToJsonSchema(
           schema.format = "int64";
           schema.pattern = "^-?\\d+$";
           break;
+        case "bytes":
+          // Binary has no JSON representation; base64 is the conventional one.
+          schema.type = "string";
+          if (draft === "draft-2020-12") {
+            schema.contentEncoding = "base64";
+          } else {
+            schema.format = "byte";
+          }
+          break;
+        case "date":
+          schema.type = "string";
+          schema.format = "date-time";
+          break;
         case "null":
           schema.type = "null";
           break;
