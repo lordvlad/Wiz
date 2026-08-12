@@ -291,9 +291,7 @@ so others can join it. *Generators* are back ends that turn IR into code.
 
 Because they meet at one IR and share the `@format` reader, a type cannot be
 described one way and encoded another — a class of bug this codebase has had
-repeatedly, and now tests against directly by asserting wire bytes against the
-protobuf and Avro specs rather than only round-tripping. A codec wrong in both
-directions round-trips perfectly.
+repeatedly.
 
 ```
 src/extractors/         front ends producing IR; typescript.ts is the first
@@ -303,6 +301,20 @@ src/plugin.ts           call-site rewriting, route harvesting
 src/registry.ts         virtual modules, keyed by structural hash
 src/cli.ts              the wiz binary
 ```
+
+### Verification
+
+Round-tripping wiz against itself proves nothing about a wire format: a codec
+wrong in both directions round-trips perfectly. So the binary and document
+output is checked against independent implementations —
+[protobuf.js](https://github.com/protobufjs/protobuf.js) parses the generated
+`.proto`, reads what wiz writes and writes what wiz reads, and generated
+OpenAPI documents are validated against the official OpenAPI schemas.
+
+That is not a formality. It caught negative `int32` being truncated to two
+bytes instead of proto3's sign-extended ten, maps declared as `string`, and
+`repeated double` where the codec wrote `int32` — none of which wiz's own
+round-trip tests could see.
 
 ## Tests
 
