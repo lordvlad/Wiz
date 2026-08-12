@@ -517,6 +517,48 @@ function findDiscriminatorProperty(types: TypeIR[]): { propertyName: string } | 
 
   return undefined;
 }
+/**
+ * Reads `NumberedUnion<{ 1: A; 2: B }>` off a type node.
+ *
+ * The numbering cannot be recovered from the resolved type: TypeScript resolves
+ * the helper to a plain union and records only the outermost alias, so the map
+ * survives on the declaration alone. One level of naming is followed, which is
+ * what `type Shape = NumberedUnion<...>` plus `shape: Shape` needs.
+ */
+function numberedUnionEntries(
+  node: ts.TypeNode | undefined,
+  checker: ts.TypeChecker,
+  depth = 0
+): Array<{ fieldNumber: number; type: ts.Type }> | undefined {
+  if (!node || depth > 8 || !ts.isTypeReferenceNode(node)) return undefined;
+
+  if (node.typeName.getText() !== "NumberedUnion") {
+    // A named alias standing in for the helper; resolve it and look again.
+    let symbol = checker.getSymbolAtLocation(node.typeName);
+    if (symbol && symbol.flags & ts.SymbolFlags.Alias) {
+      symbol = checker.getAliasedSymbol(symbol);
+    }
+    const declaration = symbol?.declarations?.[0];
+    return declaration && ts.isTypeAliasDeclaration(declaration)
+      ? numberedUnionEntries(declaration.type, checker, depth + 1)
+      : undefined;
+  }
+
+  const map = node.typeArguments?.[0];
+  if (!map || !ts.isTypeLiteralNode(map)) return undefined;
+
+  const entries: Array<{ fieldNumber: number; type: ts.Type }> = [];
+  for (const member of map.members) {
+    if (!ts.isPropertySignature(member) || !member.type) return undefined;
+    const fieldNumber = Number(member.name.getText());
+    if (!Number.isInteger(fieldNumber) || fieldNumber < 1) return undefined;
+    entries.push({
+      fieldNumber,
+      type: checker.getTypeFromTypeNode(member.type),
+    });
+  }
+  return entries.length > 0 ? entries : undefined;
+}
   if (type.isUnion()) {
     const placeholder: UnionTypeIR = {
       id: nextId(),
@@ -527,8 +569,19 @@ function findDiscriminatorProperty(types: TypeIR[]): { propertyName: string } | 
     };
     cache.set(type, placeholder);
 
-    const typesIR = type.types.map((subType) => extractTypeIR(subType, checker, cache));
+    // A `NumberedUnion` is built from its declared entries rather than from
+    // `type.types`, so members stay positionally paired with their numbers.
+    const aliasDeclaration = type.aliasSymbol?.declarations?.[0];
+    const numbered =
+      aliasDeclaration && ts.isTypeAliasDeclaration(aliasDeclaration)
+        ? numberedUnionEntries(aliasDeclaration.type, checker)
+        : undefined;
+
+    const typesIR = (numbered?.map((e) => e.type) ?? type.types).map((subType) =>
+      extractTypeIR(subType, checker, cache)
+    );
     placeholder.types = typesIR;
+    if (numbered) placeholder.fieldNumbers = numbered.map((e) => e.fieldNumber);
     placeholder.discriminator = findDiscriminatorProperty(typesIR);
     return placeholder;
   }
@@ -602,7 +655,26 @@ function findDiscriminatorProperty(types: TypeIR[]): { propertyName: string } | 
     }
 
     const propDocInfo = extractJSDocInfo(propSymbol, checker);
-    const propTypeIR = extractTypeIR(propType, checker, cache);
+    let propTypeIR = extractTypeIR(propType, checker, cache);
+
+    // `shape?: Shape` widens to `Circle | Square | undefined`, a fresh union
+    // carrying no alias, so the numbering is recovered from the annotation.
+    // The result is deliberately not cached: the numbering belongs to this
+    // declaration, while the widened union type is shared.
+    if (propTypeIR.kind === "union" && propTypeIR.fieldNumbers === undefined) {
+      const declaredType = propDecl && ts.isPropertySignature(propDecl) ? propDecl.type : undefined;
+      const numbered = numberedUnionEntries(declaredType, checker);
+      if (numbered) {
+        const types = numbered.map((e) => extractTypeIR(e.type, checker, cache));
+        propTypeIR = {
+          ...propTypeIR,
+          id: nextId(),
+          types,
+          fieldNumbers: numbered.map((e) => e.fieldNumber),
+          discriminator: findDiscriminatorProperty(types),
+        };
+      }
+    }
 
     propIRs.push({
       name: propSymbol.name,

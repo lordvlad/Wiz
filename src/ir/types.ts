@@ -122,6 +122,11 @@ export interface TupleTypeIR extends BaseTypeIR {
 export interface UnionTypeIR extends BaseTypeIR {
   kind: "union";
   types: TypeIR[];
+  /**
+   * Protobuf field numbers from `NumberedUnion`, positionally matching `types`.
+   * Present only when the union was declared through that helper.
+   */
+  fieldNumbers?: number[];
   discriminator?: { propertyName: string };
 }
 
@@ -242,7 +247,14 @@ export function normalizeTypeIR(ir: TypeIR): unknown {
       return {
         k: "union",
         u: ir.types
-          .map((t) => normalizeTypeIR(t))
+          .map((t, i) => {
+            const normalized = normalizeTypeIR(t);
+            const fieldNumber = ir.fieldNumbers?.[i];
+            // Pair before sorting, or the sort would scramble the numbering.
+            return fieldNumber === undefined
+              ? normalized
+              : { n: fieldNumber, t: normalized };
+          })
           .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
       };
     case "intersection":

@@ -10,6 +10,24 @@ export class PluginInactiveError extends Error {
   }
 }
 
+/**
+ * A union that also declares a protobuf field number for each member.
+ *
+ * To TypeScript this is exactly the union of the map's values, so it is
+ * assignable, narrowable and printable like any other union:
+ *
+ * ```ts
+ * type Shape = NumberedUnion<{ 1: Circle; 2: Square }>;
+ * const s: Shape = { kind: "circle", radius: 1 };
+ * ```
+ *
+ * wiz reads the numbers off the declaration and emits a protobuf `oneof`.
+ * The numbers live in the enclosing message's field-number space, exactly as
+ * `oneof` members do on the wire, so they must not collide with sibling
+ * fields, and the property itself takes no `@fieldNumber`.
+ */
+export type NumberedUnion<T extends Record<number, unknown>> = T[keyof T];
+
 export function keysOf<T>(): (keyof T)[] {
   throw new PluginInactiveError("keysOf");
 }

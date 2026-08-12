@@ -1,6 +1,7 @@
 import type { Constraint, ObjectTypeIR, PropertyIR, TypeIR } from "../types.ts";
 
-function generateTypeCheckExpression(ir: TypeIR, varName: string): string {
+/** A JS boolean expression testing whether `varName` matches `ir`. */
+export function generateTypeCheckExpression(ir: TypeIR, varName: string): string {
   switch (ir.kind) {
     case "primitive":
       switch (ir.type) {

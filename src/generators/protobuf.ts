@@ -3,8 +3,11 @@ import {
   declaredFormat,
   flattenObjectProperties,
   type Annotated,
+  type PropertyIR,
   type TypeIR,
+  type UnionTypeIR,
 } from "../types.ts";
+import { generateTypeCheckExpression } from "./validator.ts";
 
 /**
  * How a numeric field travels. protobuf has three encodings, and picking the
@@ -149,8 +152,12 @@ function planMessages(root: TypeIR): MessagePlan[] {
     plans.push({ id, ir, name });
 
     for (const property of flattenObjectProperties(ir)) {
-      const target = messageTarget(property.type);
-      if (target) visit(target, target.name ?? `${name}_${property.name}`);
+      const oneof = oneofFor(property.type);
+      const reachable = oneof ? oneof.types : [property.type];
+      for (const candidate of reachable) {
+        const target = messageTarget(candidate);
+        if (target) visit(target, target.name ?? `${name}_${property.name}`);
+      }
     }
     return id;
   };
@@ -161,7 +168,9 @@ function planMessages(root: TypeIR): MessagePlan[] {
 
 /** The object a field embeds, if it embeds one (directly or per array item). */
 function messageTarget(ir: TypeIR): TypeIR | undefined {
-  const candidate = ir.kind === "array" ? ir.element : ir;
+  // An optional message still embeds; absence is field omission.
+  const unwrapped = unwrapNullable(ir);
+  const candidate = unwrapped.kind === "array" ? unwrapped.element : unwrapped;
   if (candidate.kind === "object" || candidate.kind === "intersection") {
     return flattenObjectProperties(candidate).length > 0 ? candidate : undefined;
   }
@@ -200,6 +209,14 @@ function scalarCodecFor(
   ir: TypeIR,
   carrier?: Annotated
 ): ScalarCodec | undefined {
+  // A literal travels as its primitive: `kind: "circle"` is a string, not JSON.
+  if (ir.kind === "literal") {
+    const type = typeof ir.value === "bigint" ? "bigint" : typeof ir.value;
+    if (type === "string" || type === "number" || type === "boolean" || type === "bigint") {
+      return scalarCodecFor({ id: `${ir.id}_prim`, kind: "primitive", type }, carrier);
+    }
+  }
+
   if (ir.kind === "primitive") {
     if (ir.type === "string" || ir.type === "symbol") {
       return {
@@ -266,29 +283,189 @@ const JSON_FALLBACK: ScalarCodec = {
   lift: (e) => e,
 };
 
+/**
+ * Strips `undefined`, `null` and `void` from a union.
+ *
+ * Protobuf spells absence by omitting the field, so an optional `T` travels
+ * exactly as a `T` does. Without this an optional field looks like a union and
+ * falls through to the JSON fallback, silently encoding text.
+ */
+function unwrapNullable(ir: TypeIR): TypeIR {
+  if (ir.kind !== "union") return ir;
+  const meaningful = ir.types.filter(
+    (t) =>
+      !(
+        t.kind === "primitive" &&
+        (t.type === "undefined" || t.type === "null" || t.type === "void")
+      )
+  );
+  return meaningful.length === 1 ? meaningful[0]! : { ...ir, types: meaningful };
+}
+
+/**
+ * A union of same-typed literals is not a union on the wire, just its
+ * primitive: `"a" | "b"` is a string. Returns that primitive, if it applies.
+ */
+function collapseLiteralUnion(ir: UnionTypeIR): TypeIR | undefined {
+  const types = new Set<string>();
+  for (const member of ir.types) {
+    if (member.kind !== "literal") return undefined;
+    types.add(typeof member.value === "bigint" ? "bigint" : typeof member.value);
+  }
+  if (types.size !== 1) return undefined;
+  const only = [...types][0];
+  // `boolean` reaches us as `true | false`, which is one wire type, not two.
+  if (only !== "string" && only !== "number" && only !== "bigint" && only !== "boolean") {
+    return undefined;
+  }
+  return { id: `${ir.id}_collapsed`, kind: "primitive", type: only };
+}
+
+/**
+ * The type a field actually travels as: optionality stripped and a same-typed
+ * literal union reduced. Shared so the schema cannot describe one shape while
+ * the codec writes another.
+ */
+function wireFieldType(ir: TypeIR): TypeIR {
+  const unwrapped = unwrapNullable(ir);
+  if (unwrapped.kind !== "union") return unwrapped;
+  return collapseLiteralUnion(unwrapped) ?? unwrapped;
+}
+
+/** The variants of a field encoded as a `oneof`, if it is one. */
+function oneofFor(ir: TypeIR): UnionTypeIR | undefined {
+  const inner = unwrapNullable(ir);
+  if (inner.kind !== "union") return undefined;
+  return collapseLiteralUnion(inner) ? undefined : inner;
+}
+
+/** The required property names of an object variant, as a stable signature. */
+function requiredSignature(ir: TypeIR): string[] {
+  return flattenObjectProperties(ir)
+    .filter((p) => !p.optional)
+    .map((p) => p.name)
+    .sort();
+}
+
+/** A JS literal for a value that may be a bigint, which JSON cannot spell. */
+function literalExpression(value: unknown): string {
+  return typeof value === "bigint" ? `${value}n` : JSON.stringify(value);
+}
+
+/**
+ * A test that tells one `oneof` variant from its siblings.
+ *
+ * The validator's object check is deliberately shallow — it asks only whether
+ * the value is an object — so it cannot separate two record variants. The
+ * discriminant property decides where the union has one, and the required
+ * property names decide otherwise.
+ */
+function variantCheck(variant: TypeIR, union: UnionTypeIR, local: string): string {
+  const target = unwrapNullable(variant);
+  if (target.kind !== "object" && target.kind !== "intersection") {
+    return generateTypeCheckExpression(target, local);
+  }
+
+  const tests = [`${local} !== null`, `typeof ${local} === "object"`];
+  const properties = flattenObjectProperties(target);
+
+  const discriminant = union.discriminator?.propertyName;
+  const tag = discriminant
+    ? properties.find((p) => p.name === discriminant)
+    : undefined;
+  if (tag?.type.kind === "literal") {
+    tests.push(
+      `${local}[${JSON.stringify(discriminant)}] === ${literalExpression(tag.type.value)}`
+    );
+    return tests.join(" && ");
+  }
+
+  for (const name of requiredSignature(target)) {
+    tests.push(`${JSON.stringify(name)} in ${local}`);
+  }
+  return tests.join(" && ");
+}
+
+/**
+ * The one reason this type cannot be encoded, or undefined.
+ *
+ * Reported up front rather than per field, so the generated module fails with
+ * a single actionable message instead of encoding something unreadable.
+ */
+function protobufBlocker(plans: MessagePlan[]): string | undefined {
+  for (const plan of plans) {
+    const props = flattenObjectProperties(plan.ir);
+    if (props.length === 0) {
+      return `[wiz] Type '${plan.name}' has no properties for protobuf encoding/decoding.`;
+    }
+
+    // oneof members share the enclosing message's field-number space.
+    const claimed = new Map<number, string>();
+    const claim = (n: number, by: string): string | undefined => {
+      const owner = claimed.get(n);
+      if (owner !== undefined) {
+        return `[wiz] Field number ${n} on type '${plan.name}' is claimed by both '${owner}' and '${by}'. A 'oneof' shares the enclosing message's field numbers, so every variant needs its own.`;
+      }
+      claimed.set(n, by);
+      return undefined;
+    };
+
+    for (const p of props) {
+      const oneof = oneofFor(p.type);
+
+      if (!oneof) {
+        if (p.fieldNumber === undefined || Number.isNaN(p.fieldNumber)) {
+          return `[wiz] Property '${p.name}' on type '${plan.name}' is missing required '@fieldNumber <N>' JSDoc tag for protobuf encoding/decoding.`;
+        }
+        const clash = claim(p.fieldNumber, p.name);
+        if (clash) return clash;
+        continue;
+      }
+
+      if (!oneof.fieldNumbers) {
+        return `[wiz] Property '${p.name}' on type '${plan.name}' is a union, which protobuf encodes as a 'oneof' and so needs a field number per variant. Declare it as NumberedUnion<{ 1: A; 2: B }> instead of A | B.`;
+      }
+      if (p.fieldNumber !== undefined && !Number.isNaN(p.fieldNumber)) {
+        return `[wiz] Property '${p.name}' on type '${plan.name}' carries '@fieldNumber ${p.fieldNumber}' but its NumberedUnion already numbers each variant. Remove the tag.`;
+      }
+      for (const [index, n] of oneof.fieldNumbers.entries()) {
+        const clash = claim(n, `${p.name} variant ${index + 1}`);
+        if (clash) return clash;
+      }
+
+      // Encoding picks a variant by inspecting the value, so two variants that
+      // no test can separate would silently encode under the wrong number.
+      if (!oneof.discriminator) {
+        const seen = new Map<string, number>();
+        for (const [index, variant] of oneof.types.entries()) {
+          const unwrapped = unwrapNullable(variant);
+          if (unwrapped.kind !== "object" && unwrapped.kind !== "intersection") continue;
+          const signature = requiredSignature(unwrapped).join(",");
+          const first = seen.get(signature);
+          if (first !== undefined) {
+            return `[wiz] Variants ${first + 1} and ${index + 1} of property '${p.name}' on type '${plan.name}' have the same required properties (${signature || "none"}), so a value cannot be matched to one of them. Give the union a discriminant property with a distinct literal value.`;
+          }
+          seen.set(signature, index);
+        }
+      }
+    }
+  }
+  return undefined;
+}
 export function generateProtobufCode(ir: TypeIR): string {
   const plans = planMessages(ir);
 
-  // Every message we will descend into must be fully numbered.
-  for (const plan of plans) {
-    const props = flattenObjectProperties(plan.ir);
-    const missing = props.find(
-      (p) => p.fieldNumber === undefined || Number.isNaN(p.fieldNumber)
-    );
-    if (missing || props.length === 0) {
-      const errMessage = missing
-        ? `[wiz] Property '${missing.name}' on type '${plan.name}' is missing required '@fieldNumber <N>' JSDoc tag for protobuf encoding/decoding.`
-        : `[wiz] Type '${plan.name}' has no properties for protobuf encoding/decoding.`;
-      return [
-        `export function encodeProto(val, buf, offset = 0) {`,
-        `  throw new Error(${JSON.stringify(errMessage)});`,
-        `}`,
-        ``,
-        `export function decodeProto(buf, offset = 0) {`,
-        `  throw new Error(${JSON.stringify(errMessage)});`,
-        `}`,
-      ].join("\n");
-    }
+  const blocker = protobufBlocker(plans);
+  if (blocker) {
+    return [
+      `export function encodeProto(val, buf, offset = 0) {`,
+      `  throw new Error(${JSON.stringify(blocker)});`,
+      `}`,
+      ``,
+      `export function decodeProto(buf, offset = 0) {`,
+      `  throw new Error(${JSON.stringify(blocker)});`,
+      `}`,
+    ].join("\n");
   }
 
   const messageId = new Map<TypeIR, number>();
@@ -299,15 +476,65 @@ export function generateProtobufCode(ir: TypeIR): string {
   for (const plan of plans) {
     const encodeLines: string[] = [];
     const decodeCases: string[] = [];
+    // A oneof has no single number; it sorts by its lowest variant.
+    const numberOf = (p: PropertyIR): number => {
+      const variants = oneofFor(p.type)?.fieldNumbers;
+      return variants ? Math.min(...variants) : p.fieldNumber!;
+    };
     const sorted = [...flattenObjectProperties(plan.ir)].sort(
-      (a, b) => a.fieldNumber! - b.fieldNumber!
+      (a, b) => numberOf(a) - numberOf(b)
     );
 
     for (const p of sorted) {
-      const fn = p.fieldNumber!;
       const prop = JSON.stringify(p.name);
       const access = `val[${prop}]`;
-      const pType = p.type;
+
+      // ---- oneof ----------------------------------------------------------
+      const oneof = oneofFor(p.type);
+      if (oneof?.fieldNumbers) {
+        const local = `oneof${numberOf(p)}`;
+        encodeLines.push(`  const ${local} = ${access};`);
+        encodeLines.push(`  if (${local} !== undefined && ${local} !== null) {`);
+
+        oneof.types.forEach((variant, index) => {
+          const n = oneof.fieldNumbers![index]!;
+          const nested = messageId.get(messageTarget(variant) ?? variant);
+          const check = variantCheck(variant, oneof, local);
+          const branch = index === 0 ? "if" : "} else if";
+
+          encodeLines.push(`    ${branch} (${check}) {`);
+          if (nested !== undefined) {
+            encodeLines.push(`      o += writeVarint(buf, o, ${(n << 3) | 2});`);
+            encodeLines.push(
+              ...lengthDelimited([`o = encodeMsg${nested}(${local}, buf, o, view);`], "      ")
+            );
+          } else {
+            const codec = scalarCodecFor(variant, p) ?? JSON_FALLBACK;
+            encodeLines.push(`      o += writeVarint(buf, o, ${(n << 3) | codec.wire});`);
+            encodeLines.push(`      ${codec.write(local)}`);
+          }
+
+          decodeCases.push(`      case ${n}: {`);
+          if (nested !== undefined) {
+            decodeCases.push(`        let len; [len, o] = readVarint(buf, o);`);
+            decodeCases.push(`        obj[${prop}] = decodeMsg${nested}(buf, o, o + len, view);`);
+            decodeCases.push(`        o += len;`);
+          } else {
+            const codec = scalarCodecFor(variant, p) ?? JSON_FALLBACK;
+            decodeCases.push(`        ${codec.read}`);
+            decodeCases.push(`        obj[${prop}] = ${codec.lift("res")};`);
+          }
+          decodeCases.push(`        break;`);
+          decodeCases.push(`      }`);
+        });
+
+        encodeLines.push(`    }`);
+        encodeLines.push(`  }`);
+        continue;
+      }
+
+      const fn = p.fieldNumber!;
+      const pType = wireFieldType(p.type);
 
       const embedded = messageTarget(pType);
 
@@ -663,6 +890,18 @@ function mapIRToProtoType(ir: TypeIR, carrier?: Annotated): string {
   }
 }
 
+/**
+ * A protobuf field name for a `oneof` variant.
+ *
+ * `oneof` members are named fields, but the TypeScript union offers no names,
+ * so the variant's own type name is used where it has one.
+ */
+function variantFieldName(ir: TypeIR, index: number): string {
+  const base = unwrapNullable(ir).name;
+  if (!base) return `variant_${index + 1}`;
+  return base.charAt(0).toLowerCase() + base.slice(1);
+}
+
 export function generateProtobufSchemaCode(
   types: Array<{ name: string; ir: TypeIR }>
 ): string {
@@ -680,11 +919,19 @@ export function generateProtobufSchemaCode(
     }
   }
 
-  // Validate that every property across all named types has a @fieldNumber
+  // Every property must be numbered, whether directly or through its variants.
   for (const [typeName, typeIR] of allNamedTypes.entries()) {
-    const props = flattenObjectProperties(typeIR);
-    for (const prop of props) {
-      if (prop.fieldNumber === undefined || Number.isNaN(prop.fieldNumber)) {
+    for (const prop of flattenObjectProperties(typeIR)) {
+      const oneof = oneofFor(prop.type);
+      if (oneof && !oneof.fieldNumbers) {
+        const errMessage = `[wiz] Property '${prop.name}' on type '${typeName}' is a union, which protobuf encodes as a 'oneof' and so needs a field number per variant. Declare it as NumberedUnion<{ 1: A; 2: B }> instead of A | B.`;
+        return [
+          `export function protobufSchema(options = {}) {`,
+          `  throw new Error(${JSON.stringify(errMessage)});`,
+          `}`,
+        ].join("\n");
+      }
+      if (!oneof && (prop.fieldNumber === undefined || Number.isNaN(prop.fieldNumber))) {
         const errMessage = `[wiz] Property '${prop.name}' on type '${typeName}' is missing required '@fieldNumber <N>' JSDoc tag for protobuf schema generation.`;
         return [
           `export function protobufSchema(options = {}) {`,
@@ -705,6 +952,8 @@ export function generateProtobufSchemaCode(
       fieldNumber: number;
       comments: string[];
       options: string[];
+      /** Set when this entry belongs to a `oneof` of that name. */
+      oneof?: string;
     }>;
   }> = [];
 
@@ -724,12 +973,17 @@ export function generateProtobufSchemaCode(
       });
     } else {
       const props = flattenObjectProperties(typeIR);
-      const sortedProps = [...props].sort((a, b) => a.fieldNumber! - b.fieldNumber!);
+      const numberOf = (p: PropertyIR): number => {
+        const variants = oneofFor(p.type)?.fieldNumbers;
+        return variants ? Math.min(...variants) : p.fieldNumber!;
+      };
+      const sortedProps = [...props].sort((a, b) => numberOf(a) - numberOf(b));
+
       typeDefs.push({
         name: typeName,
         isEnum: false,
         description: typeIR.description,
-        entries: sortedProps.map((p) => {
+        entries: sortedProps.flatMap((p) => {
           const comments: string[] = [];
           if (p.description) {
             comments.push(p.description);
@@ -743,13 +997,30 @@ export function generateProtobufSchemaCode(
           if (p.deprecated?.isDeprecated) {
             options.push("deprecated = true");
           }
-          return {
-            name: p.name,
-            type: mapIRToProtoType(p.type, p),
-            fieldNumber: p.fieldNumber!,
-            comments,
-            options,
-          };
+
+          const oneof = oneofFor(p.type);
+          if (oneof?.fieldNumbers) {
+            // Variants are named after their type; protobuf needs a field name
+            // per member and the TypeScript side has none to offer.
+            return oneof.types.map((variant, index) => ({
+              name: variantFieldName(variant, index),
+              type: mapIRToProtoType(variant, p),
+              fieldNumber: oneof.fieldNumbers![index]!,
+              comments: index === 0 ? comments : [],
+              options,
+              oneof: p.name,
+            }));
+          }
+
+          return [
+            {
+              name: p.name,
+              type: mapIRToProtoType(wireFieldType(p.type), p),
+              fieldNumber: p.fieldNumber!,
+              comments,
+              options,
+            },
+          ];
         }),
       });
     }
@@ -780,15 +1051,23 @@ export function generateProtobufSchemaCode(
     `      lines.push('}');`,
     `    } else {`,
     `      lines.push('message ' + def.name + ' {');`,
+    `      let openOneof = null;`,
     `      for (const entry of def.entries) {`,
+    `        if (entry.oneof !== openOneof) {`,
+    `          if (openOneof !== null) lines.push(indent + '}');`,
+    `          if (entry.oneof) lines.push(indent + 'oneof ' + entry.oneof + ' {');`,
+    `          openOneof = entry.oneof ?? null;`,
+    `        }`,
+    `        const pad = entry.oneof ? indent + indent : indent;`,
     `        if (entry.comments && entry.comments.length > 0) {`,
     `          for (const c of entry.comments) {`,
-    `            lines.push(indent + '// ' + c);`,
+    `            lines.push(pad + '// ' + c);`,
     `          }`,
     `        }`,
     `        const optStr = entry.options && entry.options.length > 0 ? ' [' + entry.options.join(', ') + ']' : '';`,
-    `        lines.push(indent + entry.type + ' ' + entry.name + ' = ' + entry.fieldNumber + optStr + ';');`,
+    `        lines.push(pad + entry.type + ' ' + entry.name + ' = ' + entry.fieldNumber + optStr + ';');`,
     `      }`,
+    `      if (openOneof !== null) lines.push(indent + '}');`,
     `      lines.push('}');`,
     `    }`,
     `    lines.push('');`,
