@@ -1,7 +1,13 @@
 import type { BunPlugin } from "bun";
 import ts from "typescript";
 import { extractTypeIR } from "./ir/extractor.ts";
-import type { OpenApiOperationIR } from "./generators/openapi.ts";
+import {
+  type HttpMethodName,
+  type ServiceMethodBodyIR,
+  type ServiceMethodIR,
+  type ServiceMethodRequestIR,
+  type ServiceMethodResponseIR,
+} from "./ir/service.ts";
 import { defaultLogger, type WizLogger } from "./logger.ts";
 import { registerType, getTypeModule } from "./registry.ts";
 import {
@@ -41,96 +47,211 @@ function toOpenApiPath(path: string): string {
   return path.replace(/:([A-Za-z0-9_$]+)/g, "{$1}");
 }
 
+/** Builds an HTTP service method from its parts. */
+function httpMethodIR(
+  method: string,
+  path: string,
+  request: ServiceMethodRequestIR,
+  responses: ServiceMethodResponseIR[],
+  overrides?: string
+): ServiceMethodIR {
+  return {
+    kind: "serviceMethod",
+    protocol: "http",
+    address: {
+      protocol: "http",
+      method: method.toUpperCase() as HttpMethodName,
+      path: toOpenApiPath(path),
+    },
+    request,
+    responses,
+    overrides,
+  };
+}
+
 /**
  * Reads the `[openapiSchema.get<...>("/users"), ...]` argument.
  * Only inline array literals of direct builder calls are folded; anything else
  * is left alone so the runtime stub reports it loudly.
+ *
+ * This builder is positional by design (path, query, response, body); the
+ * route-map form uses the named `op<{ … }>` slots instead.
  */
 function collectOperations(
   arg: ts.Expression | undefined,
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile
-): OpenApiOperationIR[] {
+): ServiceMethodIR[] {
   if (!arg || !ts.isArrayLiteralExpression(arg)) return [];
 
-  const operations: OpenApiOperationIR[] = [];
+  const methods: ServiceMethodIR[] = [];
   for (const element of arg.elements) {
     if (!ts.isCallExpression(element)) continue;
     if (!ts.isPropertyAccessExpression(element.expression)) continue;
 
-    const method = element.expression.name.text.toLowerCase();
-    if (!HTTP_METHODS.has(method)) continue;
+    const httpMethod = element.expression.name.text.toLowerCase();
+    if (!HTTP_METHODS.has(httpMethod)) continue;
 
     const pathArg = element.arguments[0];
     if (!pathArg || !ts.isStringLiteralLike(pathArg)) continue;
 
     const optionsArg = element.arguments[1];
-    const [pathParams, queryParams, response, requestBody] =
-      (element.typeArguments ?? []).map((typeNode) =>
-        extractTypeIR(checker.getTypeFromTypeNode(typeNode), checker)
-      );
+    const [pathParams, queryParams, response, requestBody] = (
+      element.typeArguments ?? []
+    ).map((typeNode) =>
+      extractTypeIR(checker.getTypeFromTypeNode(typeNode), checker)
+    );
 
-    operations.push({
-      method,
-      path: toOpenApiPath(pathArg.text),
-      optionsSource: optionsArg ? optionsArg.getText(sourceFile) : undefined,
-      pathParams,
-      queryParams,
-      response,
-      requestBody,
-    });
+    const request: ServiceMethodRequestIR = { protocol: "http" };
+    if (pathParams && !isAbsent(pathParams)) request.pathParameters = pathParams;
+    if (queryParams && !isAbsent(queryParams)) {
+      request.queryParameters = queryParams;
+    }
+    if (requestBody && !isAbsent(requestBody)) {
+      request.body = [{ mimetype: JSON_MIME, content: requestBody }];
+    }
+
+    const responses: ServiceMethodResponseIR[] =
+      response && !isAbsent(response)
+        ? [
+            {
+              protocol: "http",
+              status: 200,
+              body: [{ mimetype: JSON_MIME, content: response }],
+            },
+          ]
+        : [{ protocol: "http", status: 204 }];
+
+    methods.push(
+      httpMethodIR(
+        httpMethod,
+        pathArg.text,
+        request,
+        responses,
+        optionsArg ? optionsArg.getText(sourceFile) : undefined
+      )
+    );
   }
-  return operations;
+  return methods;
 }
 
-/** Stable, content-addressable projection of an operation for hashing. */
-function operationKeyPart(op: OpenApiOperationIR): unknown {
+/** Stable, content-addressable projection of a service method for hashing. */
+function methodKeyPart(method: ServiceMethodIR): unknown {
+  const typeKey = (ir: TypeIR | undefined) => (ir ? normalizeTypeIR(ir) : null);
+  const bodyKey = (bodies: ServiceMethodBodyIR[] | undefined) =>
+    (bodies ?? []).map((b) => ({ m: b.mimetype, c: typeKey(b.content) }));
+
   return {
-    m: op.method,
-    p: op.path,
-    o: op.optionsSource ?? null,
-    t: [op.pathParams, op.queryParams, op.response, op.requestBody].map((ir) =>
-      ir ? normalizeTypeIR(ir) : null
-    ),
+    a: method.address,
+    o: method.overrides ?? null,
+    q: [
+      typeKey(method.request.pathParameters),
+      typeKey(method.request.queryParameters),
+      typeKey(method.request.headerParameters),
+      typeKey(method.request.cookieParameters),
+    ],
+    b: bodyKey(method.request.body),
+    r: method.responses.map((response) => ({
+      s: response.status,
+      b: bodyKey(response.body),
+    })),
   };
 }
+const JSON_MIME = "application/json";
+
 /** Slots understood inside an `op<{ … }>()` type argument. */
-const SPEC_SLOTS = ["path", "query", "body", "response"] as const;
+const SPEC_SLOTS = new Set([
+  "path",
+  "query",
+  "header",
+  "cookie",
+  "body",
+  "response",
+  "status",
+]);
+
+interface OperationSpec {
+  request: ServiceMethodRequestIR;
+  responses: ServiceMethodResponseIR[];
+}
+
+function isAbsent(ir: TypeIR | undefined): boolean {
+  if (!ir) return true;
+  return (
+    ir.kind === "primitive" &&
+    (ir.type === "never" || ir.type === "void" || ir.type === "undefined")
+  );
+}
 
 /**
- * Reads the single named-member type argument of `op<{ query: Q; … }>()`.
- * Named slots beat positional generics: callers omit what they do not use and
- * new slots can be added without shifting anyone's arguments.
+ * Reads the single named-member type argument of `op<{ query: Q; … }>()` into
+ * the request/response halves of a service method. Named slots beat positional
+ * generics: callers omit what they do not use and new slots can be added
+ * without shifting anyone's arguments.
  */
 function readOperationSpec(
   call: ts.CallExpression,
-  checker: ts.TypeChecker
-): Partial<OpenApiOperationIR> {
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  logger: WizLogger
+): OperationSpec {
+  const request: ServiceMethodRequestIR = { protocol: "http" };
   const specNode = call.typeArguments?.[0];
-  if (!specNode) return {};
+  if (!specNode) {
+    return { request, responses: [{ protocol: "http", status: 204 }] };
+  }
 
   const specIR = extractTypeIR(checker.getTypeFromTypeNode(specNode), checker);
   const slots = new Map(
     flattenObjectProperties(specIR).map((p) => [p.name, p])
   );
 
-  const spec: Partial<OpenApiOperationIR> = {};
-  for (const slot of SPEC_SLOTS) {
-    const property = slots.get(slot);
-    if (!property) continue;
-    if (slot === "path") spec.pathParams = property.type;
-    else if (slot === "query") spec.queryParams = property.type;
-    else if (slot === "body") spec.requestBody = property.type;
-    else spec.response = property.type;
+  for (const name of slots.keys()) {
+    if (!SPEC_SLOTS.has(name)) {
+      warnUndocumentable(
+        logger,
+        `unknown op slot "${name}"; expected one of ${[...SPEC_SLOTS].join(", ")}`,
+        specNode,
+        sourceFile
+      );
+    }
+  }
+
+  const slotType = (name: string) => {
+    const property = slots.get(name);
+    return property && !isAbsent(property.type) ? property.type : undefined;
+  };
+
+  request.pathParameters = slotType("path");
+  request.queryParameters = slotType("query");
+  request.headerParameters = slotType("header");
+  request.cookieParameters = slotType("cookie");
+
+  const body = slotType("body");
+  if (body) {
+    request.body = [{ mimetype: JSON_MIME, content: body }];
   }
 
   // `status: 201` is a numeric literal type, not a payload schema.
-  const status = slots.get("status");
-  if (status?.type.kind === "literal" && typeof status.type.value === "number") {
-    spec.status = status.type.value;
-  }
+  const statusSlot = slots.get("status");
+  const status =
+    statusSlot?.type.kind === "literal" &&
+    typeof statusSlot.type.value === "number"
+      ? statusSlot.type.value
+      : undefined;
 
-  return spec;
+  const response = slotType("response");
+  const responses: ServiceMethodResponseIR[] = [
+    response
+      ? {
+          protocol: "http",
+          status: status ?? 200,
+          body: [{ mimetype: JSON_MIME, content: response }],
+        }
+      : { protocol: "http", status: status ?? 204 },
+  ];
+
+  return { request, responses };
 }
 
 /** Unwraps `op<…>(handler)` / `openapiSchema.op<…>(handler)`, else undefined. */
@@ -181,7 +302,7 @@ function collectRouteOperations(
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   logger: WizLogger
-): OpenApiOperationIR[] {
+): ServiceMethodIR[] {
   if (!arg) return [];
   if (!ts.isObjectLiteralExpression(arg)) {
     warnUndocumentable(
@@ -194,23 +315,33 @@ function collectRouteOperations(
     return [];
   }
 
-  const operations: OpenApiOperationIR[] = [];
+  const methods: ServiceMethodIR[] = [];
 
   const push = (
     path: string,
-    method: string,
+    httpMethod: string,
     value: ts.Expression | undefined
   ) => {
     const call = value ? asOperationCall(value) : undefined;
-    const optionsArg = call?.arguments[1];
-    const openApiPath = toOpenApiPath(path);
-    logger.trace(`[wiz] documented ${method.toUpperCase()} ${openApiPath}`);
-    operations.push({
-      method,
-      path: openApiPath,
-      optionsSource: optionsArg ? optionsArg.getText(sourceFile) : undefined,
-      ...(call ? readOperationSpec(call, checker) : {}),
-    });
+    const spec = call
+      ? readOperationSpec(call, checker, sourceFile, logger)
+      : {
+          request: { protocol: "http" } as ServiceMethodRequestIR,
+          responses: [
+            { protocol: "http", status: 204 } as ServiceMethodResponseIR,
+          ],
+        };
+    const method = httpMethodIR(
+      httpMethod,
+      path,
+      spec.request,
+      spec.responses,
+      call?.arguments[1]?.getText(sourceFile)
+    );
+    logger.trace(
+      `[wiz] documented ${method.address.method} ${method.address.path}`
+    );
+    methods.push(method);
   };
 
   for (const property of arg.properties) {
@@ -301,7 +432,7 @@ function collectRouteOperations(
     push(path, "get", value);
   }
 
-  return operations;
+  return methods;
 }
 /** Reads `"3.0"` / `3.0` from the second type argument; defaults to 3.1. */
 function readOpenApiVersion(call: ts.CallExpression): "3.0" | "3.1" {
@@ -486,13 +617,13 @@ export function wizPlugin(options: WizPluginOptions = {}): BunPlugin {
                   checker
                 );
                 const routesHash = `routes_${fnv1a(
-                  JSON.stringify(routeOperations.map(operationKeyPart))
+                  JSON.stringify(routeOperations.map(methodKeyPart))
                 )}`;
 
                 registerType(routesHash, callIR, {
                   openApiTypes: [],
                   openApiVersion: readVersionFromBase(node.arguments[adapter.base]),
-                  openApiOperations: routeOperations,
+                  service: { kind: "service", methods: routeOperations },
                 });
 
                 if (!virtualImports.has(routesHash)) {
@@ -634,7 +765,7 @@ export function wizPlugin(options: WizPluginOptions = {}): BunPlugin {
                         openApiTypes.push({ name, ir: elemIR });
                       }
 
-                      const openApiOperations = collectOperations(
+                      const serviceMethods = collectOperations(
                         node.arguments[1],
                         checker,
                         sourceFile
@@ -643,14 +774,14 @@ export function wizPlugin(options: WizPluginOptions = {}): BunPlugin {
                       // The leading type argument is often `[]` when every type
                       // arrives through operations, so the operations must take
                       // part in the module key or distinct documents collide.
-                      const opHash = openApiOperations.length > 0
-                        ? `${hash}_ops_${fnv1a(JSON.stringify(openApiOperations.map(operationKeyPart)))}`
+                      const opHash = serviceMethods.length > 0
+                        ? `${hash}_ops_${fnv1a(JSON.stringify(serviceMethods.map(methodKeyPart)))}`
                         : hash;
 
                       registerType(opHash, ir, {
                         openApiTypes,
                         openApiVersion,
-                        openApiOperations,
+                        service: { kind: "service", methods: serviceMethods },
                       });
 
                       if (!virtualImports.has(opHash)) {

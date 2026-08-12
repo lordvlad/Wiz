@@ -2,7 +2,8 @@ import type { TypeIR } from "../types.ts";
 import { generateKeysCode } from "./keys.ts";
 import { generateSchemaCode } from "./schema.ts";
 import { generateValidatorCode } from "./validator.ts";
-import { generateOpenApiSchemaCode, type OpenApiOperationIR } from "./openapi.ts";
+import { generateOpenApiSchemaCode } from "./openapi.ts";
+import type { ServiceIR } from "../ir/service.ts";
 import {
   generateProtobufCode,
   generateProtobufSchemaCode,
@@ -11,7 +12,8 @@ import {
 export interface VirtualModuleOptions {
   openApiTypes?: Array<{ name: string; ir: TypeIR }>;
   openApiVersion?: "3.0" | "3.1";
-  openApiOperations?: OpenApiOperationIR[];
+  /** Methods harvested from route maps or the path builder. */
+  service?: ServiceIR;
   protobufSchemaTypes?: Array<{ name: string; ir: TypeIR }>;
 }
 
@@ -33,12 +35,12 @@ export function generateVirtualModuleCode(
   ];
 
   // An empty `openApiTypes` array is still a request for an OpenAPI document:
-  // `openapiSchema<[]>(base, [...ops])` carries all its content in operations.
-  if (options?.openApiTypes || options?.openApiOperations) {
+  // `openapiSchema<[]>(base, [...ops])` carries all its content in methods.
+  if (options?.openApiTypes || options?.service) {
     const openapiCode = generateOpenApiSchemaCode(
       options.openApiTypes ?? [],
       options.openApiVersion ?? "3.1",
-      options.openApiOperations ?? []
+      options.service
     );
     parts.push(openapiCode);
   }

@@ -3,7 +3,12 @@ import { describe, expect, test } from "bun:test";
 import { plugin } from "bun";
 import { wizPlugin } from "../src/plugin.ts";
 import { generateOpenApiSchemaCode } from "../src/generators/openapi.ts";
-import { evalModule, getIRsForSource } from "./helpers.ts";
+import {
+  evalModule,
+  getIRsForSource,
+  httpMethod,
+  service,
+} from "./helpers.ts";
 
 plugin(wizPlugin());
 
@@ -34,22 +39,26 @@ describe("OpenAPI path builder (generator)", () => {
       "UserList",
     ]);
 
-    const code = generateOpenApiSchemaCode([], "3.0", [
-      {
-        method: "get",
-        path: "/users",
-        queryParams: irs.UserQuery.ir,
-        response: irs.UserList.ir,
-      },
-      {
-        method: "patch",
-        path: "/users/{id}",
-        pathParams: irs.PathParams.ir,
-        response: irs.User.ir,
-        requestBody: irs.User.ir,
-        optionsSource: `{ tags: ["User"], description: "Patch a user" }`,
-      },
-    ]);
+    const code = generateOpenApiSchemaCode(
+      [],
+      "3.0",
+      service([
+        httpMethod({
+          method: "get",
+          path: "/users",
+          queryParameters: irs.UserQuery.ir,
+          response: irs.UserList.ir,
+        }),
+        httpMethod({
+          method: "patch",
+          path: "/users/{id}",
+          pathParameters: irs.PathParams.ir,
+          response: irs.User.ir,
+          body: irs.User.ir,
+          overrides: `{ tags: ["User"], description: "Patch a user" }`,
+        }),
+      ])
+    );
 
     const doc = evalModule<{ openapiSchema: (base?: unknown) => any }>(
       code
@@ -93,10 +102,23 @@ describe("OpenAPI path builder (generator)", () => {
   test("collapses several methods onto one path item and defaults empty responses to 204", () => {
     const irs = getIRsForSource(sourceCode, ["PathParams", "User"]);
 
-    const code = generateOpenApiSchemaCode([], "3.1", [
-      { method: "get", path: "/users/{id}", pathParams: irs.PathParams.ir, response: irs.User.ir },
-      { method: "delete", path: "/users/{id}", pathParams: irs.PathParams.ir },
-    ]);
+    const code = generateOpenApiSchemaCode(
+      [],
+      "3.1",
+      service([
+        httpMethod({
+          method: "get",
+          path: "/users/{id}",
+          pathParameters: irs.PathParams.ir,
+          response: irs.User.ir,
+        }),
+        httpMethod({
+          method: "delete",
+          path: "/users/{id}",
+          pathParameters: irs.PathParams.ir,
+        }),
+      ])
+    );
 
     const doc = evalModule<{ openapiSchema: (base?: unknown) => any }>(
       code
@@ -112,9 +134,13 @@ describe("OpenAPI path builder (generator)", () => {
   test("merges generated paths with paths supplied on the base document", () => {
     const irs = getIRsForSource(sourceCode, ["User"]);
 
-    const code = generateOpenApiSchemaCode([], "3.0", [
-      { method: "get", path: "/users", response: irs.User.ir },
-    ]);
+    const code = generateOpenApiSchemaCode(
+      [],
+      "3.0",
+      service([
+        httpMethod({ method: "get", path: "/users", response: irs.User.ir }),
+      ])
+    );
 
     const doc = evalModule<{ openapiSchema: (base?: unknown) => any }>(
       code

@@ -1,6 +1,12 @@
 import ts from "typescript";
 import { extractTypeIR } from "../src/ir/extractor.ts";
 import type { TypeIR } from "../src/types.ts";
+import type {
+  HttpMethodName,
+  ServiceIR,
+  ServiceMethodIR,
+  ServiceMethodRequestIR,
+} from "../src/ir/service.ts";
 
 const VIRTUAL_ENTRY = "test.ts";
 
@@ -127,4 +133,47 @@ export function evalModule<T>(code: string): T {
   return new Function(
     `${code.replace(/export /g, "")}\nreturn { ${collected} };`
   )() as T;
+}
+/** Concise `ServiceMethodIR` builder for generator tests. */
+export function httpMethod(spec: {
+  method: string;
+  path: string;
+  pathParameters?: TypeIR;
+  queryParameters?: TypeIR;
+  body?: TypeIR;
+  response?: TypeIR;
+  status?: number;
+  overrides?: string;
+}): ServiceMethodIR {
+  const request: ServiceMethodRequestIR = { protocol: "http" };
+  if (spec.pathParameters) request.pathParameters = spec.pathParameters;
+  if (spec.queryParameters) request.queryParameters = spec.queryParameters;
+  if (spec.body) {
+    request.body = [{ mimetype: "application/json", content: spec.body }];
+  }
+
+  return {
+    kind: "serviceMethod",
+    protocol: "http",
+    address: {
+      protocol: "http",
+      method: spec.method.toUpperCase() as HttpMethodName,
+      path: spec.path,
+    },
+    request,
+    responses: [
+      spec.response
+        ? {
+            protocol: "http",
+            status: spec.status ?? 200,
+            body: [{ mimetype: "application/json", content: spec.response }],
+          }
+        : { protocol: "http", status: spec.status ?? 204 },
+    ],
+    overrides: spec.overrides,
+  };
+}
+
+export function service(methods: ServiceMethodIR[]): ServiceIR {
+  return { kind: "service", methods };
 }

@@ -5,6 +5,12 @@ import {
   type Constraint,
   type TypeIR,
 } from "../types.ts";
+import {
+  emptyService,
+  type ServiceIR,
+  type ServiceMethodBodyIR,
+  type ServiceMethodIR,
+} from "../ir/service.ts";
 
 function applyConstraints(
   schema: Record<string, unknown>,
@@ -234,24 +240,7 @@ export function irToOpenApiSchema(
   return schema;
 }
 
-/**
- * A single compile-time `openapiSchema.<method>()` call site.
- * `optionsSource` is verbatim JS from the callsite so literal option objects
- * survive into the generated document without being re-serialized.
- */
-export interface OpenApiOperationIR {
-  method: string;
-  path: string;
-  optionsSource?: string;
-  pathParams?: TypeIR;
-  queryParams?: TypeIR;
-  response?: TypeIR;
-  requestBody?: TypeIR;
-  /** Success status code; defaults to 200, or 204 when there is no response. */
-  status?: number;
-}
-
-/** `never`/`void`/`undefined` in a slot means "this operation has none". */
+/** `never`/`void`/`undefined` in a slot means "this method has none". */
 function isAbsentIR(ir: TypeIR | undefined): boolean {
   if (!ir) return true;
   return (
@@ -262,7 +251,7 @@ function isAbsentIR(ir: TypeIR | undefined): boolean {
 
 function parametersFor(
   ir: TypeIR | undefined,
-  location: "path" | "query",
+  location: "path" | "query" | "header" | "cookie",
   version: "3.0" | "3.1"
 ): Record<string, unknown>[] {
   if (isAbsentIR(ir)) return [];
@@ -282,60 +271,80 @@ function parametersFor(
   });
 }
 
+/** `{ "application/json": { schema } }` for each media type on a payload. */
+function contentFor(
+  bodies: ServiceMethodBodyIR[] | undefined,
+  version: "3.0" | "3.1"
+): Record<string, unknown> | undefined {
+  if (!bodies || bodies.length === 0) return undefined;
+  const content: Record<string, unknown> = {};
+  for (const body of bodies) {
+    if (isAbsentIR(body.content)) continue;
+    content[body.mimetype] = {
+      schema: irToOpenApiSchema(body.content, version, false),
+    };
+  }
+  return Object.keys(content).length > 0 ? content : undefined;
+}
+
 /**
  * Renders one operation object. Generated fields come first so that an explicit
- * option (`description`, or even a hand-written `responses`) overrides them.
+ * override (`description`, or even a hand-written `responses`) wins.
  */
-function operationSource(op: OpenApiOperationIR, version: "3.0" | "3.1"): string {
+function operationSource(
+  method: ServiceMethodIR,
+  version: "3.0" | "3.1"
+): string {
   const operation: Record<string, unknown> = {};
 
+  if (method.tags) operation.tags = method.tags;
+  if (method.summary) operation.summary = method.summary;
+  if (method.description) operation.description = method.description;
+  if (method.operationId) operation.operationId = method.operationId;
+  if (method.deprecated) operation.deprecated = true;
+
   const parameters = [
-    ...parametersFor(op.pathParams, "path", version),
-    ...parametersFor(op.queryParams, "query", version),
+    ...parametersFor(method.request.pathParameters, "path", version),
+    ...parametersFor(method.request.queryParameters, "query", version),
+    ...parametersFor(method.request.headerParameters, "header", version),
+    ...parametersFor(method.request.cookieParameters, "cookie", version),
   ];
   if (parameters.length > 0) operation.parameters = parameters;
 
-  if (!isAbsentIR(op.requestBody)) {
+  const requestContent = contentFor(method.request.body, version);
+  if (requestContent) {
     operation.requestBody = {
-      required: true,
-      content: {
-        "application/json": {
-          schema: irToOpenApiSchema(op.requestBody!, version, false),
-        },
-      },
+      required: method.request.bodyRequired ?? true,
+      content: requestContent,
     };
   }
 
-  const noBody = isAbsentIR(op.response);
-  const status = String(op.status ?? (noBody ? 204 : 200));
-  operation.responses = noBody
-    ? { [status]: { description: "No content" } }
-    : {
-        [status]: {
-          description: "Successful response",
-          content: {
-            "application/json": {
-              schema: irToOpenApiSchema(op.response!, version, false),
-            },
-          },
-        },
-      };
+  const responses: Record<string, unknown> = {};
+  for (const response of method.responses) {
+    const content = contentFor(response.body, version);
+    responses[String(response.status)] = {
+      description:
+        response.description ?? (content ? "Successful response" : "No content"),
+      ...(content ? { content } : {}),
+    };
+  }
+  operation.responses = responses;
 
   const generated = JSON.stringify(operation, null, 2);
-  return op.optionsSource
-    ? `{ ...${generated}, ...(${op.optionsSource}) }`
+  return method.overrides
+    ? `{ ...${generated}, ...(${method.overrides}) }`
     : generated;
 }
 
-function pathsSource(
-  operations: OpenApiOperationIR[],
-  version: "3.0" | "3.1"
-): string {
+function pathsSource(service: ServiceIR, version: "3.0" | "3.1"): string {
   const byPath = new Map<string, Array<[string, string]>>();
-  for (const op of operations) {
-    const methods = byPath.get(op.path) ?? [];
-    methods.push([op.method, operationSource(op, version)]);
-    byPath.set(op.path, methods);
+  for (const method of service.methods) {
+    const entries = byPath.get(method.address.path) ?? [];
+    entries.push([
+      method.address.method.toLowerCase(),
+      operationSource(method, version),
+    ]);
+    byPath.set(method.address.path, entries);
   }
 
   const pathEntries = [...byPath.entries()].map(([path, methods]) => {
@@ -348,10 +357,30 @@ function pathsSource(
   return `{\n${pathEntries.join(",\n")}\n}`;
 }
 
+/** Every TypeIR a method references, for component hoisting. */
+function typesReferencedBy(method: ServiceMethodIR): TypeIR[] {
+  const referenced: TypeIR[] = [];
+  const { request } = method;
+  for (const ir of [
+    request.pathParameters,
+    request.queryParameters,
+    request.headerParameters,
+    request.cookieParameters,
+  ]) {
+    if (ir) referenced.push(ir);
+  }
+  for (const body of request.body ?? []) referenced.push(body.content);
+  for (const response of method.responses) {
+    for (const body of response.body ?? []) referenced.push(body.content);
+    if (response.headers) referenced.push(response.headers);
+  }
+  return referenced;
+}
+
 export function generateOpenApiSchemaCode(
   types: Array<{ name: string; ir: TypeIR }>,
   version: "3.0" | "3.1",
-  operations: OpenApiOperationIR[] = []
+  service: ServiceIR = emptyService()
 ): string {
   const schemasObj: Record<string, unknown> = {};
   const allNamedTypes = new Map<string, TypeIR>();
@@ -369,11 +398,9 @@ export function generateOpenApiSchemaCode(
     collect(ir);
   }
 
-  // Operation payload types contribute component schemas too.
-  for (const op of operations) {
-    for (const ir of [op.pathParams, op.queryParams, op.response, op.requestBody]) {
-      if (ir) collect(ir);
-    }
+  // Method payload types contribute component schemas too.
+  for (const method of service.methods) {
+    for (const ir of typesReferencedBy(method)) collect(ir);
   }
 
   for (const [name, ir] of allNamedTypes.entries()) {
@@ -387,7 +414,7 @@ export function generateOpenApiSchemaCode(
     `  const components = baseSchema.components || {};`,
     `  const schemas = components.schemas || {};`,
     `  const basePaths = baseSchema.paths || {};`,
-    `  const generatedPaths = ${pathsSource(operations, version)};`,
+    `  const generatedPaths = ${pathsSource(service, version)};`,
     `  const paths = { ...basePaths };`,
     `  for (const pathKey of Object.keys(generatedPaths)) {`,
     `    paths[pathKey] = { ...(paths[pathKey] || {}), ...generatedPaths[pathKey] };`,

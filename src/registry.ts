@@ -22,7 +22,7 @@ export function registerType(
     // types) are not part of the type key, so they force a regeneration.
     const carriesGeneratorPayload =
       Boolean(options?.openApiTypes) ||
-      Boolean(options?.openApiOperations?.length) ||
+      Boolean(options?.service?.methods.length) ||
       Boolean(options?.protobufSchemaTypes?.length);
 
     if (carriesGeneratorPayload) {
