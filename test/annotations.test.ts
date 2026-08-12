@@ -35,6 +35,7 @@ const annotated = `
     /**
      * @since 1.4.0
      * @author Ada
+     * @author Grace
      * @internal
      */
     secret: string;
@@ -75,12 +76,11 @@ describe("annotation extraction", () => {
     ]);
     expect(prop("email").description).toBe("Contact address");
   });
-
-  test("unmodelled tags are preserved in meta", () => {
+  test("unmodelled tags are preserved in meta, repeats included", () => {
     expect(prop("secret").meta).toEqual({
-      since: "1.4.0",
-      author: "Ada",
-      internal: true,
+      since: ["1.4.0"],
+      author: ["Ada", "Grace"],
+      internal: [true],
     });
   });
 
@@ -198,7 +198,7 @@ describe("type level annotations", () => {
     );
 
     expect(ir.examples).toEqual([{ id: 1 }]);
-    expect(ir.meta).toEqual({ since: "2.0.0" });
+    expect(ir.meta).toEqual({ since: ["2.0.0"] });
     expect(ir.description).toBe("A user record");
 
     const doc = evalModule<{ openapiSchema: () => any }>(

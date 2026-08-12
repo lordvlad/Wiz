@@ -91,7 +91,7 @@ function parseAnnotationValue(text: string): unknown {
 export interface JSDocInfo extends Annotated {
   constraints: Constraint[];
   examples: unknown[];
-  meta: Record<string, string | true>;
+  meta: Record<string, (string | true)[]>;
   fieldNumber?: number;
 }
 
@@ -101,7 +101,7 @@ function extractJSDocInfo(
 ): JSDocInfo {
   const constraints: Constraint[] = [];
   const examples: unknown[] = [];
-  const meta: Record<string, string | true> = {};
+  const meta: Record<string, (string | true)[]> = {};
   let deprecated: DeprecatedInfo | undefined;
   let description: string | undefined;
   let defaultValue: unknown;
@@ -175,7 +175,7 @@ function extractJSDocInfo(
 
     // Anything wiz does not model is preserved rather than discarded.
     if (!HANDLED_TAGS.has(tagName)) {
-      meta[tag.name] = tagText === "" ? true : tagText;
+      (meta[tag.name] ??= []).push(tagText === "" ? true : tagText);
     }
   }
 

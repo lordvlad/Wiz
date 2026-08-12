@@ -43,8 +43,9 @@ export interface DeprecatedInfo {
  * `constraints` narrow the set of valid values; the rest only describe it.
  * `meta` is the catch-all for tags wiz does not model — `@since`, `@author`,
  * `@internal` and so on — so nothing in a doc comment is silently lost.
- * A bare tag records `true`; a tag with text records that text. Repeated tags
- * keep the last occurrence.
+ * A bare tag records `true`; a tag with text records that text. Values are
+ * always arrays: `@see` and friends legitimately repeat, and collapsing them
+ * would discard everything but the last.
  */
 export interface Annotated {
   description?: string;
@@ -54,8 +55,8 @@ export interface Annotated {
   examples?: unknown[];
   /** `@default` value, JSON-parsed when possible. */
   default?: unknown;
-  /** Unrecognised JSDoc tags, verbatim. */
-  meta?: Record<string, string | true>;
+  /** Unrecognised JSDoc tags, verbatim, in source order. */
+  meta?: Record<string, (string | true)[]>;
 }
 
 export interface BaseTypeIR extends Annotated {
