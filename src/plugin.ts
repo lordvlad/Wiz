@@ -29,6 +29,9 @@ const HELPER_FUNCTIONS = new Set([
   "encodeProto",
   "decodeProto",
   "protobufSchema",
+  "encodeAvro",
+  "decodeAvro",
+  "avroSchema",
 ]);
 
 const HTTP_METHODS = new Set([
@@ -845,6 +848,50 @@ export function wizPlugin(options: WizPluginOptions = {}): BunPlugin {
                         visitedArgs
                       );
                     }
+                    case "encodeAvro": {
+                      exportSet.add("encodeAvro");
+                      const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
+                      return context.factory.createCallExpression(
+                        context.factory.createIdentifier(`__wiz_encodeAvro_${hash}`),
+                        undefined,
+                        visitedArgs
+                      );
+                    }
+                    case "decodeAvro": {
+                      exportSet.add("decodeAvro");
+                      const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
+                      return context.factory.createCallExpression(
+                        context.factory.createIdentifier(`__wiz_decodeAvro_${hash}`),
+                        undefined,
+                        visitedArgs
+                      );
+                    }
+                    case "avroSchema": {
+                      exportSet.add("avroSchema");
+
+                      const avroSchemaTypes: Array<{ name: string; ir: TypeIR }> = [];
+                      let avroArgs: readonly ts.Type[] = checker.isTupleType(tsType)
+                        ? checker.getTypeArguments(tsType as ts.TypeReference)
+                        : [tsType];
+
+                      for (const elemType of avroArgs) {
+                        const elemIR = extractTypeIR(elemType, checker);
+                        const sym = elemType.aliasSymbol ?? elemType.symbol;
+                        const name = sym && !sym.name.startsWith("__")
+                          ? sym.name
+                          : (elemIR.name ?? `Schema_${avroSchemaTypes.length + 1}`);
+                        avroSchemaTypes.push({ name, ir: elemIR });
+                      }
+
+                      registerType(hash, ir, { avroSchemaTypes });
+
+                      const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
+                      return context.factory.createCallExpression(
+                        context.factory.createIdentifier(`__wiz_avroSchema_${hash}`),
+                        undefined,
+                        visitedArgs
+                      );
+                    }
                   }
                 }
               }
@@ -921,6 +968,21 @@ export function wizPlugin(options: WizPluginOptions = {}): BunPlugin {
           if (exportsSet.has("protobufSchema")) {
             specifiers.push(
               contextSpecifier("protobufSchema", `__wiz_protobufSchema_${hash}`)
+            );
+          }
+          if (exportsSet.has("encodeAvro")) {
+            specifiers.push(
+              contextSpecifier("encodeAvro", `__wiz_encodeAvro_${hash}`)
+            );
+          }
+          if (exportsSet.has("decodeAvro")) {
+            specifiers.push(
+              contextSpecifier("decodeAvro", `__wiz_decodeAvro_${hash}`)
+            );
+          }
+          if (exportsSet.has("avroSchema")) {
+            specifiers.push(
+              contextSpecifier("avroSchema", `__wiz_avroSchema_${hash}`)
             );
           }
 

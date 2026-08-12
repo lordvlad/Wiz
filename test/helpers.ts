@@ -124,6 +124,9 @@ export function evalModule<T>(code: string): T {
     "encodeProto",
     "decodeProto",
     "protobufSchema",
+    "encodeAvro",
+    "decodeAvro",
+    "avroSchema",
   ];
 
   const collected = exportNames

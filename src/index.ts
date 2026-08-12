@@ -218,6 +218,19 @@ export function protobufSchema<TTypes extends unknown[]>(
 ): string {
   throw new PluginInactiveError("protobufSchema");
 }
+export function encodeAvro<T>(_val: T, _buf: Uint8Array, _offset = 0): number {
+  throw new PluginInactiveError("encodeAvro");
+}
+
+export function decodeAvro<T>(_buf: Uint8Array, _offset = 0): T {
+  throw new PluginInactiveError("decodeAvro");
+}
+
+export function avroSchema<TTypes extends unknown[]>(
+  _options?: { indent?: string }
+): string {
+  throw new PluginInactiveError("avroSchema");
+}
 
 // `wizPlugin` is deliberately NOT re-exported here: it pulls in the TypeScript
 // compiler, and importing the runtime must never drag that into an app bundle.

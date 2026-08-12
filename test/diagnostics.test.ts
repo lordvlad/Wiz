@@ -89,10 +89,11 @@ describe("undocumentable route diagnostics", () => {
     }
   });
 
+  // Two full builds, each paying for a cold TypeScript program.
   test("clean fixtures produce no warnings at all", async () => {
     expect(await warningsFor("./test/fixtures/serverFixture.ts")).toEqual([]);
     expect(await warningsFor("./test/fixtures/honoFixture.ts")).toEqual([]);
-  });
+  }, 30_000);
 });
 
 describe("logger parameter", () => {

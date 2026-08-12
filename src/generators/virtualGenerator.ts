@@ -8,6 +8,7 @@ import {
   generateProtobufCode,
   generateProtobufSchemaCode,
 } from "./protobuf.ts";
+import { generateAvroCode, generateAvroSchemaCode } from "./avro.ts";
 
 export interface VirtualModuleOptions {
   openApiTypes?: Array<{ name: string; ir: TypeIR }>;
@@ -15,6 +16,7 @@ export interface VirtualModuleOptions {
   /** Methods harvested from route maps or the path builder. */
   service?: ServiceIR;
   protobufSchemaTypes?: Array<{ name: string; ir: TypeIR }>;
+  avroSchemaTypes?: Array<{ name: string; ir: TypeIR }>;
 }
 
 export function generateVirtualModuleCode(
@@ -25,6 +27,7 @@ export function generateVirtualModuleCode(
   const schemaCode = generateSchemaCode(ir);
   const validatorCode = generateValidatorCode(ir);
   const protoCode = generateProtobufCode(ir);
+  const avroCode = generateAvroCode(ir);
 
   const parts = [
     `// Auto-generated virtual module by wizPlugin`,
@@ -32,6 +35,7 @@ export function generateVirtualModuleCode(
     schemaCode,
     validatorCode,
     protoCode,
+    avroCode,
   ];
 
   // An empty `openApiTypes` array is still a request for an OpenAPI document:
@@ -50,6 +54,10 @@ export function generateVirtualModuleCode(
       options.protobufSchemaTypes
     );
     parts.push(protoSchemaCode);
+  }
+
+  if (options?.avroSchemaTypes && options.avroSchemaTypes.length > 0) {
+    parts.push(generateAvroSchemaCode(options.avroSchemaTypes));
   }
 
   return parts.join("\n\n");
