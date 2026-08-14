@@ -269,8 +269,10 @@ Only protobuf cares. JSON Schema, OpenAPI and Avro see an ordinary union.
 ## CLI
 
 ```
-wiz init [--force]   Register the plugin in the current project
-wiz --help           Show usage
+wiz init [--force]             Register the plugin in the current project
+wiz eject <file.ts> [out.ts]   Eject one file; no output path prints to stdout
+wiz eject <dir> [outdir]       Eject a tsconfig project; no outdir prints JSON
+wiz --help                     Show usage
 ```
 
 `init` writes `wizPlugin.ts` and adds it to the root and `[test]` `preload`
@@ -282,6 +284,20 @@ and no serializer, and rewriting the file from a parsed object would throw all
 of that away. Entries already present are left alone, `./x.ts` and `x.ts` count
 as the same entry, and if the parser sees a `preload` the editor cannot safely
 place, `init` says so instead of writing a second one.
+
+`eject` writes what the plugin would have handed to Bun, so the result runs
+with no plugin and nothing importing wiz. It is the same transform the plugin
+uses, not a second implementation.
+
+A single file ejects to a single file, with the generated code inlined and
+trimmed to the parts that file uses. It refuses anything that cannot be
+answered from one file — `openapiDocument()` is built from every route
+reachable from the module, which is what the project form is for.
+
+A project ejects through its `tsconfig.json`, mirroring the tree. Generated
+modules stay separate there, since files share types by key and inlining would
+copy the same code into each one. Given no destination, the whole tree is
+printed as JSON with paths for keys.
 
 ## Design
 
