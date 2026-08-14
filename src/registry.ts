@@ -7,6 +7,8 @@ import type { TypeIR } from "./types.ts";
 export interface RegisteredType {
   ir: TypeIR;
   generatedCode: string;
+  /** Kept so a caller wanting a different subset can regenerate faithfully. */
+  options?: VirtualModuleOptions;
 }
 
 const TypeRegistry = new Map<string, RegisteredType>();
@@ -28,7 +30,7 @@ export function registerType(
 
     if (carriesGeneratorPayload) {
       const generatedCode = generateVirtualModuleCode(ir, options);
-      const registered = { ir, generatedCode };
+      const registered: RegisteredType = { ir, generatedCode, options };
       TypeRegistry.set(hash, registered);
       return registered;
     }
@@ -36,13 +38,18 @@ export function registerType(
   }
 
   const generatedCode = generateVirtualModuleCode(ir, options);
-  const registered: RegisteredType = { ir, generatedCode };
+  const registered: RegisteredType = { ir, generatedCode, options };
   TypeRegistry.set(hash, registered);
   return registered;
 }
 
 export function getTypeModule(hash: string): string | undefined {
   return TypeRegistry.get(hash)?.generatedCode;
+}
+
+/** The whole entry, for a caller that needs to regenerate a subset. */
+export function getRegisteredType(hash: string): RegisteredType | undefined {
+  return TypeRegistry.get(hash);
 }
 
 export function clearTypeRegistry(): void {

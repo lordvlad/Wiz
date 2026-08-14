@@ -17,46 +17,63 @@ export interface VirtualModuleOptions {
   service?: ServiceIR;
   protobufSchemaTypes?: Array<{ name: string; ir: TypeIR }>;
   avroSchemaTypes?: Array<{ name: string; ir: TypeIR }>;
+  /**
+   * Export names to emit, when only some are wanted.
+   *
+   * A module serving a bundler carries every generator, because callsites in
+   * other files share it by type key and a bundler drops what it does not use.
+   * `wiz eject` inlines this code for a person to read, where several hundred
+   * lines of unreachable codec is just noise.
+   */
+  only?: readonly string[];
 }
+
+/** Which exports each generated section provides. */
+const SECTION_EXPORTS = {
+  keys: ["keys", "requiredKeys", "optionalKeys"],
+  schema: ["schema_draft2020", "schema_draft07"],
+  validator: ["validate", "is"],
+  openapi: ["openapiSchema"],
+  protobuf: ["encodeProto", "decodeProto"],
+  protobufSchema: ["protobufSchema"],
+  avro: ["encodeAvro", "decodeAvro"],
+  avroSchema: ["avroSchema"],
+} as const;
 
 export function generateVirtualModuleCode(
   ir: TypeIR,
   options?: VirtualModuleOptions
 ): string {
-  const keysCode = generateKeysCode(ir);
-  const schemaCode = generateSchemaCode(ir);
-  const validatorCode = generateValidatorCode(ir);
-  const protoCode = generateProtobufCode(ir);
-  const avroCode = generateAvroCode(ir);
+  const wanted = options?.only;
+  const include = (section: keyof typeof SECTION_EXPORTS): boolean =>
+    wanted === undefined ||
+    SECTION_EXPORTS[section].some((name) => wanted.includes(name));
 
-  const parts = [
-    `// Auto-generated virtual module by wizPlugin`,
-    keysCode,
-    schemaCode,
-    validatorCode,
-    protoCode,
-    avroCode,
-  ];
+  const parts = [`// Auto-generated virtual module by wizPlugin`];
+
+  if (include("keys")) parts.push(generateKeysCode(ir));
+  if (include("schema")) parts.push(generateSchemaCode(ir));
+  if (include("validator")) parts.push(generateValidatorCode(ir));
+  if (include("protobuf")) parts.push(generateProtobufCode(ir));
+  if (include("avro")) parts.push(generateAvroCode(ir));
 
   // An empty `openApiTypes` array is still a request for an OpenAPI document:
   // `openapiSchema<[]>(base, [...ops])` carries all its content in methods.
-  if (options?.openApiTypes || options?.service) {
-    const openapiCode = generateOpenApiSchemaCode(
-      options.openApiTypes ?? [],
-      options.openApiVersion ?? "3.1",
-      options.service
+  if ((options?.openApiTypes || options?.service) && include("openapi")) {
+    parts.push(
+      generateOpenApiSchemaCode(
+        options.openApiTypes ?? [],
+        options.openApiVersion ?? "3.1",
+        options.service
+      )
     );
-    parts.push(openapiCode);
   }
 
-  if (options?.protobufSchemaTypes && options.protobufSchemaTypes.length > 0) {
-    const protoSchemaCode = generateProtobufSchemaCode(
-      options.protobufSchemaTypes
-    );
-    parts.push(protoSchemaCode);
+  if (options?.protobufSchemaTypes?.length && include("protobufSchema")) {
+    parts.push(generateProtobufSchemaCode(options.protobufSchemaTypes));
   }
 
-  if (options?.avroSchemaTypes && options.avroSchemaTypes.length > 0) {
+  if (options?.avroSchemaTypes?.length && include("avroSchema")) {
     parts.push(generateAvroSchemaCode(options.avroSchemaTypes));
   }
 

@@ -260,3 +260,107 @@ describe("the wiz binary", () => {
     }
   });
 });
+
+const TSCONFIG_JSON = JSON.stringify({
+  compilerOptions: {
+    target: "ESNext",
+    module: "Preserve",
+    moduleResolution: "bundler",
+    strict: true,
+    noEmit: true,
+    allowImportingTsExtensions: true,
+  },
+  include: ["src"],
+});
+
+describe("wiz eject through the binary", () => {
+  const scratch: string[] = [];
+
+  afterEach(async () => {
+    for (const dir of scratch.splice(0)) await rm(dir, { recursive: true, force: true });
+  });
+
+  const workspace = async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wiz-eject-cli-"));
+    scratch.push(dir);
+    return dir;
+  };
+
+  const run = async (args: string[], cwd: string) => {
+    const proc = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "cli.ts"), ...args], {
+      cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    return { code: await proc.exited, stdout, stderr };
+  };
+
+  const SOURCE = `import { keysOf } from "wiz";
+export interface User { name: string }
+export const keys = keysOf<User>();
+`;
+
+  test("one file with no output path prints to stdout", async () => {
+    const cwd = await workspace();
+    await Bun.write(join(cwd, "one.ts"), SOURCE);
+
+    const result = await run(["eject", "one.ts"], cwd);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("export const keys =");
+    expect(result.stdout).not.toMatch(/from\s+"wiz"/);
+  });
+
+  test("one file with an output path writes it, overwriting", async () => {
+    const cwd = await workspace();
+    await Bun.write(join(cwd, "one.ts"), SOURCE);
+    await Bun.write(join(cwd, "out.ts"), "// stale\n");
+
+    const result = await run(["eject", "one.ts", "out.ts"], cwd);
+    expect(result.code).toBe(0);
+
+    const written = await Bun.file(join(cwd, "out.ts")).text();
+    expect(written).not.toContain("stale");
+    expect(written).toContain("export const keys =");
+  });
+
+  test("a directory with no outdir prints a JSON tree keyed by path", async () => {
+    const cwd = await workspace();
+    await Bun.write(join(cwd, "tsconfig.json"), TSCONFIG_JSON);
+    await Bun.write(join(cwd, "src", "one.ts"), SOURCE);
+
+    const result = await run(["eject", "."], cwd);
+    expect(result.code).toBe(0);
+
+    const tree = JSON.parse(result.stdout) as Record<string, string>;
+    expect(Object.keys(tree)).toContain("src/one.ts");
+    expect(tree["src/one.ts"]).toContain("export const keys =");
+  });
+
+  test("a directory with an outdir mirrors the tree", async () => {
+    const cwd = await workspace();
+    await Bun.write(join(cwd, "tsconfig.json"), TSCONFIG_JSON);
+    await Bun.write(join(cwd, "src", "one.ts"), SOURCE);
+
+    const result = await run(["eject", ".", "dist"], cwd);
+    expect(result.code).toBe(0);
+    expect(await Bun.file(join(cwd, "dist", "src", "one.ts")).exists()).toBe(true);
+  });
+
+  test("eject needs something to eject", async () => {
+    const cwd = await workspace();
+    const result = await run(["eject"], cwd);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("needs a file or directory");
+  });
+
+  test("a project eject without a tsconfig is refused", async () => {
+    const cwd = await workspace();
+    const result = await run(["eject", "."], cwd);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("no tsconfig.json");
+  });
+});
