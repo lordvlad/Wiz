@@ -3,7 +3,6 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { plugin } from "bun";
 import { wizPlugin } from "../src/plugin.ts";
 import { silentLogger } from "../src/logger.ts";
-import { clearDocumentFragments } from "../src/document.ts";
 
 plugin(wizPlugin({ logger: silentLogger }));
 
@@ -11,7 +10,6 @@ describe("honoRoutes end-to-end", () => {
   let fixture: typeof import("./fixtures/honoFixture.ts");
 
   beforeAll(async () => {
-    clearDocumentFragments();
     fixture = await import("./fixtures/honoFixture.ts");
   });
 
@@ -41,8 +39,7 @@ describe("honoRoutes end-to-end", () => {
   });
 
   test("collects the merged document from the same route map", async () => {
-    const { openapiDocument } = await import("../src/index.ts");
-    const doc = openapiDocument() as Record<string, any>;
+    const doc = fixture.document as Record<string, any>;
 
     expect(doc.openapi).toBe("3.1.0");
     expect(doc.info).toEqual({ title: "Notes API", version: "2.0.0" });
@@ -71,8 +68,7 @@ describe("honoRoutes end-to-end", () => {
   });
 
   test("documented methods and mounted methods cannot drift", async () => {
-    const { openapiDocument } = await import("../src/index.ts");
-    const doc = openapiDocument() as Record<string, any>;
+    const doc = fixture.document as Record<string, any>;
 
     // Every documented operation must actually answer on the app.
     for (const [path, methods] of Object.entries<Record<string, unknown>>(

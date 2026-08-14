@@ -3,33 +3,27 @@ import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { plugin } from "bun";
 import { wizPlugin } from "../src/plugin.ts";
 import { silentLogger } from "../src/logger.ts";
-import {
-  clearDocumentFragments,
-  mergeDocumentFragment,
-  mergedDocument,
-} from "../src/document.ts";
+import { mergeDocuments } from "../src/document.ts";
 
 plugin(wizPlugin({ logger: silentLogger }));
 
-describe("merged document registry", () => {
-  beforeEach(() => clearDocumentFragments());
-
+describe("merging document fragments", () => {
   test("merges paths per method and components per name across fragments", () => {
-    mergeDocumentFragment({
-      openapi: "3.0.3",
-      info: { title: "A", version: "1" },
-      paths: { "/users": { get: { operationId: "list" } } },
-      components: { schemas: { User: { type: "object" } } },
-    });
-    mergeDocumentFragment({
-      paths: {
-        "/users": { post: { operationId: "create" } },
-        "/health": { get: { operationId: "health" } },
+    const doc = mergeDocuments([
+      {
+        openapi: "3.0.3",
+        info: { title: "A", version: "1" },
+        paths: { "/users": { get: { operationId: "list" } } },
+        components: { schemas: { User: { type: "object" } } },
       },
-      components: { schemas: { Order: { type: "object" } } },
-    });
-
-    const doc = mergedDocument();
+      {
+        paths: {
+          "/users": { post: { operationId: "create" } },
+          "/health": { get: { operationId: "health" } },
+        },
+        components: { schemas: { Order: { type: "object" } } },
+      },
+    ]);
 
     // Same path contributed by two fragments keeps both methods.
     expect(Object.keys(doc.paths as object).sort()).toEqual(["/health", "/users"]);
@@ -43,18 +37,15 @@ describe("merged document registry", () => {
   });
 
   test("concatenates tags rather than overwriting them", () => {
-    mergeDocumentFragment({ tags: [{ name: "a" }] });
-    mergeDocumentFragment({ tags: [{ name: "b" }] });
-    expect(mergedDocument().tags).toEqual([{ name: "a" }, { name: "b" }]);
+    const doc = mergeDocuments([{ tags: [{ name: "a" }] }, { tags: [{ name: "b" }] }]);
+    expect(doc.tags).toEqual([{ name: "a" }, { name: "b" }]);
   });
 });
+
 describe("bunRoutes end-to-end", () => {
-  // Fragments register during module evaluation, and module init happens once,
-  // so the registry must be cleared before the fixture is first imported.
   let fixture: typeof import("./fixtures/serverFixture.ts");
 
   beforeAll(async () => {
-    clearDocumentFragments();
     fixture = await import("./fixtures/serverFixture.ts");
   });
 
@@ -78,8 +69,7 @@ describe("bunRoutes end-to-end", () => {
   });
 
   test("collects one merged document from the route descriptors", async () => {
-    const { openapiDocument } = await import("../src/index.ts");
-    const doc = openapiDocument() as Record<string, any>;
+    const doc = fixture.document as Record<string, any>;
 
     expect(doc.openapi).toBe("3.0.3");
     expect(doc.info).toEqual({ title: "Users API", version: "1.0.0" });

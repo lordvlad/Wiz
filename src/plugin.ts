@@ -1,5 +1,7 @@
 import type { BunPlugin } from "bun";
 import ts from "typescript";
+import { mergeDocuments, type OpenApiDocument } from "./document.ts";
+import { generateOpenApiSchemaCode } from "./generators/openapi.ts";
 import { extractTypeIR } from "./extractors/typescript.ts";
 import {
   type HttpMethodName,
@@ -8,7 +10,7 @@ import {
   type ServiceMethodRequestIR,
   type ServiceMethodResponseIR,
 } from "./ir/service.ts";
-import { defaultLogger, type WizLogger } from "./logger.ts";
+import { defaultLogger, silentLogger, type WizLogger } from "./logger.ts";
 import { registerType, getTypeModule } from "./registry.ts";
 import {
   flattenObjectProperties,
@@ -19,6 +21,7 @@ import {
 } from "./types.ts";
 
 const HELPER_FUNCTIONS = new Set([
+  "openapiDocument",
   "keysOf",
   "requiredKeysOf",
   "optionalKeysOf",
@@ -516,6 +519,207 @@ const COMPILER_OPTIONS: ts.CompilerOptions = {
  * `SourceFile` objects are shared by every per-file program the plugin creates.
  */
 const declarationFileCache = new Map<string, ts.SourceFile | undefined>();
+
+/**
+ * The value of a literal expression, or undefined if it is not one.
+ *
+ * The base document handed to `bunRoutes` has to be known at build time now
+ * that the merge happens there. Anything computed at runtime cannot be, and is
+ * reported rather than guessed at.
+ */
+function staticValue(node: ts.Expression | undefined): unknown {
+  if (!node) return undefined;
+
+  if (ts.isParenthesizedExpression(node)) return staticValue(node.expression);
+  if (ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) {
+    return staticValue(node.expression);
+  }
+  if (ts.isStringLiteralLike(node)) return node.text;
+  if (ts.isNumericLiteral(node)) return Number(node.text);
+  if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
+  if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
+  if (node.kind === ts.SyntaxKind.NullKeyword) return null;
+  if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.MinusToken) {
+    const inner = staticValue(node.operand);
+    return typeof inner === "number" ? -inner : undefined;
+  }
+
+  if (ts.isArrayLiteralExpression(node)) {
+    const items: unknown[] = [];
+    for (const element of node.elements) {
+      const value = staticValue(element);
+      if (value === undefined) return undefined;
+      items.push(value);
+    }
+    return items;
+  }
+
+  if (ts.isObjectLiteralExpression(node)) {
+    const object: Record<string, unknown> = {};
+    for (const property of node.properties) {
+      if (!ts.isPropertyAssignment(property)) return undefined;
+      const key = ts.isIdentifier(property.name)
+        ? property.name.text
+        : ts.isStringLiteralLike(property.name)
+          ? property.name.text
+          : undefined;
+      if (key === undefined) return undefined;
+      const value = staticValue(property.initializer);
+      if (value === undefined) return undefined;
+      object[key] = value;
+    }
+    return object;
+  }
+
+  return undefined;
+}
+
+/**
+ * Runs a generated OpenAPI module and returns the document it builds.
+ *
+ * The generator is reused rather than reimplemented for the build-time path:
+ * a second implementation of the same document is exactly the drift this
+ * codebase keeps finding. The input is our own generated source, not the
+ * user's.
+ */
+function runGeneratedDocument(
+  code: string,
+  base: Record<string, unknown>
+): OpenApiDocument {
+  const factory = new Function(
+    `${code.replace(/^export /gm, "")}\nreturn openapiSchema;`
+  );
+  return factory()(base) as OpenApiDocument;
+}
+
+/**
+ * Every route reachable from this module, merged into one document.
+ *
+ * `openapiDocument()` is answered at compile time, and a per-file transform
+ * cannot know whether the file it is looking at is the first or the last, so
+ * fragments are never accumulated as files happen to load - the answer must
+ * not depend on Bun's load order.
+ *
+ * The scope is the import graph rather than every file in the project, because
+ * that is the program being built: a module nobody imports contributes no
+ * routes at runtime and should contribute none to the document either.
+ */
+const harvestCache = new Map<string, OpenApiDocument>();
+
+function harvestDocument(entryPath: string, logger: WizLogger): OpenApiDocument {
+  const cached = harvestCache.get(entryPath);
+  if (cached) return cached;
+
+  // Rooting the program at the entry makes TypeScript resolve the imports for
+  // us, so `getSourceFiles()` is exactly the transitive closure.
+  const program = ts.createProgram([entryPath], COMPILER_OPTIONS);
+  const checker = program.getTypeChecker();
+  const fragments: OpenApiDocument[] = [];
+
+  for (const sourceFile of program.getSourceFiles()) {
+    if (sourceFile.isDeclarationFile) continue;
+    if (sourceFile.fileName.includes("node_modules")) continue;
+
+    const visit = (node: ts.Node): void => {
+      const adapter = routeAdapterFor(node);
+      if (adapter) {
+        const { base, routes } = adapter;
+        // Silent: every route file is transformed in its own right, and the
+        // adapter reports these diagnostics there. Repeating them per harvest
+        // would just duplicate them.
+        const methods = collectRouteOperations(routes, checker, sourceFile, silentLogger);
+        if (methods.length > 0) {
+          const baseValue = base ? staticValue(base) : {};
+          if (baseValue === undefined) {
+            warnUndocumentable(
+              logger,
+              "the base document is computed at runtime, so it cannot be merged " +
+                "into openapiDocument(); declare it as a literal",
+              base!,
+              sourceFile
+            );
+          }
+          const code = generateOpenApiSchemaCode([], readVersionFromBase(base), {
+            kind: "service",
+            methods,
+          });
+          fragments.push(
+            runGeneratedDocument(
+              code,
+              (baseValue as Record<string, unknown>) ?? {}
+            )
+          );
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+
+    visit(sourceFile);
+  }
+
+  if (fragments.length === 0) {
+    logger.warn(
+      `[wiz] openapiDocument() found no routes reachable from ${entryPath}; ` +
+        `a module declaring routes has to be imported to be documented`
+    );
+  }
+
+  const document = mergeDocuments(fragments);
+  harvestCache.set(entryPath, document);
+  return document;
+}
+
+/** `openapiSchema.bunRoutes(base, routes)` / `.honoRoutes(app, base, routes)`. */
+function routeAdapterFor(node: ts.Node):
+  | { call: ts.CallExpression; base: ts.Expression | undefined; routes: ts.Expression }
+  | undefined {
+  if (!ts.isCallExpression(node)) return undefined;
+  if (!ts.isPropertyAccessExpression(node.expression)) return undefined;
+
+  const name = node.expression.name.text;
+  const offset = name === "bunRoutes" ? 0 : name === "honoRoutes" ? 1 : undefined;
+  if (offset === undefined) return undefined;
+
+  const routes = node.arguments[offset + 1];
+  if (!routes) return undefined;
+  return { call: node, base: node.arguments[offset], routes };
+}
+
+/** A plain value as an AST literal, so the document lands inline in the output. */
+function jsonToExpression(
+  factory: ts.NodeFactory,
+  value: unknown
+): ts.Expression {
+  if (value === null) return factory.createNull();
+  if (typeof value === "string") return factory.createStringLiteral(value);
+  if (typeof value === "boolean") return value ? factory.createTrue() : factory.createFalse();
+  if (typeof value === "number") {
+    return value < 0
+      ? factory.createPrefixUnaryExpression(
+          ts.SyntaxKind.MinusToken,
+          factory.createNumericLiteral(-value)
+        )
+      : factory.createNumericLiteral(value);
+  }
+  if (Array.isArray(value)) {
+    return factory.createArrayLiteralExpression(
+      value.map((item) => jsonToExpression(factory, item))
+    );
+  }
+  if (typeof value === "object") {
+    return factory.createObjectLiteralExpression(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) =>
+        factory.createPropertyAssignment(
+          factory.createStringLiteral(key),
+          jsonToExpression(factory, item)
+        )
+      ),
+      true
+    );
+  }
+  return factory.createIdentifier("undefined");
+}
+
 export interface WizPluginOptions {
   /**
    * Where diagnostics go. Defaults to {@link defaultLogger}, which forwards
@@ -632,6 +836,26 @@ export function wizPlugin(options: WizPluginOptions = {}): BunPlugin {
               } else if (ts.isPropertyAccessExpression(expression)) {
                 fnName = expression.name.text;
               }
+
+              // `openapiDocument()` is answered here, from the whole program,
+              // so no fragment registry survives into the bundle.
+              if (fnName === "openapiDocument" && node.arguments.length === 0) {
+                modified = true;
+                return jsonToExpression(
+                  context.factory,
+                  harvestDocument(args.path, logger)
+                );
+              }
+
+              // `op(handler, options)` is a compile-time carrier; the handler is
+              // the only part with runtime meaning.
+              if (fnName === "op") {
+                const handler = node.arguments[0];
+                if (handler) {
+                  modified = true;
+                  return ts.visitNode(handler, visitor) as ts.Expression;
+                }
+              }
               // `bunRoutes(base, routes)` / `honoRoutes(app, base, routes)` are
               // declarations, not transformations: harvest descriptors and let
               // the original value through untouched.
@@ -646,67 +870,20 @@ export function wizPlugin(options: WizPluginOptions = {}): BunPlugin {
                 const routesArg = node.arguments[adapter.routes];
                 if (!routesArg) return ts.visitEachChild(node, visitor, context);
 
-                const routeOperations = collectRouteOperations(
-                  routesArg,
-                  checker,
-                  sourceFile,
-                  logger
-                );
-                const callIR = extractTypeIR(
-                  checker.getTypeAtLocation(node),
-                  checker
-                );
-                const routesHash = `routes_${fnv1a(
-                  JSON.stringify(routeOperations.map(methodKeyPart))
-                )}`;
-
-                registerType(routesHash, callIR, {
-                  openApiTypes: [],
-                  openApiVersion: readVersionFromBase(node.arguments[adapter.base]),
-                  service: { kind: "service", methods: routeOperations },
-                });
-
-                if (!virtualImports.has(routesHash)) {
-                  virtualImports.set(routesHash, new Set());
-                }
-                virtualImports.get(routesHash)!.add("openapiSchema");
+                // Descriptors reach the document through `harvestDocument`,
+                // straight from the program, so nothing is registered here.
+                // This pass runs for its diagnostics alone: a route that cannot
+                // be documented is reported against the file declaring it,
+                // whether or not anything asks for the document.
+                collectRouteOperations(routesArg, checker, sourceFile, logger);
                 modified = true;
-
-                const baseArg = node.arguments[adapter.base]
-                  ? (ts.visitNode(
-                      node.arguments[adapter.base],
-                      visitor
-                    ) as ts.Expression)
-                  : context.factory.createObjectLiteralExpression([]);
-
-                const register = context.factory.createCallExpression(
-                  context.factory.createPropertyAccessExpression(
-                    expression.expression,
-                    "__mergeDocument"
-                  ),
-                  undefined,
-                  [
-                    context.factory.createCallExpression(
-                      context.factory.createIdentifier(
-                        `__wiz_openapiSchema_${routesHash}`
-                      ),
-                      undefined,
-                      [baseArg]
-                    ),
-                  ]
-                );
 
                 // Bun: the call collapses to the routes literal, which Bun.serve
                 // consumes directly. Hono: the call must survive, because it is
                 // what mounts the handlers onto the app.
-                const value =
-                  fnName === "bunRoutes"
-                    ? (ts.visitNode(routesArg, visitor) as ts.Expression)
-                    : (ts.visitEachChild(node, visitor, context) as ts.Expression);
-
-                return context.factory.createParenthesizedExpression(
-                  context.factory.createCommaListExpression([register, value])
-                );
+                return fnName === "bunRoutes"
+                  ? (ts.visitNode(routesArg, visitor) as ts.Expression)
+                  : (ts.visitEachChild(node, visitor, context) as ts.Expression);
               }
 
               if (fnName && HELPER_FUNCTIONS.has(fnName)) {

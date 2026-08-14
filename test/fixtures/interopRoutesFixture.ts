@@ -1,4 +1,4 @@
-import { op, openapiSchema } from "../../src/index.ts";
+import { op, openapiDocument, openapiSchema } from "../../src/index.ts";
 
 export interface Product {
   /** @format uuid */
@@ -51,3 +51,6 @@ export const routes = openapiSchema.bunRoutes(
     },
   }
 );
+
+/** Resolved at build time; the test reads it from here. */
+export const document = openapiDocument();

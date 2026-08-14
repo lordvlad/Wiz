@@ -1,19 +1,13 @@
-export type OpenApiDocument = Record<string, unknown>;
-
 /**
- * Every transformed `bunRoutes`/`honoRoutes` callsite contributes one slice of
- * the API surface. They accumulate here so a program with routes spread across
- * many modules still exposes a single merged document.
+ * Merging the OpenAPI fragments a program's routes contribute.
+ *
+ * This runs at build time only: the plugin harvests every route declaration
+ * across the program and folds the result into the `openapiDocument()`
+ * callsite as a literal. Nothing here reaches a bundle, which is why there is
+ * no module-level accumulator - an import-time side effect would both pull the
+ * runtime in and make the document depend on load order.
  */
-const fragments: OpenApiDocument[] = [];
-
-export function mergeDocumentFragment(fragment: OpenApiDocument): void {
-  fragments.push(fragment);
-}
-
-export function clearDocumentFragments(): void {
-  fragments.length = 0;
-}
+export type OpenApiDocument = Record<string, unknown>;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -65,7 +59,8 @@ function mergeInto(target: OpenApiDocument, source: OpenApiDocument): void {
   }
 }
 
-export function mergedDocument(): OpenApiDocument {
+/** Folds fragments left to right into one document. */
+export function mergeDocuments(fragments: OpenApiDocument[]): OpenApiDocument {
   const document: OpenApiDocument = {};
   for (const fragment of fragments) {
     mergeInto(document, fragment);

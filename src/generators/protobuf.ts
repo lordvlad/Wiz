@@ -785,8 +785,12 @@ export function generateProtobufCode(ir: TypeIR): string {
   }
 
   return [
-    `var textEncoder = typeof textEncoder !== "undefined" ? textEncoder : new TextEncoder();`,
-    `var textDecoder = typeof textDecoder !== "undefined" ? textDecoder : new TextDecoder();`,
+    // `var`, and bare: the protobuf and avro codecs are concatenated into one
+    // module, and only `var` tolerates the redeclaration. Bare because a
+    // top-level `new TextEncoder()` is a side effect a bundler must keep, which
+    // would pin the whole codec into a build that never calls it.
+    `var textEncoder;`,
+    `var textDecoder;`,
     `function writeVarint(buf, offset, val) {`,
     `  let v = Number(val);`,
     `  if (!Number.isFinite(v)) v = 0;`,
@@ -847,6 +851,7 @@ export function generateProtobufCode(ir: TypeIR): string {
     `}`,
     ``,
     `function writeString(buf, offset, str) {`,
+    `  textEncoder ??= new TextEncoder();`,
     `  const bytes = textEncoder.encode(str);`,
     `  let o = offset;`,
     `  o += writeVarint(buf, o, bytes.length);`,
@@ -856,6 +861,7 @@ export function generateProtobufCode(ir: TypeIR): string {
     ``,
     `function readString(buf, offset) {`,
     `  const [len, newOff] = readVarint(buf, offset);`,
+    `  textDecoder ??= new TextDecoder();`,
     `  const str = textDecoder.decode(buf.subarray(newOff, newOff + len));`,
     `  return [str, newOff + len];`,
     `}`,

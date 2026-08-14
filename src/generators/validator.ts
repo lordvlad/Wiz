@@ -1,4 +1,5 @@
 import type { Constraint, ObjectTypeIR, PropertyIR, TypeIR } from "../types.ts";
+import { walkTypeIR } from "../types.ts";
 
 /** A JS boolean expression testing whether `varName` matches `ir`. */
 export function generateTypeCheckExpression(ir: TypeIR, varName: string): string {
@@ -384,13 +385,16 @@ function generateValidationBlock(
 }
 
 /**
- * Helpers the checks rely on, emitted once per module.
+ * Helpers the checks rely on, keyed by the constraint that needs them.
  *
- * Both exist because the obvious JS spelling is not what JSON Schema means:
+ * Each exists because the obvious JS spelling is not what JSON Schema means:
  * `String.length` counts UTF-16 units, and `Set` compares objects by
- * reference.
+ * reference. They are emitted only when something uses them - a bundler can
+ * drop an unused function, but not a `const` whose initialiser it must assume
+ * has side effects.
  */
-const RUNTIME_HELPERS = [
+const RUNTIME_HELPERS: Record<string, string> = {
+  length: [
   `function __wizLength(str) {`,
   `  // JSON Schema counts characters, so an astral character such as an emoji`,
   `  // is one, where String.length would call it two.`,
@@ -405,7 +409,9 @@ const RUNTIME_HELPERS = [
   `  }`,
   `  return length;`,
   `}`,
-  ``,
+  ].join("\n"),
+
+  unique: [
   `function __wizEqual(a, b) {`,
   `  if (a === b) return true;`,
   `  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;`,
@@ -428,7 +434,9 @@ const RUNTIME_HELPERS = [
   `  }`,
   `  return true;`,
   `}`,
-  ``,
+  ].join("\n"),
+
+  pattern: [
   `const __wizPatterns = new Map();`,
   `function __wizPattern(src) {`,
   `  // A pattern is a constant, so compiling it per call is pure waste; a Map`,
@@ -440,13 +448,36 @@ const RUNTIME_HELPERS = [
   `  }`,
   `  return re;`,
   `}`,
-].join("\n");
+  ].join("\n"),
+};
+
+/** The helpers this type's constraints actually reach for. */
+function helpersFor(ir: TypeIR): string[] {
+  const needed = new Set<string>();
+
+  const scan = (constraints: Constraint[] | undefined): void => {
+    for (const c of constraints ?? []) {
+      if (c.kind === "minLength" || c.kind === "maxLength") needed.add("length");
+      if (c.kind === "uniqueItems" && c.value !== false) needed.add("unique");
+      if (c.kind === "pattern") needed.add("pattern");
+    }
+  };
+
+  walkTypeIR(ir, (node) => {
+    scan(node.constraints);
+    if (node.kind === "object") {
+      for (const property of node.properties) scan(property.constraints);
+    }
+  });
+
+  return [...needed].map((key) => RUNTIME_HELPERS[key]!);
+}
 
 export function generateValidatorCode(ir: TypeIR): string {
   const validationBody = generateValidationBlock(ir, "arg", "path", 0);
 
   return [
-    RUNTIME_HELPERS,
+    ...helpersFor(ir),
     ``,
     `export function validate(arg, path = "") {`,
     `  const errors = [];`,

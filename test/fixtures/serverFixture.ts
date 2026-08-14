@@ -1,4 +1,4 @@
-import { op, openapiSchema } from "../../src/index.ts";
+import { op, openapiDocument, openapiSchema } from "../../src/index.ts";
 
 export interface User {
   id: number;
@@ -45,3 +45,6 @@ export const routes = openapiSchema.bunRoutes(
     },
   }
 );
+
+/** Resolved at build time; the test reads it from here. */
+export const document = openapiDocument();

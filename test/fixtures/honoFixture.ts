@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { op, openapiSchema } from "../../src/index.ts";
+import { op, openapiDocument, openapiSchema } from "../../src/index.ts";
 
 export interface Note {
   id: number;
@@ -38,3 +38,6 @@ export const app = openapiSchema.honoRoutes(
     },
   }
 );
+
+/** Resolved at build time; the test reads it from here. */
+export const document = openapiDocument();

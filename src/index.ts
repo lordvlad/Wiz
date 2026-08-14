@@ -1,4 +1,3 @@
-import { mergeDocumentFragment, mergedDocument } from "./document.ts";
 import type { ValidationError } from "./types.ts";
 
 export class PluginInactiveError extends Error {
@@ -129,8 +128,6 @@ export interface OpenApiSchemaBuilder {
     baseSchema: Record<string, unknown>,
     routes: RouteMap
   ): TApp;
-  /** @internal Merge hook targeted by the plugin's rewritten callsites. */
-  __mergeDocument(fragment: Record<string, unknown>): void;
 }
 
 /** A route value is either a handler/response, or a map of method -> handler. */
@@ -209,7 +206,6 @@ export const openapiSchema: OpenApiSchemaBuilder = Object.assign(
       mountRoutes(app, routes);
       return app;
     },
-    __mergeDocument: mergeDocumentFragment,
   }
 );
 
@@ -225,9 +221,17 @@ export function op<TSpec>(
   return handler;
 }
 
-/** The single merged OpenAPI document for every declared route in the program. */
+/**
+ * The single merged OpenAPI document for every route declared in the program.
+ *
+ * Compile-time only: the plugin harvests every route across the program and
+ * replaces this call with the finished document. There is deliberately no
+ * runtime that could answer it, since that would mean shipping wiz's
+ * bookkeeping in your bundle and reading a document assembled by import-order
+ * side effects.
+ */
 export function openapiDocument(): Record<string, unknown> {
-  return mergedDocument();
+  throw new PluginInactiveError("openapiDocument");
 }
 export function encodeProto<T>(_val: T, _buf: Uint8Array, _offset = 0): number {
   throw new PluginInactiveError("encodeProto");

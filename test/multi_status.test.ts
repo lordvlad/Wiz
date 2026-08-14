@@ -3,7 +3,6 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { plugin } from "bun";
 import { wizPlugin } from "../src/plugin.ts";
 import { silentLogger } from "../src/logger.ts";
-import { clearDocumentFragments } from "../src/document.ts";
 
 plugin(wizPlugin({ logger: silentLogger }));
 
@@ -11,10 +10,9 @@ describe("multi-status responses via op<{ responses }>", () => {
   let doc: Record<string, any>;
 
   beforeAll(async () => {
-    clearDocumentFragments();
-    await import("./fixtures/errorsFixture.ts");
-    const { openapiDocument } = await import("../src/index.ts");
-    doc = openapiDocument() as Record<string, any>;
+    // `openapiDocument()` is resolved at build time, so it is called inside the
+    // fixture; this file is @wiz-ignore and would never be transformed.
+    doc = (await import("./fixtures/errorsFixture.ts")).document as Record<string, any>;
   });
 
   test("every declared status reaches the document", () => {

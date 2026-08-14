@@ -4,7 +4,6 @@ import { plugin } from "bun";
 import { Validator } from "@seriousme/openapi-schema-validator";
 import { wizPlugin } from "../src/plugin.ts";
 import { silentLogger } from "../src/logger.ts";
-import { clearDocumentFragments } from "../src/document.ts";
 import { generateOpenApiSchemaCode } from "../src/generators/openapi.ts";
 import { evalModule, getIRsForSource, service, httpMethod } from "./helpers.ts";
 
@@ -134,12 +133,7 @@ describe("harvested route documents validate", () => {
   let doc: Record<string, any>;
 
   beforeAll(async () => {
-    // The merged document is process-wide, so each suite that reads it clears
-    // first and imports only its own fixture.
-    clearDocumentFragments();
-    await import("./fixtures/interopRoutesFixture.ts");
-    const { openapiDocument } = await import("../src/index.ts");
-    doc = openapiDocument() as Record<string, any>;
+    doc = (await import("./fixtures/interopRoutesFixture.ts")).document as Record<string, any>;
   });
 
   test("a harvested 3.1 document is valid OpenAPI", async () => {

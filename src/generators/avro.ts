@@ -565,8 +565,12 @@ export function generateAvroCode(ir: TypeIR): string {
   const decodeBody = emitDecode(ir, "out", ctx);
 
   return [
-    `var textEncoder = typeof textEncoder !== "undefined" ? textEncoder : new TextEncoder();`,
-    `var textDecoder = typeof textDecoder !== "undefined" ? textDecoder : new TextDecoder();`,
+    // `var`, and bare: the protobuf and avro codecs are concatenated into one
+    // module, and only `var` tolerates the redeclaration. Bare because a
+    // top-level `new TextEncoder()` is a side effect a bundler must keep, which
+    // would pin the whole codec into a build that never calls it.
+    `var textEncoder;`,
+    `var textDecoder;`,
     ...ctx.prelude,
     ``,
     `// Avro longs are zig-zag varints. Everything goes through BigInt because`,
@@ -615,6 +619,7 @@ export function generateAvroCode(ir: TypeIR): string {
     `}`,
     ``,
     `function writeString(buf, offset, str) {`,
+    `  textEncoder ??= new TextEncoder();`,
     `  const bytes = textEncoder.encode(str);`,
     `  let o = offset;`,
     `  o += writeIndex(buf, o, bytes.length);`,
@@ -624,6 +629,7 @@ export function generateAvroCode(ir: TypeIR): string {
     ``,
     `function readString(buf, offset) {`,
     `  const [len, start] = readIndex(buf, offset);`,
+    `  textDecoder ??= new TextDecoder();`,
     `  return [textDecoder.decode(buf.subarray(start, start + len)), start + len];`,
     `}`,
     ``,
