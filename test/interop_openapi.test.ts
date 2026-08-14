@@ -30,6 +30,13 @@ const base = (version: "3.0.3" | "3.1.0") => ({
   info: { title: "Interop", version: "1.0.0" },
 });
 
+// Building the first TypeScript program and compiling the first schema costs
+// more than the default per-test timeout on a cold cache. Paid once here, so
+// no test is measuring a cold start.
+beforeAll(async () => {
+  await expectValid({ ...base("3.1.0"), paths: {} });
+}, 60_000);
+
 describe("generated documents satisfy the OpenAPI schemas", () => {
   const source = `
     export interface User {

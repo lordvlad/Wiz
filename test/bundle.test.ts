@@ -112,4 +112,18 @@ describe("nothing of wiz survives the build", () => {
     for (const trace of RUNTIME_TRACES) expect(code).not.toContain(trace);
     expect(code).toContain("writeLong");
   });
+
+  test("an arrow module carries its codec but not apache-arrow", async () => {
+    const code = await bundle("./test/fixtures/arrowFixture.ts");
+
+    for (const trace of RUNTIME_TRACES) expect(code).not.toContain(trace);
+    // The schema was built during the transform and inlined as bytes, so the
+    // library that built it has no reason to be here.
+    expect(code).not.toMatch(/apache-arrow/);
+    expect(code).not.toContain("RecordBatchReader");
+    expect(code).not.toContain("tableToIPC");
+    // What remains is the generated codec and the schema it inlined.
+    expect(code).toContain("function encodeArrow(");
+    expect(code).toContain("__arrowSchema");
+  });
 });

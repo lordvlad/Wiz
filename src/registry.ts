@@ -26,7 +26,9 @@ export function registerType(
       Boolean(options?.openApiTypes) ||
       Boolean(options?.service?.methods.length) ||
       Boolean(options?.protobufSchemaTypes?.length) ||
-      Boolean(options?.avroSchemaTypes?.length);
+      Boolean(options?.avroSchemaTypes?.length) ||
+      Boolean(options?.arrowSchemaTypes?.length) ||
+      Boolean(options?.arrow);
 
     if (carriesGeneratorPayload) {
       const generatedCode = generateVirtualModuleCode(ir, options);

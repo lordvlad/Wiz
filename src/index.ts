@@ -259,6 +259,27 @@ export function avroSchema<TTypes extends unknown[]>(
   throw new PluginInactiveError("avroSchema");
 }
 
+/**
+ * Encodes rows as an Arrow IPC stream.
+ *
+ * Arrow is columnar, so a value is a table of records rather than one record:
+ * the rows are transposed into a buffer per column, framed as a schema message
+ * and a record batch.
+ */
+export function encodeArrow<T>(_rows: T[], _buf: Uint8Array, _offset = 0): number {
+  throw new PluginInactiveError("encodeArrow");
+}
+
+export function decodeArrow<T>(_buf: Uint8Array, _offset = 0): T[] {
+  throw new PluginInactiveError("decodeArrow");
+}
+
+export function arrowSchema<TTypes extends unknown[]>(
+  _options?: { indent?: string }
+): string {
+  throw new PluginInactiveError("arrowSchema");
+}
+
 // `wizPlugin` is deliberately NOT re-exported here: it pulls in the TypeScript
 // compiler, and importing the runtime must never drag that into an app bundle.
 // Build tooling imports it from "wiz/plugin". The logger contract is dependency

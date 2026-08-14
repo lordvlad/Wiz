@@ -36,6 +36,9 @@ const HELPER_FUNCTIONS = new Set([
   "encodeAvro",
   "decodeAvro",
   "avroSchema",
+  "encodeArrow",
+  "decodeArrow",
+  "arrowSchema",
 ]);
 
 const HTTP_METHODS = new Set([
@@ -754,6 +757,9 @@ export const VIRTUAL_EXPORTS: Record<string, string> = {
   encodeAvro: "__wiz_encodeAvro",
   decodeAvro: "__wiz_decodeAvro",
   avroSchema: "__wiz_avroSchema",
+  encodeArrow: "__wiz_encodeArrow",
+  decodeArrow: "__wiz_decodeArrow",
+  arrowSchema: "__wiz_arrowSchema",
 };
 
 export function localAlias(exportName: string, hash: string): string {
@@ -1145,6 +1151,45 @@ export function transformSource(options: TransformOptions): TransformResult {
                 const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
                 return context.factory.createCallExpression(
                   context.factory.createIdentifier(`__wiz_avroSchema_${hash}`),
+                  undefined,
+                  visitedArgs
+                );
+              }
+              case "encodeArrow":
+              case "decodeArrow": {
+                exportSet.add(fnName);
+                // Arrow codegen is opt-in, because building the schema needs
+                // apache-arrow; requesting it here is what turns it on.
+                registerType(hash, ir, { arrow: true });
+                const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
+                return context.factory.createCallExpression(
+                  context.factory.createIdentifier(`__wiz_${fnName}_${hash}`),
+                  undefined,
+                  visitedArgs
+                );
+              }
+              case "arrowSchema": {
+                exportSet.add("arrowSchema");
+
+                const arrowSchemaTypes: Array<{ name: string; ir: TypeIR }> = [];
+                const arrowArgs: readonly ts.Type[] = checker.isTupleType(tsType)
+                  ? checker.getTypeArguments(tsType as ts.TypeReference)
+                  : [tsType];
+
+                for (const elemType of arrowArgs) {
+                  const elemIR = extractTypeIR(elemType, checker);
+                  const sym = elemType.aliasSymbol ?? elemType.symbol;
+                  const name = sym && !sym.name.startsWith("__")
+                    ? sym.name
+                    : (elemIR.name ?? `Schema_${arrowSchemaTypes.length + 1}`);
+                  arrowSchemaTypes.push({ name, ir: elemIR });
+                }
+
+                registerType(hash, ir, { arrowSchemaTypes });
+
+                const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
+                return context.factory.createCallExpression(
+                  context.factory.createIdentifier(`__wiz_arrowSchema_${hash}`),
                   undefined,
                   visitedArgs
                 );

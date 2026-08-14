@@ -9,6 +9,7 @@ import {
   generateProtobufSchemaCode,
 } from "./protobuf.ts";
 import { generateAvroCode, generateAvroSchemaCode } from "./avro.ts";
+import { generateArrowCode, generateArrowSchemaCode } from "./arrow.ts";
 
 export interface VirtualModuleOptions {
   openApiTypes?: Array<{ name: string; ir: TypeIR }>;
@@ -17,6 +18,15 @@ export interface VirtualModuleOptions {
   service?: ServiceIR;
   protobufSchemaTypes?: Array<{ name: string; ir: TypeIR }>;
   avroSchemaTypes?: Array<{ name: string; ir: TypeIR }>;
+  arrowSchemaTypes?: Array<{ name: string; ir: TypeIR }>;
+  /**
+   * Whether to emit the Arrow codec.
+   *
+   * Unlike the other back ends this is opt-in, because generating it needs
+   * `apache-arrow` at build time to produce the schema message. A project that
+   * never mentions Arrow should never be asked for that dependency.
+   */
+  arrow?: boolean;
   /**
    * Export names to emit, when only some are wanted.
    *
@@ -38,6 +48,8 @@ const SECTION_EXPORTS = {
   protobufSchema: ["protobufSchema"],
   avro: ["encodeAvro", "decodeAvro"],
   avroSchema: ["avroSchema"],
+  arrow: ["encodeArrow", "decodeArrow"],
+  arrowSchema: ["arrowSchema"],
 } as const;
 
 export function generateVirtualModuleCode(
@@ -75,6 +87,14 @@ export function generateVirtualModuleCode(
 
   if (options?.avroSchemaTypes?.length && include("avroSchema")) {
     parts.push(generateAvroSchemaCode(options.avroSchemaTypes));
+  }
+
+  if (options?.arrow && include("arrow")) {
+    parts.push(generateArrowCode(ir));
+  }
+
+  if (options?.arrowSchemaTypes?.length && include("arrowSchema")) {
+    parts.push(generateArrowSchemaCode(options.arrowSchemaTypes));
   }
 
   return parts.join("\n\n");
