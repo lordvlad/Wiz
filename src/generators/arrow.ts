@@ -43,6 +43,17 @@ const FORMAT_TO_ARROW: Record<string, string> = {
   double: "Float64",
   byte: "Binary",
   binary: "Binary",
+  // Arrow has native columns at these widths, so nothing has to widen.
+  int8: "Int8",
+  int16: "Int16",
+  uint8: "Uint8",
+  uint16: "Uint16",
+  // 64-bit on the wire, but carried by a `number`, which is what the format
+  // states: an integer a double holds exactly.
+  "double-int": "Int64",
+  unixtime: "Int64",
+  "sf-integer": "Int64",
+  "sf-decimal": "Float64",
 };
 
 /**
@@ -63,6 +74,15 @@ export interface ArrowLeaf {
     | "date";
   /** Bit width for numeric and boolean layouts. */
   width: 8 | 16 | 32 | 64 | 1;
+  /**
+   * Which JS type the column round-trips as.
+   *
+   * A 64-bit column is a bigint when the property is one, and a number when it
+   * is a number - `@format double-int` is 64 bits wide and still a number.
+   * Getting this wrong changes the type on the way back, which is a silent
+   * round-trip failure rather than a wrong value.
+   */
+  js?: "number" | "bigint";
   /** Arrow type name, for the schema builder. */
   arrow: string;
 }
@@ -88,6 +108,10 @@ const LEAVES: Record<string, ArrowLeaf> = {
   Utf8: { kind: "utf8", width: 32, arrow: "Utf8" },
   Binary: { kind: "binary", width: 32, arrow: "Binary" },
   TimestampMillisecond: { kind: "timestamp", width: 64, arrow: "TimestampMillisecond" },
+  Int8: { kind: "int", width: 8, arrow: "Int8" },
+  Int16: { kind: "int", width: 16, arrow: "Int16" },
+  Uint8: { kind: "uint", width: 8, arrow: "Uint8" },
+  Uint16: { kind: "uint", width: 16, arrow: "Uint16" },
 };
 
 /** `T | undefined` reaching us is what makes an Arrow field nullable. */
@@ -143,12 +167,17 @@ function leafFor(ir: TypeIR, carrier?: Annotated): ArrowLeaf | undefined {
       return LEAVES.Binary;
     case "date":
       return LEAVES.TimestampMillisecond;
-    case "bigint":
+    case "bigint": {
       // 64-bit by definition, though `@format int32` may still narrow it.
-      return LEAVES[named ?? "Int64"] ?? LEAVES.Int64;
-    case "number":
-      // A JS number is a double; `@format` is what narrows it.
-      return LEAVES[named ?? "Float64"] ?? LEAVES.Float64;
+      const leaf = LEAVES[named ?? "Int64"] ?? LEAVES.Int64!;
+      return { ...leaf, js: "bigint" };
+    }
+    case "number": {
+      // A JS number is a double; `@format` is what narrows it. The carrier
+      // stays a number even at 64 bits, which is what `double-int` means.
+      const leaf = LEAVES[named ?? "Float64"] ?? LEAVES.Float64!;
+      return { ...leaf, js: "number" };
+    }
     default:
       return undefined;
   }
@@ -448,6 +477,8 @@ function sampleColumn(field: ArrowField, A: ArrowModule): unknown {
       return make([new Date(1)], type);
     case "int":
     case "uint":
+      // A 64-bit arrow column takes a bigint sample even when the property is
+      // a number, because that is what the builder for that type accepts.
       return make([field.leaf.width === 64 ? 1n : 1], type);
     case "float":
       return make([1], type);
@@ -503,7 +534,7 @@ function emitValues(leaf: ArrowLeaf, access: string): string[] {
       ];
     case "int":
     case "uint":
-    case "timestamp":
+    case "timestamp": {
       if (leaf.width === 64) {
         const setter = leaf.kind === "uint" ? "setBigUint64" : "setBigInt64";
         const coerce =
@@ -518,13 +549,32 @@ function emitValues(leaf: ArrowLeaf, access: string): string[] {
           `      }`,
         ];
       }
+      // Arrow stores narrow integers at their real width, so the buffer is
+      // n * 1 or n * 2 bytes rather than widened to four.
+      const bytes = leaf.width === 8 ? 1 : leaf.width === 16 ? 2 : 4;
+      const setter =
+        leaf.kind === "uint"
+          ? bytes === 1
+            ? "setUint8"
+            : bytes === 2
+              ? "setUint16"
+              : "setUint32"
+          : bytes === 1
+            ? "setInt8"
+            : bytes === 2
+              ? "setInt16"
+              : "setInt32";
+      // The value is already known to fit: the validator enforces the declared
+      // range, so this is a store, not a truncation.
+      const args = bytes === 1 ? "" : ", true";
       return [
-        `      len = n * 4;`,
+        `      len = n * ${bytes};`,
         `      for (let i = 0; i < n; i++) {`,
         `        const v = ${access.replace("!= null", "")};`,
-        `        view.${leaf.kind === "uint" ? "setUint32" : "setInt32"}(o + i * 4, Number(v ?? 0) | 0, true);`,
+        `        view.${setter}(o + i * ${bytes}, Number(v ?? 0)${args});`,
         `      }`,
       ];
+    }
     case "float":
       return [
         `      len = n * ${leaf.width === 32 ? 4 : 8};`,
@@ -829,6 +879,14 @@ function emitDecodeColumn(field: ArrowField, slot: number): string[] {
   } else {
     const at = `valuesAt`;
     const read = (() => {
+      // A 64-bit column reads back as a bigint unless the property is a number,
+      // which `@format double-int` and `unixtime` both are: returning the wrong
+      // JS type round-trips the value and loses the type.
+      const wide = (getter: string) =>
+        leaf.js === "number"
+          ? `Number(view.${getter}(${at} + i * 8, true))`
+          : `view.${getter}(${at} + i * 8, true)`;
+
       switch (leaf.kind) {
         case "bool":
           return `(buf[${at} + (i >> 3)] & (1 << (i & 7))) !== 0`;
@@ -839,13 +897,15 @@ function emitDecodeColumn(field: ArrowField, slot: number): string[] {
             ? `view.getFloat32(${at} + i * 4, true)`
             : `view.getFloat64(${at} + i * 8, true)`;
         case "uint":
-          return leaf.width === 64
-            ? `view.getBigUint64(${at} + i * 8, true)`
-            : `view.getUint32(${at} + i * 4, true)`;
+          if (leaf.width === 64) return wide("getBigUint64");
+          if (leaf.width === 8) return `view.getUint8(${at} + i)`;
+          if (leaf.width === 16) return `view.getUint16(${at} + i * 2, true)`;
+          return `view.getUint32(${at} + i * 4, true)`;
         default:
-          return leaf.width === 64
-            ? `view.getBigInt64(${at} + i * 8, true)`
-            : `view.getInt32(${at} + i * 4, true)`;
+          if (leaf.width === 64) return wide("getBigInt64");
+          if (leaf.width === 8) return `view.getInt8(${at} + i)`;
+          if (leaf.width === 16) return `view.getInt16(${at} + i * 2, true)`;
+          return `view.getInt32(${at} + i * 4, true)`;
       }
     })();
     lines.push(

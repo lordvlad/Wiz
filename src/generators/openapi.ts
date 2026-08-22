@@ -2,6 +2,8 @@ import {
   collectNamedTypes,
   flattenObjectProperties,
   isUserNamedType,
+  INTEGER_FORMATS,
+  SAFE_INTEGER,
   type Annotated,
   type Constraint,
   type TypeIR,
@@ -20,6 +22,16 @@ function applyConstraints(
   if (!constraints) return;
   for (const c of constraints) {
     schema[c.kind] = c.value;
+
+    // The registry defines each integer format as a range; stating it makes the
+    // document enforceable rather than merely descriptive.
+    if (c.kind === "format" && typeof c.value === "string") {
+      const range = INTEGER_FORMATS[c.value];
+      if (range) {
+        if (range.min >= -SAFE_INTEGER) schema.minimum = Number(range.min);
+        if (range.max <= SAFE_INTEGER) schema.maximum = Number(range.max);
+      }
+    }
   }
 }
 

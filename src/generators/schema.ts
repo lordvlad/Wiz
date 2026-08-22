@@ -1,9 +1,23 @@
 import type { Annotated, Constraint, TypeIR } from "../types.ts";
+import { INTEGER_FORMATS, SAFE_INTEGER } from "../types.ts";
 
 function applyConstraints(schema: Record<string, unknown>, constraints?: Constraint[]) {
   if (!constraints) return;
   for (const c of constraints) {
     schema[c.kind] = c.value;
+
+    // A width is a range, so say so. `format` alone is an annotation a
+    // validator may ignore, which is how an out-of-range value slips through
+    // to a codec that then narrows it.
+    if (c.kind === "format" && typeof c.value === "string") {
+      const range = INTEGER_FORMATS[c.value];
+      if (range) {
+        // Bounds a JSON number cannot state exactly are left out rather than
+        // rounded: an approximate bound would reject or admit the wrong values.
+        if (range.min >= -SAFE_INTEGER) schema.minimum = Number(range.min);
+        if (range.max <= SAFE_INTEGER) schema.maximum = Number(range.max);
+      }
+    }
   }
 }
 

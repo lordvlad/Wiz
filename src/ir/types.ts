@@ -446,3 +446,40 @@ export function declaredFormat(
   }
   return undefined;
 }
+
+/**
+ * The value range each integer `@format` promises.
+ *
+ * One table so the validator, the JSON Schema bounds and every codec agree on
+ * what a width means. Bounds are bigints because `int64` and `uint64` exceed
+ * what a JS number can represent exactly, which is the whole reason a value
+ * outside them cannot be trusted.
+ *
+ * The protobuf-specific spellings appear too: `sint`/`sfixed` differ from
+ * `int` only in how they are written, not in what they can hold.
+ */
+export const INTEGER_FORMATS: Record<string, { min: bigint; max: bigint }> = {
+  int8: { min: -128n, max: 127n },
+  int16: { min: -32768n, max: 32767n },
+  int32: { min: -2147483648n, max: 2147483647n },
+  int64: { min: -(2n ** 63n), max: 2n ** 63n - 1n },
+  uint8: { min: 0n, max: 255n },
+  uint16: { min: 0n, max: 65535n },
+  uint32: { min: 0n, max: 4294967295n },
+  uint64: { min: 0n, max: 2n ** 64n - 1n },
+  sint32: { min: -2147483648n, max: 2147483647n },
+  sint64: { min: -(2n ** 63n), max: 2n ** 63n - 1n },
+  sfixed32: { min: -2147483648n, max: 2147483647n },
+  sfixed64: { min: -(2n ** 63n), max: 2n ** 63n - 1n },
+  fixed32: { min: 0n, max: 4294967295n },
+  fixed64: { min: 0n, max: 2n ** 64n - 1n },
+  // Exactly the integers a double holds without loss, which is what the format
+  // means, and also the practical limit for any 64-bit width carried by a
+  // `number` rather than a `bigint`.
+  "double-int": { min: -(2n ** 53n - 1n), max: 2n ** 53n - 1n },
+  "sf-integer": { min: -999999999999999n, max: 999999999999999n },
+  unixtime: { min: -(2n ** 63n), max: 2n ** 63n - 1n },
+};
+
+/** Integers a JS number holds exactly; beyond this a `number` is already wrong. */
+export const SAFE_INTEGER = 9007199254740991n;

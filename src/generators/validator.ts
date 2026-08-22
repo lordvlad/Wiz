@@ -1,5 +1,5 @@
 import type { Constraint, ObjectTypeIR, PropertyIR, TypeIR } from "../types.ts";
-import { walkTypeIR } from "../types.ts";
+import { INTEGER_FORMATS, SAFE_INTEGER, walkTypeIR } from "../types.ts";
 
 /** A JS boolean expression testing whether `varName` matches `ir`. */
 export function generateTypeCheckExpression(ir: TypeIR, varName: string): string {
@@ -127,6 +127,23 @@ function generateConstraintCheckStatements(
         } else if (val === "uuid") {
           statements.push(
             `if (typeof ${varName} === "string" && !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(${varName})) errors.push({ path: ${pathVar}, message: "Invalid UUID format", constraint: "format", expected: "uuid", actual: ${varName} });`
+          );
+        } else if (typeof val === "string" && INTEGER_FORMATS[val]) {
+          // A width that is declared and not checked is the worst of both: the
+          // codecs narrow the value to fit and the wrong number travels.
+          const { min, max } = INTEGER_FORMATS[val]!;
+          const expected = `${val} (${min}..${max})`;
+
+          // A number is checked against the range a number can state exactly;
+          // past that the value is already imprecise, whatever the width allows.
+          const numberMin = min < -SAFE_INTEGER ? -SAFE_INTEGER : min;
+          const numberMax = max > SAFE_INTEGER ? SAFE_INTEGER : max;
+
+          statements.push(
+            `if (typeof ${varName} === "number" && (!Number.isInteger(${varName}) || ${varName} < ${numberMin} || ${varName} > ${numberMax})) errors.push({ path: ${pathVar}, message: "Expected an integer in range for ${val}", constraint: "format", expected: ${JSON.stringify(expected)}, actual: ${varName} });`
+          );
+          statements.push(
+            `if (typeof ${varName} === "bigint" && (${varName} < ${min}n || ${varName} > ${max}n)) errors.push({ path: ${pathVar}, message: "Expected an integer in range for ${val}", constraint: "format", expected: ${JSON.stringify(expected)}, actual: ${varName} });`
           );
         }
         break;

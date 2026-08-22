@@ -133,39 +133,56 @@ interface User {
 ### `@format` picks the wire type
 
 One annotation drives the JSON Schema format, the OpenAPI format, the protobuf
-field type and the Avro type. The values are the OpenAPI Format Registry's, so
-there is nothing wiz-specific to learn.
+field type, the Avro type and the Arrow column. The values are the OpenAPI
+Format Registry's, so there is nothing wiz-specific to learn.
 
-| `@format` | on | proto | Avro | JSON Schema |
-|---|---|---|---|---|
-| *(none)* | `number` | `double` | `double` | `number` |
-| `int32` | `number` | `int32` | `int` | `number` + `int32` |
-| `int64` | `number` | `int64` | `long` | `number` + `int64` |
-| `int64` | `bigint` | `int64` | `long` | `string` + pattern |
-| `uint32` / `uint64` | `number` | same | `long` | `number` + format |
-| `sint32` / `sint64` | `number` | zig-zag varint | `int` / `long` | `number` + format |
-| `fixed32` / `sfixed32` | `number` | 4 bytes | `int` | `number` + format |
-| `fixed64` / `sfixed64` | `bigint` | 8 bytes | `long` | `string` + pattern |
-| `float` | `number` | `float` | `float` | `number` + `float` |
-| `uuid` | `string` | `string` | `{string, uuid}` | `string` + `uuid` |
-| `date` / `time` | `string` | `string` | `{int, date}` / `{int, time-millis}` | `string` + format |
-| `date-time` | `string` | `string` | `{long, timestamp-millis}` | `string` + format |
-| `byte` / `binary` | `string` | `string` | `bytes` | `string` + format |
+| `@format` | on | proto | Avro | Arrow | JSON Schema |
+|---|---|---|---|---|---|
+| *(none)* | `number` | `double` | `double` | `Float64` | `number` |
+| `int8` / `int16` | `number` | `int32` | `int` | `Int8` / `Int16` | `number` + bounds |
+| `uint8` / `uint16` | `number` | `uint32` | `int` | `Uint8` / `Uint16` | `number` + bounds |
+| `int32` | `number` | `int32` | `int` | `Int32` | `number` + bounds |
+| `uint32` | `number` | `uint32` | `long` | `Uint32` | `number` + bounds |
+| `int64` | `bigint` | `int64` | `long` | `Int64` | `string` + pattern |
+| `uint64` | `bigint` | `uint64` | `long` | `Uint64` | `string` + pattern |
+| `sint32` / `sint64` | `number` / `bigint` | zig-zag varint | `int` / `long` | `Int32` / `Int64` | + bounds |
+| `fixed32` / `sfixed32` | `number` | 4 bytes | `int` | `Uint32` / `Int32` | + bounds |
+| `fixed64` / `sfixed64` | `bigint` | 8 bytes | `long` | `Uint64` / `Int64` | `string` + pattern |
+| `double-int` | `number` | `int64` | `long` | `Int64` | `number` + bounds |
+| `unixtime` | `number` | `int64` | `long` | `Int64` | `number` + bounds |
+| `sf-integer` / `sf-decimal` | `number` | `int64` / `double` | `long` / `double` | `Int64` / `Float64` | `number` |
+| `float` | `number` | `float` | `float` | `Float32` | `number` + `float` |
+| `uuid` | `string` | `string` | `{string, uuid}` | `Utf8` | `string` + `uuid` |
+| `date` / `time` | `string` | `string` | `{int, date}` / `{int, time-millis}` | `Utf8` | `string` + format |
+| `date-time` | `string` | `string` | `{long, timestamp-millis}` | `Utf8` | `string` + format |
+| `byte` / `binary` | `string` | `string` | `bytes` | `Binary` | `string` + format |
 
 A plain `number` is a `double`, because in JavaScript it is one. Opt into a
 compact integer with `@format int32`.
 
+**A width is a range, and the range is enforced.** `@format int32` with
+`3000000000` is rejected by `validate`/`is` rather than wrapped to
+`-1294967296` by the codec, and the JSON Schema and OpenAPI output carry the
+matching `minimum`/`maximum` so any other validator agrees. A fractional value
+fails an integer width for the same reason, as does a `number` beyond 2^53 —
+past that the value is already wrong, whatever the width permits.
+
+Widths narrower than 32 bits are native columns in Arrow, and travel in the
+smallest type protobuf and Avro have, since neither has an 8- or 16-bit
+integer. Nothing widens silently, because the declared range is checked first.
+
 A `bigint` is described as a *string* in JSON Schema, with a digits pattern:
 JSON numbers are doubles, so precision above 2^53 dies on the way out, and
 `JSON.stringify` refuses a BigInt outright. The binary codecs carry the full
-64 bits.
+64 bits. Bounds that a JSON number cannot state exactly are omitted rather
+than rounded, since an approximate bound admits or rejects the wrong values.
 
 `Uint8Array` and `Date` need no annotation — they are scalars everywhere:
 
-| type | proto | Avro | JSON Schema |
-|---|---|---|---|
-| `Uint8Array` | `bytes` | `bytes` | `string`, base64 |
-| `Date` | `int64` | `{long, timestamp-millis}` | `string`, `date-time` |
+| type | proto | Avro | Arrow | JSON Schema |
+|---|---|---|---|---|
+| `Uint8Array` | `bytes` | `bytes` | `Binary` | `string`, base64 |
+| `Date` | `int64` | `{long, timestamp-millis}` | `Timestamp<ms>` | `string`, `date-time` |
 
 ## OpenAPI
 

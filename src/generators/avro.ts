@@ -44,6 +44,17 @@ const FORMAT_TO_AVRO: Record<string, AvroPrimitive> = {
   double: "double",
   byte: "bytes",
   binary: "bytes",
+  // Avro has no integer narrower than 32 bits and none unsigned, so the narrow
+  // registry widths travel in the smallest signed type that holds them. The
+  // declared range is enforced by the validator, so nothing widens silently.
+  int8: "int",
+  int16: "int",
+  uint8: "int",
+  uint16: "int",
+  "double-int": "long",
+  unixtime: "long",
+  "sf-integer": "long",
+  "sf-decimal": "double",
 };
 
 /**

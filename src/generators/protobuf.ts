@@ -100,6 +100,59 @@ const PROTO_NUMERICS: Record<string, ProtoNumeric> = {
     write: (t) => `view.setFloat64(o, Number(${t}), true); o += 8;`,
     read: `const res = view.getFloat64(o, true); o += 8;`,
   },
+  // protobuf has no integer narrower than 32 bits, so the narrow registry
+  // widths travel in the smallest type that holds them. The declared range is
+  // still enforced by the validator, so nothing widens silently.
+  int8: {
+    proto: "int32",
+    wire: 0,
+    write: (t) => `o += writeVarint(buf, o, ${t});`,
+    read: `let res; [res, o] = readVarint64(buf, o); res = Number(BigInt.asIntN(32, res));`,
+  },
+  int16: {
+    proto: "int32",
+    wire: 0,
+    write: (t) => `o += writeVarint(buf, o, ${t});`,
+    read: `let res; [res, o] = readVarint64(buf, o); res = Number(BigInt.asIntN(32, res));`,
+  },
+  uint8: {
+    proto: "uint32",
+    wire: 0,
+    write: (t) => `o += writeVarint(buf, o, ${t});`,
+    read: `let res; [res, o] = readVarint(buf, o);`,
+  },
+  uint16: {
+    proto: "uint32",
+    wire: 0,
+    write: (t) => `o += writeVarint(buf, o, ${t});`,
+    read: `let res; [res, o] = readVarint(buf, o);`,
+  },
+  // An integer a double holds exactly, so it is 64-bit on the wire but stays a
+  // `number` in JS - which is the whole point of the format.
+  "double-int": {
+    proto: "int64",
+    wire: 0,
+    write: (t) => `o += writeVarint64(buf, o, ${t});`,
+    read: `let res; [res, o] = readVarint64(buf, o);`,
+  },
+  unixtime: {
+    proto: "int64",
+    wire: 0,
+    write: (t) => `o += writeVarint64(buf, o, ${t});`,
+    read: `let res; [res, o] = readVarint64(buf, o);`,
+  },
+  "sf-integer": {
+    proto: "int64",
+    wire: 0,
+    write: (t) => `o += writeVarint64(buf, o, ${t});`,
+    read: `let res; [res, o] = readVarint64(buf, o);`,
+  },
+  "sf-decimal": {
+    proto: "double",
+    wire: 1,
+    write: (t) => `view.setFloat64(o, Number(${t}), true); o += 8;`,
+    read: `const res = view.getFloat64(o, true); o += 8;`,
+  },
 };
 
 /** Widths that must round-trip as BigInt rather than Number. */
