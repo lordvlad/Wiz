@@ -228,15 +228,31 @@ function roundTripDocument(version: "3.0" | "3.1") {
                 prefixItems: [{ type: "string" }, { type: "number" }],
               },
             }),
-        // 3.0 exclusive bounds are booleans, so they get their own assertion.
+        // Each dialect's own spelling of an exclusive bound: a boolean
+        // modifier in 3.0, a numeric keyword in 3.1.
         Bounded: v30
-          ? { type: "number", minimum: 0, maximum: 10, multipleOf: 2 }
+          ? {
+              type: "number",
+              minimum: 0,
+              exclusiveMinimum: true,
+              maximum: 10,
+              exclusiveMaximum: true,
+              multipleOf: 2,
+            }
           : {
               type: "number",
               exclusiveMinimum: 0,
               exclusiveMaximum: 10,
               multipleOf: 2,
             },
+        // An integer format states its own range, and the extractor knows not
+        // to read that range back as an author-written constraint.
+        Counter: {
+          type: "number",
+          format: "int32",
+          minimum: -2147483648,
+          maximum: 2147483647,
+        },
         // The generator spells a bigint literal as a string enum + int64.
         Answer: { type: "string", format: "int64", enum: ["42"] },
       },
@@ -309,20 +325,22 @@ describe("individual schema mappings", () => {
     });
   });
 
-  test("a 3.0 boolean exclusiveMinimum becomes a numeric bound", () => {
+  test("a 3.0 boolean exclusiveMinimum is one bound, and round-trips", () => {
     const { ir, regenerated } = regenerate(
       wrap({ type: "integer", minimum: 5, exclusiveMinimum: true }, "3.0")
     );
     const x = ir.types.get("X")!;
     expect(x.constraints).toEqual([{ kind: "exclusiveMinimum", value: 5 }]);
-    // `integer` has no IR of its own; the generator only emits `number`.
+    // Back out as the 3.0 pair, which is the only spelling that dialect's own
+    // schema accepts. `integer` has no IR of its own, so it becomes `number`.
     expect(regenerated.components.schemas.X).toEqual({
-      exclusiveMinimum: 5,
       type: "number",
+      minimum: 5,
+      exclusiveMinimum: true,
     });
   });
 
-  test("a 3.0 boolean exclusiveMaximum becomes a numeric bound", () => {
+  test("a 3.0 boolean exclusiveMaximum is one bound", () => {
     const { ir } = regenerate(
       wrap({ type: "number", maximum: 9, exclusiveMaximum: true }, "3.0")
     );
@@ -332,9 +350,43 @@ describe("individual schema mappings", () => {
   });
 
   test("a 3.1 numeric exclusiveMinimum passes straight through", () => {
-    const { ir } = regenerate(wrap({ type: "number", exclusiveMinimum: 5 }));
+    const { ir, regenerated } = regenerate(
+      wrap({ type: "number", exclusiveMinimum: 5 })
+    );
     expect(ir.types.get("X")!.constraints).toEqual([
       { kind: "exclusiveMinimum", value: 5 },
+    ]);
+    expect(regenerated.components.schemas.X).toEqual({
+      type: "number",
+      exclusiveMinimum: 5,
+    });
+  });
+
+  test("a range an integer format implies is not read back as a constraint", () => {
+    // The generator derives minimum/maximum from the format to make the
+    // document enforceable. Reading those back would invent constraints the
+    // author never wrote, and the pair would never round-trip.
+    const { ir, regenerated } = regenerate(
+      wrap({ type: "integer", format: "int32" })
+    );
+    expect(ir.types.get("X")!.constraints).toEqual([
+      { kind: "format", value: "int32" },
+    ]);
+    expect(regenerated.components.schemas.X).toEqual({
+      type: "number",
+      format: "int32",
+      minimum: -2147483648,
+      maximum: 2147483647,
+    });
+  });
+
+  test("a bound the author wrote alongside an integer format survives", () => {
+    const { ir } = regenerate(
+      wrap({ type: "integer", format: "int32", minimum: 10 })
+    );
+    expect(ir.types.get("X")!.constraints).toEqual([
+      { kind: "minimum", value: 10 },
+      { kind: "format", value: "int32" },
     ]);
   });
 

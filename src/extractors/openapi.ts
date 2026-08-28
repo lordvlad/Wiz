@@ -6,12 +6,15 @@ import {
 } from "../ir/api.ts";
 import type {
   Annotated,
-  Constraint,
-  ConstraintKind,
   EnumMemberIR,
   PropertyIR,
   TypeIR,
 } from "../ir/types.ts";
+import {
+  keywordsToAnnotations,
+  keywordsToConstraints,
+  PRIMITIVE_FORMATS,
+} from "../openapiDialect.ts";
 import type {
   HttpMethodName,
   ParameterIR,
@@ -113,87 +116,18 @@ function reportUnsupported(schema: JsonObject, ctx: Ctx, pointer: string): void 
   }
 }
 
-const PLAIN_CONSTRAINTS = [
-  "minLength",
-  "maxLength",
-  "pattern",
-  "multipleOf",
-  "minItems",
-  "maxItems",
-  "uniqueItems",
-] as const satisfies readonly ConstraintKind[];
-
-function readConstraints(
-  schema: JsonObject,
-  ctx: Ctx,
-  consumedFormat: boolean
-): Constraint[] {
-  const out: Constraint[] = [];
-  const isNum = (v: unknown) => typeof v === "number";
-
-  if (ctx.version === "3.0") {
-    // A 3.0 `exclusiveMinimum` is a boolean modifier on `minimum`, so the pair
-    // collapses into one numeric bound. Reading it as a bound would invert it.
-    if (isNum(schema.minimum)) {
-      out.push({
-        kind: schema.exclusiveMinimum === true ? "exclusiveMinimum" : "minimum",
-        value: schema.minimum,
-      });
-    }
-    if (isNum(schema.maximum)) {
-      out.push({
-        kind: schema.exclusiveMaximum === true ? "exclusiveMaximum" : "maximum",
-        value: schema.maximum,
-      });
-    }
-  } else {
-    if (isNum(schema.minimum)) {
-      out.push({ kind: "minimum", value: schema.minimum });
-    }
-    if (isNum(schema.maximum)) {
-      out.push({ kind: "maximum", value: schema.maximum });
-    }
-    if (isNum(schema.exclusiveMinimum)) {
-      out.push({ kind: "exclusiveMinimum", value: schema.exclusiveMinimum });
-    }
-    if (isNum(schema.exclusiveMaximum)) {
-      out.push({ kind: "exclusiveMaximum", value: schema.exclusiveMaximum });
-    }
-  }
-
-  for (const kind of PLAIN_CONSTRAINTS) {
-    if (schema[kind] !== undefined) out.push({ kind, value: schema[kind] });
-  }
-
-  // A `format` that picked the primitive is already encoded in the node's type;
-  // keeping it would make the generator emit it from two sources.
-  if (!consumedFormat && typeof schema.format === "string") {
-    out.push({ kind: "format", value: schema.format });
-  }
-
-  return out;
-}
-
 function readAnnotations(
   schema: JsonObject,
   ctx: Ctx,
   consumedFormat: boolean
 ): Annotated {
-  const annotated: Annotated = {};
-  if (typeof schema.description === "string") {
-    annotated.description = schema.description;
-  }
-  if (schema.deprecated === true) {
-    annotated.deprecated = { isDeprecated: true };
-  }
-  const constraints = readConstraints(schema, ctx, consumedFormat);
+  const annotated = keywordsToAnnotations(schema);
+  const constraints = keywordsToConstraints(
+    schema,
+    ctx.version,
+    consumedFormat
+  );
   if (constraints.length > 0) annotated.constraints = constraints;
-  if (Array.isArray(schema.examples)) {
-    annotated.examples = schema.examples;
-  } else if (schema.example !== undefined) {
-    annotated.examples = [schema.example];
-  }
-  if (schema.default !== undefined) annotated.default = schema.default;
   return annotated;
 }
 
@@ -265,13 +199,12 @@ function schemaToIR(
       : undefined;
   const nonNull = typeNames?.filter((t) => t !== "null");
 
-  // `type: "string"` plus one of three formats is how the generator spells
+  // `type: "string"` plus one of a few formats is how the generator spells
   // bigint/bytes/date, so those formats are part of the type, not a constraint.
   const consumedFormat =
     Boolean(nonNull?.includes("string")) &&
-    (raw.format === "int64" ||
-      raw.format === "byte" ||
-      raw.format === "date-time");
+    typeof raw.format === "string" &&
+    raw.format in PRIMITIVE_FORMATS;
 
   const annotated = readAnnotations(raw, ctx, consumedFormat);
 
@@ -408,14 +341,14 @@ function typeToIR(
 
   switch (typeName) {
     case "string": {
-      if (raw.format === "int64") {
-        return { ...base, kind: "primitive", type: "bigint" };
-      }
-      if (raw.format === "byte" || raw.contentEncoding === "base64") {
+      const named =
+        typeof raw.format === "string"
+          ? PRIMITIVE_FORMATS[raw.format]
+          : undefined;
+      if (named) return { ...base, kind: "primitive", type: named };
+      // 3.1 defers to JSON Schema's contentEncoding for binary.
+      if (raw.contentEncoding === "base64") {
         return { ...base, kind: "primitive", type: "bytes" };
-      }
-      if (raw.format === "date-time") {
-        return { ...base, kind: "primitive", type: "date" };
       }
       return { ...base, kind: "primitive", type: "string" };
     }

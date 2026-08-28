@@ -1,4 +1,11 @@
 // @wiz-ignore
+//
+// This file asserts the *untransformed* behaviour of the wiz helpers, so it
+// must not be transformed. `@wiz-ignore` above is what guarantees that, which
+// is why this file does not care whether another test has already called
+// `plugin(wizPlugin())` on the process. It used to be named `00_stubs` to sort
+// first; that prefix suggested a load-bearing ordering dependency that never
+// existed.
 import { describe, expect, test } from "bun:test";
 import {
   is,

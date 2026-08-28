@@ -1,12 +1,14 @@
 import {
   collectNamedTypes,
   isUserNamedType,
-  INTEGER_FORMATS,
-  SAFE_INTEGER,
   type Annotated,
   type Constraint,
   type TypeIR,
 } from "../types.ts";
+import {
+  annotationsToKeywords,
+  constraintsToKeywords,
+} from "../openapiDialect.ts";
 import {
   emptyService,
   type ParameterIR,
@@ -17,44 +19,18 @@ import {
 
 function applyConstraints(
   schema: Record<string, unknown>,
-  constraints?: Constraint[]
+  constraints: Constraint[] | undefined,
+  version: "3.0" | "3.1"
 ) {
-  if (!constraints) return;
-  for (const c of constraints) {
-    schema[c.kind] = c.value;
-
-    // The registry defines each integer format as a range; stating it makes the
-    // document enforceable rather than merely descriptive.
-    if (c.kind === "format" && typeof c.value === "string") {
-      const range = INTEGER_FORMATS[c.value];
-      if (range) {
-        if (range.min >= -SAFE_INTEGER) schema.minimum = Number(range.min);
-        if (range.max <= SAFE_INTEGER) schema.maximum = Number(range.max);
-      }
-    }
-  }
+  Object.assign(schema, constraintsToKeywords(constraints, version));
 }
 
-/**
- * Descriptive keywords.
- *
- * The two dialects genuinely differ here: an OpenAPI 3.0 Schema Object carries
- * a single `example`, while 3.1 follows JSON Schema 2020-12 and takes an
- * `examples` array. `meta` is not emitted — arbitrary JSDoc tags are not
- * OpenAPI keywords, and inventing `x-` extensions from them would be noise.
- */
 function applyAnnotations(
   schema: Record<string, unknown>,
   node: Annotated,
   version: "3.0" | "3.1"
 ) {
-  if (node.default !== undefined) schema.default = node.default;
-  if (!node.examples || node.examples.length === 0) return;
-  if (version === "3.0") {
-    schema.example = node.examples[0];
-  } else {
-    schema.examples = node.examples;
-  }
+  Object.assign(schema, annotationsToKeywords(node, version));
 }
 
 export function irToOpenApiSchema(
@@ -79,7 +55,7 @@ export function irToOpenApiSchema(
     }
   }
 
-  applyConstraints(schema, ir.constraints);
+  applyConstraints(schema, ir.constraints, version);
   applyAnnotations(schema, ir, version);
 
   switch (ir.kind) {
@@ -177,7 +153,7 @@ export function irToOpenApiSchema(
         if (prop.deprecated?.isDeprecated) {
           propSchema.deprecated = true;
         }
-        applyConstraints(propSchema, prop.constraints);
+        applyConstraints(propSchema, prop.constraints, version);
         applyAnnotations(propSchema, prop, version);
         propertiesSchema[prop.name] = propSchema;
 
