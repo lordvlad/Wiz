@@ -1,4 +1,4 @@
-import type { TypeIR } from "./types.ts";
+import { normalizeTypeIR, type TypeIR } from "./types.ts";
 
 /**
  * Transport a service method speaks. Every address/request/response carries it
@@ -116,4 +116,37 @@ export interface ServiceIR {
 
 export function emptyService(): ServiceIR {
   return { kind: "service", methods: [] };
+}
+
+/**
+ * Stable, content-addressable projection of a service method, so two methods
+ * that describe the same call hash alike and two that do not never collide.
+ * Lives here rather than in the plugin because the virtual-module registry
+ * keys on it too.
+ */
+export function normalizeServiceMethod(method: ServiceMethodIR): unknown {
+  const bodyKey = (bodies: ServiceMethodBodyIR[] | undefined) =>
+    (bodies ?? []).map((b) => ({ m: b.mimetype, c: normalizeTypeIR(b.content) }));
+
+  return {
+    a: method.address,
+    o: method.overrides ?? null,
+    q: (method.request.parameters ?? []).map((p) => [
+      p.name,
+      p.in,
+      p.required,
+      normalizeTypeIR(p.type),
+    ]),
+    b: bodyKey(method.request.body),
+    bc: method.request.bodyComponent ?? null,
+    r: method.responses.map((response) => ({
+      s: response.status,
+      b: bodyKey(response.body),
+      h: (response.headers ?? []).map((h) => [
+        h.name,
+        h.required,
+        normalizeTypeIR(h.type),
+      ]),
+    })),
+  };
 }

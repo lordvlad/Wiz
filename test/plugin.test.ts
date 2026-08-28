@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { plugin } from "bun";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { wizPlugin } from "../src/plugin.ts";
 
 // Register plugin globally for Bun runtime
@@ -77,14 +80,28 @@ describe("wizPlugin End-to-End", () => {
     expect(f2.validateItem({ id: "1", title: "Item 1" })).toEqual([]);
   });
   test("works with Bun.build bundler pipeline", async () => {
-    const buildOutput = await Bun.build({
-      entrypoints: ["./test/fixtures/userFixture.ts"],
-      plugins: [wizPlugin()],
-    });
+    const outdir = await mkdtemp(join(tmpdir(), "wiz-plugin-build-"));
+    try {
+      const buildOutput = await Bun.build({
+        entrypoints: ["./test/fixtures/userFixture.ts"],
+        plugins: [wizPlugin()],
+        outdir,
+      });
 
-    expect(buildOutput.success).toBe(true);
-    expect(buildOutput.outputs.length).toBeGreaterThan(0);
-    const code = await buildOutput.outputs[0]!.text();
-    expect(code).toContain("var userKeys = keys;");
+      expect(buildOutput.success).toBe(true);
+      expect(buildOutput.outputs.length).toBeGreaterThan(0);
+
+      // The bundle is imported rather than pattern-matched: what matters is
+      // that the built artifact still answers correctly, not how Bun happened
+      // to name its variables. The specifier cannot be static — it is a build
+      // artifact in a temp directory that exists only while this test runs.
+      const built = await import(buildOutput.outputs[0]!.path);
+      expect(built.userKeys).toEqual(["id", "name", "age", "email"]);
+      expect(built.checkUserIs({ id: "u1", name: "Ada", email: "a@b.co" })).toBe(
+        true
+      );
+    } finally {
+      await rm(outdir, { recursive: true, force: true });
+    }
   });
 });
