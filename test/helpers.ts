@@ -1,8 +1,9 @@
 import ts from "typescript";
 import { extractTypeIR } from "../src/extractors/typescript.ts";
-import type { TypeIR } from "../src/types.ts";
+import { flattenObjectProperties, type TypeIR } from "../src/types.ts";
 import type {
   HttpMethodName,
+  ParameterIR,
   ServiceIR,
   ServiceMethodIR,
   ServiceMethodRequestIR,
@@ -24,6 +25,7 @@ const compilerOptions: ts.CompilerOptions = {
  */
 const libFileCache = new Map<string, ts.SourceFile | undefined>();
 const programCache = new Map<string, ts.Program>();
+process.on('exit', () => { if ((globalThis as any).__progs) console.error(`__PROGRAMS__ ${(globalThis as any).__progs} ${programCache.size}`); });
 
 function programFor(sourceText: string): ts.Program {
   const cached = programCache.get(sourceText);
@@ -55,6 +57,8 @@ function programFor(sourceText: string): ts.Program {
     return libFileCache.get(fileName);
   };
 
+  (globalThis as any).__progs = ((globalThis as any).__progs ?? 0) + 1;
+  process.on?.('exit', () => {});
   const program = ts.createProgram([VIRTUAL_ENTRY], compilerOptions, host);
   programCache.set(sourceText, program);
   return program;
@@ -140,20 +144,36 @@ export function evalModule<T>(code: string): T {
     `${code.replace(/export /g, "")}\nreturn { ${collected} };`
   )() as T;
 }
+/**
+ * Turns a fixture interface's IR into the flat `ParameterIR[]` the IR now
+ * carries, the same way `src/plugin.ts` does for `op<{ … }>` slots.
+ */
+export function params(
+  ir: TypeIR,
+  location: ParameterIR["in"]
+): ParameterIR[] {
+  return flattenObjectProperties(ir).map((property) => ({
+    name: property.name,
+    in: location,
+    required: location === "path" ? true : !property.optional,
+    type: property.type,
+  }));
+}
+
 /** Concise `ServiceMethodIR` builder for generator tests. */
 export function httpMethod(spec: {
   method: string;
   path: string;
-  pathParameters?: TypeIR;
-  queryParameters?: TypeIR;
+  parameters?: ParameterIR[];
   body?: TypeIR;
   response?: TypeIR;
   status?: number;
   overrides?: string;
 }): ServiceMethodIR {
   const request: ServiceMethodRequestIR = { protocol: "http" };
-  if (spec.pathParameters) request.pathParameters = spec.pathParameters;
-  if (spec.queryParameters) request.queryParameters = spec.queryParameters;
+  if (spec.parameters && spec.parameters.length > 0) {
+    request.parameters = spec.parameters;
+  }
   if (spec.body) {
     request.body = [{ mimetype: "application/json", content: spec.body }];
   }

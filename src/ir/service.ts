@@ -36,15 +36,27 @@ export interface ServiceMethodBodyIR {
   content: TypeIR;
 }
 
+/** One parameter or response header, with the component name it came from. */
+export interface ParameterIR {
+  name: string;
+  in: "path" | "query" | "header" | "cookie";
+  /** Path parameters are always required, per the OpenAPI spec. */
+  required: boolean;
+  type: TypeIR;
+  description?: string;
+  deprecated?: boolean;
+  /** Set when declared under `components.parameters` or `components.headers`. */
+  component?: string;
+}
+
 export interface HttpRequestIR {
   protocol: "http";
-  /** Object-ish IRs; intersections are flattened when read. */
-  pathParameters?: TypeIR;
-  queryParameters?: TypeIR;
-  headerParameters?: TypeIR;
-  cookieParameters?: TypeIR;
+  /** Path, query, header and cookie parameters in document order. */
+  parameters?: ParameterIR[];
   body?: ServiceMethodBodyIR[];
   bodyRequired?: boolean;
+  /** Set when the whole body came from a `components.requestBodies` entry. */
+  bodyComponent?: string;
 }
 
 export type ServiceMethodRequestIR = HttpRequestIR;
@@ -55,7 +67,9 @@ export interface HttpResponseIR {
   status: number | "default";
   description?: string;
   body?: ServiceMethodBodyIR[];
-  headers?: TypeIR;
+  headers?: ParameterIR[];
+  /** Set when the whole response came from a `components.responses` entry. */
+  component?: string;
 }
 
 export type ServiceMethodResponseIR = HttpResponseIR;

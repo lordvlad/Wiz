@@ -5,6 +5,7 @@ import { generateOpenApiSchemaCode } from "./generators/openapi.ts";
 import { extractTypeIR } from "./extractors/typescript.ts";
 import {
   type HttpMethodName,
+  type ParameterIR,
   type ServiceMethodBodyIR,
   type ServiceMethodIR,
   type ServiceMethodRequestIR,
@@ -55,6 +56,29 @@ const HTTP_METHODS = new Set([
 /** `/users/:id` (Express style) -> `/users/{id}` (OpenAPI style). */
 function toOpenApiPath(path: string): string {
   return path.replace(/:([A-Za-z0-9_$]+)/g, "{$1}");
+}
+
+/**
+ * Flattens one `op<{ path: … }>` slot object into a flat parameter list.
+ * The IR carries parameters individually so a component name has somewhere to
+ * live; this is the only place TypeScript slot objects are taken apart.
+ */
+function slotParameters(
+  ir: TypeIR | undefined,
+  location: ParameterIR["in"]
+): ParameterIR[] {
+  if (!ir) return [];
+  return flattenObjectProperties(ir).map((property) => {
+    const parameter: ParameterIR = {
+      name: property.name,
+      in: location,
+      required: location === "path" ? true : !property.optional,
+      type: property.type,
+    };
+    if (property.description) parameter.description = property.description;
+    if (property.deprecated) parameter.deprecated = true;
+    return parameter;
+  });
 }
 
 /** Builds an HTTP service method from its parts. */
@@ -113,10 +137,17 @@ function collectOperations(
     );
 
     const request: ServiceMethodRequestIR = { protocol: "http" };
-    if (pathParams && !isAbsent(pathParams)) request.pathParameters = pathParams;
-    if (queryParams && !isAbsent(queryParams)) {
-      request.queryParameters = queryParams;
-    }
+    const parameters = [
+      ...slotParameters(
+        pathParams && !isAbsent(pathParams) ? pathParams : undefined,
+        "path"
+      ),
+      ...slotParameters(
+        queryParams && !isAbsent(queryParams) ? queryParams : undefined,
+        "query"
+      ),
+    ];
+    if (parameters.length > 0) request.parameters = parameters;
     if (requestBody && !isAbsent(requestBody)) {
       request.body = [{ mimetype: JSON_MIME, content: requestBody }];
     }
@@ -154,12 +185,12 @@ function methodKeyPart(method: ServiceMethodIR): unknown {
   return {
     a: method.address,
     o: method.overrides ?? null,
-    q: [
-      typeKey(method.request.pathParameters),
-      typeKey(method.request.queryParameters),
-      typeKey(method.request.headerParameters),
-      typeKey(method.request.cookieParameters),
-    ],
+    q: (method.request.parameters ?? []).map((p) => [
+      p.name,
+      p.in,
+      p.required,
+      typeKey(p.type),
+    ]),
     b: bodyKey(method.request.body),
     r: method.responses.map((response) => ({
       s: response.status,
@@ -233,10 +264,13 @@ function readOperationSpec(
     return property && !isAbsent(property.type) ? property.type : undefined;
   };
 
-  request.pathParameters = slotType("path");
-  request.queryParameters = slotType("query");
-  request.headerParameters = slotType("header");
-  request.cookieParameters = slotType("cookie");
+  const parameters = [
+    ...slotParameters(slotType("path"), "path"),
+    ...slotParameters(slotType("query"), "query"),
+    ...slotParameters(slotType("header"), "header"),
+    ...slotParameters(slotType("cookie"), "cookie"),
+  ];
+  if (parameters.length > 0) request.parameters = parameters;
 
   const body = slotType("body");
   if (body) {

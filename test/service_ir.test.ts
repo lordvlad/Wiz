@@ -2,7 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import { generateOpenApiSchemaCode } from "../src/generators/openapi.ts";
 import type { ServiceIR, ServiceMethodIR } from "../src/ir/service.ts";
-import { evalModule, getIRsForSource } from "./helpers.ts";
+import { evalModule, getIRsForSource, params } from "./helpers.ts";
 
 const sourceCode = `
   export interface User { id: number; name: string }
@@ -22,7 +22,7 @@ describe("ServiceIR shape", () => {
       address: { protocol: "http", method: "GET", path: "/users/{id}" },
       request: {
         protocol: "http",
-        pathParameters: irs.PathParams.ir,
+        parameters: params(irs.PathParams.ir, "path"),
       },
       responses: [
         {
@@ -65,7 +65,10 @@ describe("capabilities the flat operation IR could not express", () => {
           kind: "serviceMethod",
           protocol: "http",
           address: { protocol: "http", method: "GET", path: "/users/{id}" },
-          request: { protocol: "http", pathParameters: irs.PathParams.ir },
+          request: {
+            protocol: "http",
+            parameters: params(irs.PathParams.ir, "path"),
+          },
           responses: [
             {
               protocol: "http",
@@ -108,11 +111,11 @@ describe("capabilities the flat operation IR could not express", () => {
       $ref: "#/components/schemas/ValidationError",
     });
 
-    // Every referenced type is hoisted, including error-only ones and the
-    // named path-parameter alias.
+    // Every referenced type is hoisted, including error-only ones. Parameters
+    // are a flat list of individual types, so the `PathParams` alias that used
+    // to wrap them is no longer part of the IR and is not hoisted.
     expect(Object.keys(doc.components.schemas).sort()).toEqual([
       "NotFound",
-      "PathParams",
       "User",
       "ValidationError",
     ]);
@@ -176,8 +179,10 @@ describe("capabilities the flat operation IR could not express", () => {
           address: { protocol: "http", method: "GET", path: "/ping" },
           request: {
             protocol: "http",
-            headerParameters: irs.Headers.ir,
-            cookieParameters: irs.Cookies.ir,
+            parameters: [
+              ...params(irs.Headers.ir, "header"),
+              ...params(irs.Cookies.ir, "cookie"),
+            ],
           },
           responses: [{ protocol: "http", status: 204 }],
         },

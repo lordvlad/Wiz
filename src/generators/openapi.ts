@@ -1,6 +1,5 @@
 import {
   collectNamedTypes,
-  flattenObjectProperties,
   isUserNamedType,
   INTEGER_FORMATS,
   SAFE_INTEGER,
@@ -10,6 +9,7 @@ import {
 } from "../types.ts";
 import {
   emptyService,
+  type ParameterIR,
   type ServiceIR,
   type ServiceMethodBodyIR,
   type ServiceMethodIR,
@@ -306,25 +306,25 @@ function isAbsentIR(ir: TypeIR | undefined): boolean {
 }
 
 function parametersFor(
-  ir: TypeIR | undefined,
-  location: "path" | "query" | "header" | "cookie",
+  parameters: ParameterIR[] | undefined,
   version: "3.0" | "3.1"
 ): Record<string, unknown>[] {
-  if (isAbsentIR(ir)) return [];
-  // Params often arrive as an intersection (`ExtractRouteParams` builds one per
-  // segment), so members must be merged before reading properties.
-  return flattenObjectProperties(ir!).map((p) => {
+  if (!parameters) return [];
+  const emitted: Record<string, unknown>[] = [];
+  for (const p of parameters) {
+    if (isAbsentIR(p.type)) continue;
     const param: Record<string, unknown> = {
       name: p.name,
-      in: location,
+      in: p.in,
       // Path parameters are always required per the OpenAPI spec.
-      required: location === "path" ? true : !p.optional,
+      required: p.in === "path" ? true : p.required,
       schema: irToOpenApiSchema(p.type, version, false),
     };
     if (p.description) param.description = p.description;
-    if (p.deprecated?.isDeprecated) param.deprecated = true;
-    return param;
-  });
+    if (p.deprecated) param.deprecated = true;
+    emitted.push(param);
+  }
+  return emitted;
 }
 
 /** `{ "application/json": { schema } }` for each media type on a payload. */
@@ -359,12 +359,7 @@ function operationSource(
   if (method.operationId) operation.operationId = method.operationId;
   if (method.deprecated) operation.deprecated = true;
 
-  const parameters = [
-    ...parametersFor(method.request.pathParameters, "path", version),
-    ...parametersFor(method.request.queryParameters, "query", version),
-    ...parametersFor(method.request.headerParameters, "header", version),
-    ...parametersFor(method.request.cookieParameters, "cookie", version),
-  ];
+  const parameters = parametersFor(method.request.parameters, version);
   if (parameters.length > 0) operation.parameters = parameters;
 
   const requestContent = contentFor(method.request.body, version);
@@ -378,9 +373,21 @@ function operationSource(
   const responses: Record<string, unknown> = {};
   for (const response of method.responses) {
     const content = contentFor(response.body, version);
+    const headers: Record<string, unknown> = {};
+    for (const header of response.headers ?? []) {
+      if (isAbsentIR(header.type)) continue;
+      const entry: Record<string, unknown> = {
+        schema: irToOpenApiSchema(header.type, version, false),
+      };
+      if (header.description) entry.description = header.description;
+      if (header.required) entry.required = true;
+      if (header.deprecated) entry.deprecated = true;
+      headers[header.name] = entry;
+    }
     responses[String(response.status)] = {
       description:
         response.description ?? (content ? "Successful response" : "No content"),
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
       ...(content ? { content } : {}),
     };
   }
@@ -417,18 +424,11 @@ function pathsSource(service: ServiceIR, version: "3.0" | "3.1"): string {
 function typesReferencedBy(method: ServiceMethodIR): TypeIR[] {
   const referenced: TypeIR[] = [];
   const { request } = method;
-  for (const ir of [
-    request.pathParameters,
-    request.queryParameters,
-    request.headerParameters,
-    request.cookieParameters,
-  ]) {
-    if (ir) referenced.push(ir);
-  }
+  for (const p of request.parameters ?? []) referenced.push(p.type);
   for (const body of request.body ?? []) referenced.push(body.content);
   for (const response of method.responses) {
     for (const body of response.body ?? []) referenced.push(body.content);
-    if (response.headers) referenced.push(response.headers);
+    for (const header of response.headers ?? []) referenced.push(header.type);
   }
   return referenced;
 }
@@ -443,16 +443,18 @@ export function generateOpenApiSchemaCode(
 
   const collect = (ir: TypeIR) => {
     for (const [name, namedIR] of collectNamedTypes(ir).entries()) {
+      // A `ref` node only names its target; it is never the definition of it.
+      if (namedIR.kind === "ref") continue;
       if (!allNamedTypes.has(name)) allNamedTypes.set(name, namedIR);
     }
   };
 
+  // Declared names are claimed before anything is walked: a `$ref` to a later
+  // entry would otherwise register that name as a self-referential stub.
   for (const { name, ir } of types) {
-    if (!allNamedTypes.has(name)) {
-      allNamedTypes.set(name, ir);
-    }
-    collect(ir);
+    if (!allNamedTypes.has(name)) allNamedTypes.set(name, ir);
   }
+  for (const { ir } of types) collect(ir);
 
   // Method payload types contribute component schemas too.
   for (const method of service.methods) {

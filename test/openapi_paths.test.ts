@@ -7,6 +7,7 @@ import {
   evalModule,
   getIRsForSource,
   httpMethod,
+  params,
   service,
 } from "./helpers.ts";
 
@@ -46,13 +47,13 @@ describe("OpenAPI path builder (generator)", () => {
         httpMethod({
           method: "get",
           path: "/users",
-          queryParameters: irs.UserQuery.ir,
+          parameters: params(irs.UserQuery.ir, "query"),
           response: irs.UserList.ir,
         }),
         httpMethod({
           method: "patch",
           path: "/users/{id}",
-          pathParameters: irs.PathParams.ir,
+          parameters: params(irs.PathParams.ir, "path"),
           response: irs.User.ir,
           body: irs.User.ir,
           overrides: `{ tags: ["User"], description: "Patch a user" }`,
@@ -109,13 +110,13 @@ describe("OpenAPI path builder (generator)", () => {
         httpMethod({
           method: "get",
           path: "/users/{id}",
-          pathParameters: irs.PathParams.ir,
+          parameters: params(irs.PathParams.ir, "path"),
           response: irs.User.ir,
         }),
         httpMethod({
           method: "delete",
           path: "/users/{id}",
-          pathParameters: irs.PathParams.ir,
+          parameters: params(irs.PathParams.ir, "path"),
         }),
       ])
     );
@@ -206,6 +207,8 @@ describe("OpenAPI path builder (plugin end-to-end)", () => {
 
     // Named payload types reached only through operations still get components.
     expect(doc.components.schemas.User.properties.name.minLength).toBe(2);
-    expect(doc.components.schemas.UserQuery).toBeDefined();
+    // A parameter container has no name in the IR any more — parameters are a
+    // flat list — so it is no longer hoisted as an orphan component.
+    expect(doc.components.schemas.UserQuery).toBeUndefined();
   });
 });

@@ -5,7 +5,13 @@ import { Validator } from "@seriousme/openapi-schema-validator";
 import { wizPlugin } from "../src/plugin.ts";
 import { silentLogger } from "../src/logger.ts";
 import { generateOpenApiSchemaCode } from "../src/generators/openapi.ts";
-import { evalModule, getIRsForSource, service, httpMethod } from "./helpers.ts";
+import {
+  evalModule,
+  getIRsForSource,
+  service,
+  httpMethod,
+  params,
+} from "./helpers.ts";
 
 plugin(wizPlugin({ logger: silentLogger }));
 
@@ -105,8 +111,10 @@ describe("generated documents satisfy the OpenAPI schemas", () => {
             httpMethod({
               method: "get",
               path: "/users/{id}",
-              pathParameters: irs.PathParams.ir,
-              queryParameters: irs.UserQuery.ir,
+              parameters: [
+                ...params(irs.PathParams.ir, "path"),
+                ...params(irs.UserQuery.ir, "query"),
+              ],
               response: irs.User.ir,
               overrides: `{ tags: ["Users"], summary: "Fetch a user" }`,
             }),
@@ -120,7 +128,7 @@ describe("generated documents satisfy the OpenAPI schemas", () => {
             httpMethod({
               method: "delete",
               path: "/users/{id}",
-              pathParameters: irs.PathParams.ir,
+              parameters: params(irs.PathParams.ir, "path"),
               status: 204,
             }),
           ])
