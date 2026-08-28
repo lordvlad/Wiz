@@ -60,6 +60,10 @@ export interface Annotated {
 }
 
 export interface BaseTypeIR extends Annotated {
+  /**
+   * Node identity within one extracted graph. It is not globally unique:
+   * separate extractions may reuse the same counter values.
+   */
   id: string;
   name?: string;
 }
@@ -300,15 +304,18 @@ export function computeTypeIRHash(ir: TypeIR): string {
 }
 /**
  * Recursively traverses a TypeIR tree and invokes visitor on every node.
- * Prevents cycles using a visited set of node IDs.
+ *
+ * Cycles are broken on node identity, not `id`: separate extractions may
+ * legitimately mint the same id, and an id-keyed walk would skip a node from
+ * a second graph when callers reuse one visited set.
  */
 export function walkTypeIR(
   ir: TypeIR,
   visitor: (node: TypeIR) => void,
-  visited = new Set<string>()
+  visited = new Set<TypeIR>()
 ): void {
-  if (visited.has(ir.id)) return;
-  visited.add(ir.id);
+  if (visited.has(ir)) return;
+  visited.add(ir);
 
   visitor(ir);
 

@@ -153,6 +153,9 @@ export function irToOpenApiSchema(
         if (prop.deprecated?.isDeprecated) {
           propSchema.deprecated = true;
         }
+        if (prop.readonly) {
+          propSchema.readOnly = true;
+        }
         applyConstraints(propSchema, prop.constraints, version);
         applyAnnotations(propSchema, prop, version);
         propertiesSchema[prop.name] = propSchema;

@@ -175,6 +175,8 @@ export function irToJsonSchema(
 
     case "tuple": {
       schema.type = "array";
+      const requiredItems = ir.elements.findIndex((element) => element.optional);
+      if (requiredItems >= 0) schema.minItems = requiredItems;
       if (draft === "draft-2020-12") {
         schema.prefixItems = ir.elements.map((e) => irToJsonSchema(e.type, draft));
         if (ir.rest) {

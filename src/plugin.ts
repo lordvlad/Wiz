@@ -11,11 +11,12 @@ import {
   type ServiceMethodResponseIR,
 } from "./ir/service.ts";
 import { defaultLogger, silentLogger, type WizLogger } from "./logger.ts";
-import { getRegisteredType, getTypeModule, registerType } from "./registry.ts";
+import { getRegisteredType, registerType } from "./registry.ts";
 import {
   generateVirtualModuleCode,
   type VirtualModuleOptions,
 } from "./generators/virtualGenerator.ts";
+import { setupVirtualModuleLifecycle } from "./virtualPlugin.ts";
 import {
   flattenObjectProperties,
   getTypeKey,
@@ -1280,52 +1281,9 @@ export function wizPlugin(options: WizPluginOptions = {}): BunPlugin {
   return {
     name: "wiz-plugin",
     setup(build) {
-      // Resolve virtual module paths
-      build.onResolve({ filter: /wiz-virtual/ }, (args) => {
-        return {
-          path: args.path,
-          namespace: "wiz-virtual",
-        };
-      });
-
-      // Load content for virtual modules
-      build.onLoad({ filter: /.*/, namespace: "wiz-virtual" }, (args) => {
-        const hash = args.path
-          .replace(/^.*wiz-virtual-?/, "")
-          .replace(/^\//, "")
-          .replace(/\.js$/, "");
-        const contents = getTypeModule(hash);
-        if (!contents) {
-          const message = `[wiz] Virtual module for hash '${hash}' not found in registry.`;
-          logger.error(message);
-          throw new Error(message);
-        }
-        return {
-          contents,
-          loader: "js",
-        };
-      });
-
-      // `node_modules` is excluded in the filter rather than bailed out of
-      // inside the callback. Returning contents at all makes Bun treat the
-      // module as ESM, so a CommonJS dependency loses its `default` export
-      // even when handed straight back — the filter is the only real opt-out.
-      // It also spares us reading every dependency file we would never touch.
-      build.onLoad({ filter: /^(?!.*node_modules).*\.[jt]sx?$/ }, async (args) => {
-        // The loader must follow the extension: labelling a `.js` file as `ts`
-        // breaks CommonJS the same way.
-        const loader: "ts" | "tsx" | "js" | "jsx" = args.path.endsWith(".tsx")
-          ? "tsx"
-          : args.path.endsWith(".jsx")
-            ? "jsx"
-            : args.path.endsWith(".ts")
-              ? "ts"
-              : "js";
-
-        const contents = await Bun.file(args.path).text();
-        const { code } = transformSource({ path: args.path, contents, logger });
-        return { contents: code, loader };
-      });
+      setupVirtualModuleLifecycle(build, logger, ({ path, contents, logger }) =>
+        transformSource({ path, contents, logger })
+      );
     },
   };
 }
