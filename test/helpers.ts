@@ -19,13 +19,20 @@ const compilerOptions: ts.CompilerOptions = {
 };
 
 /**
- * Parsing `lib.d.ts` dominates the cost of `ts.createProgram`, and every test
- * fixture would otherwise pay it again. Declaration files never change during a
- * run, so their `SourceFile` objects are shared across every program we build.
+ * Building a `ts.Program` is what this suite actually spends its time on, so
+ * two caches sit in front of it.
+ *
+ * `libFileCache` shares parsed declaration files: the first program in a
+ * process spends ~1.3s on `lib.d.ts` alone, and every fixture would otherwise
+ * pay it again. `lastProgram` goes further — handing the previous program to
+ * TypeScript as `oldProgram` lets it reuse the binding of every file that did
+ * not change, which is all of them but the fixture entry. Measured on this
+ * suite: 126ms per program without it, 10ms with. It only works because every
+ * fixture compiles under the same entry name.
  */
 const libFileCache = new Map<string, ts.SourceFile | undefined>();
 const programCache = new Map<string, ts.Program>();
-process.on('exit', () => { if ((globalThis as any).__progs) console.error(`__PROGRAMS__ ${(globalThis as any).__progs} ${programCache.size}`); });
+let lastProgram: ts.Program | undefined;
 
 function programFor(sourceText: string): ts.Program {
   const cached = programCache.get(sourceText);
@@ -57,9 +64,13 @@ function programFor(sourceText: string): ts.Program {
     return libFileCache.get(fileName);
   };
 
-  (globalThis as any).__progs = ((globalThis as any).__progs ?? 0) + 1;
-  process.on?.('exit', () => {});
-  const program = ts.createProgram([VIRTUAL_ENTRY], compilerOptions, host);
+  const program = ts.createProgram(
+    [VIRTUAL_ENTRY],
+    compilerOptions,
+    host,
+    lastProgram
+  );
+  lastProgram = program;
   programCache.set(sourceText, program);
   return program;
 }

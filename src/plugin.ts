@@ -537,6 +537,15 @@ const COMPILER_OPTIONS: ts.CompilerOptions = {
 const declarationFileCache = new Map<string, ts.SourceFile | undefined>();
 
 /**
+ * The program built for the previously transformed file, handed to TypeScript
+ * as `oldProgram` so it can reuse the binding of everything that did not
+ * change. Each file is its own root, so reuse is partial — unlike the test
+ * helper, which compiles every fixture under one entry name and gains far
+ * more — but a build transforms many files and the saving compounds.
+ */
+let lastProgram: ts.Program | undefined;
+
+/**
  * The value of a literal expression, or undefined if it is not one.
  *
  * The base document handed to `bunRoutes` has to be known at build time now
@@ -868,7 +877,13 @@ export function transformSource(options: TransformOptions): TransformResult {
     return declarationFileCache.get(fileName);
   };
 
-  const program = ts.createProgram([path], COMPILER_OPTIONS, host);
+  const program = ts.createProgram(
+    [path],
+    COMPILER_OPTIONS,
+    host,
+    lastProgram
+  );
+  lastProgram = program;
   const checker = program.getTypeChecker();
   const sourceFile = program.getSourceFile(path);
 
