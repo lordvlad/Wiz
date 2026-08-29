@@ -187,6 +187,10 @@ export function fnv1a(str: string): string {
 /** Annotation slice of the structural key, so docs cannot be lost to dedupe. */
 function normalizeAnnotations(node: Annotated): Record<string, unknown> {
   return {
+    desc: node.description ?? undefined,
+    dep: node.deprecated
+      ? { d: node.deprecated.isDeprecated, n: node.deprecated.note ?? null }
+      : undefined,
     c: node.constraints ? normalizeConstraints(node.constraints) : undefined,
     ex: node.examples ?? undefined,
     def: node.default ?? undefined,
@@ -198,20 +202,35 @@ function normalizeAnnotations(node: Annotated): Record<string, unknown> {
 
 /**
  * Computes a normalized, deterministic string representation of a TypeIR tree.
+ *
+ * `withNames` decides whether the name each node publishes is part of the
+ * projection. A bare type module never emits one — its keys, JSON Schema,
+ * validator and codecs are purely structural — so two identical shapes with
+ * different names legitimately share it. A document or schema-text payload does
+ * emit them, as `components.schemas` keys, `$ref` targets and message names, so
+ * those keys ask for names and two trees differing only in a nested name stay
+ * two modules.
  */
-export function normalizeTypeIR(ir: TypeIR): unknown {
+export function normalizeTypeIR(ir: TypeIR, withNames = false): unknown {
+  // Annotations reach every generator, so they are keyed unconditionally; the
+  // name only when the caller emits it.
+  const self = withNames
+    ? { nm: ir.name ?? undefined, ...normalizeAnnotations(ir) }
+    : normalizeAnnotations(ir);
+  const child = (node: TypeIR): unknown => normalizeTypeIR(node, withNames);
+
   switch (ir.kind) {
     case "primitive":
       return {
         k: "primitive",
         t: ir.type,
-        ...normalizeAnnotations(ir),
+        ...self,
       };
     case "literal":
       return {
         k: "literal",
         v: typeof ir.value === "bigint" ? ir.value.toString() + "n" : ir.value,
-        ...normalizeAnnotations(ir),
+        ...self,
       };
     case "object":
       return {
@@ -220,39 +239,41 @@ export function normalizeTypeIR(ir: TypeIR): unknown {
           .sort((a, b) => a.name.localeCompare(b.name))
           .map((p) => ({
             n: p.name,
-            t: normalizeTypeIR(p.type),
+            t: child(p.type),
             o: p.optional,
             r: p.readonly,
-            desc: p.description ?? null,
-            dep: p.deprecated ? { d: p.deprecated.isDeprecated, n: p.deprecated.note ?? null } : null,
+            // A protobuf field number is the wire contract, not a comment.
+            fn: p.fieldNumber ?? undefined,
             ...normalizeAnnotations(p),
           })),
         add: typeof ir.additionalProperties === "object"
-          ? normalizeTypeIR(ir.additionalProperties)
+          ? child(ir.additionalProperties)
           : ir.additionalProperties,
+        ...self,
       };
     case "array":
       return {
         k: "array",
-        e: normalizeTypeIR(ir.element),
-        ...normalizeAnnotations(ir),
+        e: child(ir.element),
+        ...self,
       };
     case "tuple":
       return {
         k: "tuple",
         el: ir.elements.map((e) => ({
-          t: normalizeTypeIR(e.type),
+          t: child(e.type),
           o: e.optional,
           n: e.name,
         })),
-        r: ir.rest ? normalizeTypeIR(ir.rest) : undefined,
+        r: ir.rest ? child(ir.rest) : undefined,
+        ...self,
       };
     case "union":
       return {
         k: "union",
         u: ir.types
           .map((t, i) => {
-            const normalized = normalizeTypeIR(t);
+            const normalized = child(t);
             const fieldNumber = ir.fieldNumbers?.[i];
             // Pair before sorting, or the sort would scramble the numbering.
             return fieldNumber === undefined
@@ -260,13 +281,18 @@ export function normalizeTypeIR(ir: TypeIR): unknown {
               : { n: fieldNumber, t: normalized };
           })
           .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+        // A discriminated union emits `oneOf` + `discriminator`; a plain one
+        // emits `anyOf`. Different output, so it cannot share a key.
+        d: ir.discriminator ? { p: ir.discriminator.propertyName } : undefined,
+        ...self,
       };
     case "intersection":
       return {
         k: "intersection",
         i: ir.types
-          .map((t) => normalizeTypeIR(t))
+          .map((t) => child(t))
           .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+        ...self,
       };
     case "enum":
       return {
@@ -274,17 +300,20 @@ export function normalizeTypeIR(ir: TypeIR): unknown {
         m: [...ir.members]
           .sort((a, b) => a.name.localeCompare(b.name))
           .map((m) => ({ n: m.name, v: m.value })),
+        ...self,
       };
     case "record":
       return {
         k: "record",
-        kt: normalizeTypeIR(ir.keyType),
-        vt: normalizeTypeIR(ir.valueType),
+        kt: child(ir.keyType),
+        vt: child(ir.valueType),
+        ...self,
       };
     case "ref":
       return {
         k: "ref",
         id: ir.targetId,
+        ...self,
       };
   }
 }

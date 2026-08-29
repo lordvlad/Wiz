@@ -1,6 +1,7 @@
 // @wiz-ignore
-import { describe, expect, test } from "bun:test";
-import { transformSource } from "../src/plugin.ts";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { transformSource, type TransformResult } from "../src/plugin.ts";
+import { clearTypeRegistry } from "../src/registry.ts";
 import { silentLogger } from "../src/logger.ts";
 
 /**
@@ -11,13 +12,20 @@ import { silentLogger } from "../src/logger.ts";
  * two callsites that shared a type but differed in payload collided and
  * whichever was transformed last redefined the other.
  */
-function transform(contents: string) {
-  return transformSource({
-    path: "collide.ts",
-    contents,
-    logger: silentLogger,
-  });
+function transform(contents: string, path = "collide.ts") {
+  return transformSource({ path, contents, logger: silentLogger });
 }
+
+/** The registry outlives one transform, so each test starts from an empty one. */
+beforeEach(() => {
+  clearTypeRegistry();
+});
+
+const moduleCode = (result: TransformResult, marker: string): string => {
+  const found = [...result.modules.values()].find((m) => m.code.includes(marker));
+  if (!found) throw new Error(`no generated module contains ${marker}`);
+  return found.code;
+};
 
 const USER = `
   export interface User {
@@ -90,5 +98,66 @@ describe("virtual module identity", () => {
       export const b = openapiSchema<[User], "3.1">();
     `);
     expect(result.modules.size).toBe(1);
+  });
+
+  /**
+   * Everything below differs only in a field the key used to drop, so the
+   * second transform was handed the first one's module.
+   */
+  test("a changed doc comment is a new module, not the old one", () => {
+    const source = (doc: string) => `
+      import { schema } from "wiz";
+      /** ${doc} */
+      export interface Doc {
+        id: string;
+      }
+      export const s = schema<Doc>();
+    `;
+
+    const first = transform(source("first revision"));
+    const second = transform(source("second revision"));
+
+    expect(moduleCode(first, "schema_draft2020")).toContain("first revision");
+    expect(moduleCode(second, "schema_draft2020")).toContain("second revision");
+  });
+
+  test("a nested component name is part of the document's identity", () => {
+    const source = (name: string) => `
+      import { openapiSchema } from "wiz";
+      export interface ${name} {
+        id: string;
+      }
+      export const doc = openapiSchema<{ profile: ${name} }>({});
+    `;
+
+    // Same path and same structure: only the nested schema name differs, and
+    // it decides both the `$ref` and the `components.schemas` key.
+    const users = transform(source("User"));
+    const admins = transform(source("Admin"));
+
+    expect(moduleCode(users, "openapiSchema")).toContain('"User"');
+    const adminDoc = moduleCode(admins, "openapiSchema");
+    expect(adminDoc).toContain('"Admin"');
+    expect(adminDoc).not.toContain('"User"');
+  });
+
+  test("a changed field number is a new protobuf schema", () => {
+    const source = (fieldNumber: number) => `
+      import { protobufSchema } from "wiz";
+      export interface Wire {
+        /** @fieldNumber ${fieldNumber} */
+        id: string;
+      }
+      export const proto = protobufSchema<[Wire]>();
+    `;
+
+    const one = transform(source(1));
+    const two = transform(source(2));
+
+    // The schema module carries the wire numbers as data and renders the
+    // `.proto` text from them, so that is where the contract is observable.
+    const marker = "export function protobufSchema";
+    expect(moduleCode(one, marker)).toContain('"fieldNumber": 1');
+    expect(moduleCode(two, marker)).toContain('"fieldNumber": 2');
   });
 });

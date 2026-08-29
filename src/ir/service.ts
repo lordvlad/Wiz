@@ -125,28 +125,44 @@ export function emptyService(): ServiceIR {
  * keys on it too.
  */
 export function normalizeServiceMethod(method: ServiceMethodIR): unknown {
+  // Payload types are keyed with their names: an operation renders them as
+  // `$ref`s into `components.schemas`, so a nested name is emitted output.
   const bodyKey = (bodies: ServiceMethodBodyIR[] | undefined) =>
-    (bodies ?? []).map((b) => ({ m: b.mimetype, c: normalizeTypeIR(b.content) }));
+    (bodies ?? []).map((b) => ({
+      m: b.mimetype,
+      c: normalizeTypeIR(b.content, true),
+    }));
+
+  // Every field here is rendered into the operation object, down to the
+  // descriptions, so all of them have to separate two otherwise equal methods.
+  const parameterKey = (p: ParameterIR) => [
+    p.name,
+    p.in,
+    p.required,
+    p.description ?? null,
+    p.deprecated ?? null,
+    p.component ?? null,
+    normalizeTypeIR(p.type, true),
+  ];
 
   return {
     a: method.address,
+    oi: method.operationId ?? null,
+    su: method.summary ?? null,
+    de: method.description ?? null,
+    tg: method.tags ?? null,
+    dp: method.deprecated ?? null,
     o: method.overrides ?? null,
-    q: (method.request.parameters ?? []).map((p) => [
-      p.name,
-      p.in,
-      p.required,
-      normalizeTypeIR(p.type),
-    ]),
+    q: (method.request.parameters ?? []).map(parameterKey),
     b: bodyKey(method.request.body),
+    br: method.request.bodyRequired ?? null,
     bc: method.request.bodyComponent ?? null,
     r: method.responses.map((response) => ({
       s: response.status,
+      de: response.description ?? null,
+      cp: response.component ?? null,
       b: bodyKey(response.body),
-      h: (response.headers ?? []).map((h) => [
-        h.name,
-        h.required,
-        normalizeTypeIR(h.type),
-      ]),
+      h: (response.headers ?? []).map(parameterKey),
     })),
   };
 }

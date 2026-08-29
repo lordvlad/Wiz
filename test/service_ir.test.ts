@@ -1,7 +1,12 @@
 // @wiz-ignore
 import { describe, expect, test } from "bun:test";
 import { generateOpenApiSchemaCode } from "../src/generators/openapi.ts";
-import type { ServiceIR, ServiceMethodIR } from "../src/ir/service.ts";
+import {
+  normalizeServiceMethod,
+  type ServiceIR,
+  type ServiceMethodIR,
+} from "../src/ir/service.ts";
+import type { TypeIR } from "../src/types.ts";
 import { evalModule, getIRsForSource, params } from "./helpers.ts";
 
 const sourceCode = `
@@ -232,5 +237,109 @@ describe("capabilities the flat operation IR could not express", () => {
     expect(get.summary).toBe("List users");
     expect(get.tags).toEqual(["User"]);
     expect(get.deprecated).toBe(true);
+  });
+});
+
+/**
+ * The registry keys virtual modules on this projection, so anything the
+ * operation object renders has to separate two methods that differ in it.
+ */
+describe("service method key coverage", () => {
+  const payload: TypeIR = { id: "s_1", kind: "primitive", type: "string" };
+  const base: ServiceMethodIR = {
+    kind: "serviceMethod",
+    protocol: "http",
+    address: { protocol: "http", method: "GET", path: "/users" },
+    request: {
+      protocol: "http",
+      parameters: [{ name: "q", in: "query", required: false, type: payload }],
+      body: [{ mimetype: "application/json", content: payload }],
+    },
+    responses: [
+      {
+        protocol: "http",
+        status: 200,
+        body: [{ mimetype: "application/json", content: payload }],
+      },
+    ],
+  };
+
+  const key = (over: Partial<ServiceMethodIR> = {}): string =>
+    JSON.stringify(normalizeServiceMethod({ ...base, ...over }));
+  const bare = key();
+
+  test("operation metadata is part of the key", () => {
+    expect(key({ operationId: "listUsers" })).not.toBe(bare);
+    expect(key({ summary: "List users" })).not.toBe(bare);
+    expect(key({ description: "Lists every user" })).not.toBe(bare);
+    expect(key({ tags: ["User"] })).not.toBe(bare);
+    expect(key({ deprecated: true })).not.toBe(bare);
+  });
+
+  test("request and response detail is part of the key", () => {
+    expect(key({ request: { ...base.request, bodyRequired: false } })).not.toBe(bare);
+    expect(
+      key({
+        request: {
+          ...base.request,
+          parameters: [{ ...base.request.parameters![0]!, description: "search" }],
+        },
+      })
+    ).not.toBe(bare);
+    expect(
+      key({
+        request: {
+          ...base.request,
+          parameters: [{ ...base.request.parameters![0]!, deprecated: true }],
+        },
+      })
+    ).not.toBe(bare);
+    expect(
+      key({ responses: [{ ...base.responses[0]!, description: "the users" }] })
+    ).not.toBe(bare);
+  });
+
+  test("a payload's component name is part of the key", () => {
+    const named = (name: string): ServiceMethodIR => ({
+      ...base,
+      responses: [
+        {
+          protocol: "http",
+          status: 200,
+          body: [
+            {
+              mimetype: "application/json",
+              content: { id: "o_1", kind: "object", name, properties: [] },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(JSON.stringify(normalizeServiceMethod(named("User")))).not.toBe(
+      JSON.stringify(normalizeServiceMethod(named("Admin")))
+    );
+  });
+
+  test("two methods describing the same call still share a key", () => {
+    const twin: ServiceMethodIR = {
+      kind: "serviceMethod",
+      protocol: "http",
+      address: { protocol: "http", method: "GET", path: "/users" },
+      request: {
+        protocol: "http",
+        parameters: [{ name: "q", in: "query", required: false, type: payload }],
+        body: [{ mimetype: "application/json", content: payload }],
+      },
+      responses: [
+        {
+          protocol: "http",
+          status: 200,
+          body: [{ mimetype: "application/json", content: payload }],
+        },
+      ],
+    };
+
+    expect(JSON.stringify(normalizeServiceMethod(twin))).toBe(bare);
   });
 });

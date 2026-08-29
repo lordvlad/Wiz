@@ -22,7 +22,10 @@ const TypeRegistry = new Map<string, RegisteredType>();
 function namedTypesKey(
   types: Array<{ name: string; ir: TypeIR }> | undefined
 ): unknown {
-  return types?.map((t) => [t.name, normalizeTypeIR(t.ir)]) ?? null;
+  // Names are part of a schema payload's identity: they become
+  // `components.schemas` keys, `$ref` targets and message names, so two
+  // payloads differing only in a nested name are two modules.
+  return types?.map((t) => [t.name, normalizeTypeIR(t.ir, true)]) ?? null;
 }
 
 /**
