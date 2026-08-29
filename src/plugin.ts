@@ -844,6 +844,13 @@ export function transformSource(options: TransformOptions): TransformResult {
     changed: false,
   });
 
+  // A second transform of one path means the build is running again over it, so
+  // the document harvested for it last time describes source that may already
+  // be gone. The entry is dropped before the transform can read it; what
+  // survives is reuse within a single transform, where several
+  // `openapiDocument()` callsites share one harvest.
+  harvestCache.delete(path);
+
   if (
     contents.includes("@wiz-ignore") ||
     !Array.from(HELPER_FUNCTIONS).some((fn) => contents.includes(fn))
