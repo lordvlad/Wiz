@@ -152,4 +152,16 @@ describe("TypeIR Extractor & Normalization", () => {
     expect(hash1).toBe(hash2);
     expect(normalizeTypeIR(ir1)).toEqual(normalizeTypeIR(ir2));
   });
+
+  test("a recursive type hashes the same however much was extracted before it", () => {
+    const recursive = `export interface Node { value: string; next?: Node }`;
+
+    const before = computeTypeIRHash(getIRForSource(recursive, "Node"));
+    // Unrelated extractions in between: node ids belong to one extraction, so
+    // the `ref` a recursive type carries must not depend on them.
+    getIRForSource(`export interface Filler { a: string; b: string }`, "Filler");
+    const after = computeTypeIRHash(getIRForSource(recursive, "Node"));
+
+    expect(after).toBe(before);
+  });
 });

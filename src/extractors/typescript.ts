@@ -17,9 +17,20 @@ import type {
 } from "../ir/types.ts";
 import { isUserNamedType } from "../ir/types.ts";
 
-let idCounter = 0;
-function nextId(): string {
-  return `t_${++idCounter}`;
+/**
+ * Node ids are minted per extraction rather than per process, so extracting one
+ * type twice yields equal IR — and therefore one structural hash and one
+ * virtual module. The counter rides the extraction's own type cache, which
+ * every top-level call creates fresh and threads through the recursion, and is
+ * collected with it. A process-wide counter made the hash of any type holding a
+ * `ref` depend on how much had been extracted before it.
+ */
+const extractionIds = new WeakMap<Map<ts.Type, TypeIR>, number>();
+
+function nextId(cache: Map<ts.Type, TypeIR>): string {
+  const id = (extractionIds.get(cache) ?? 0) + 1;
+  extractionIds.set(cache, id);
+  return `t_${id}`;
 }
 
 function displayPartsToString(
@@ -228,7 +239,7 @@ export function extractTypeIR(
   if (existing) {
     if (existing.kind === "object" || existing.kind === "array" || existing.kind === "tuple") {
       return {
-        id: nextId(),
+        id: nextId(cache),
         kind: "ref",
         targetId: existing.id,
         name: existing.name,
@@ -251,7 +262,7 @@ export function extractTypeIR(
   const wellKnown = symbol ? WELL_KNOWN_SCALARS[symbol.name] : undefined;
   if (wellKnown) {
     const res: TypeIR = {
-      id: nextId(),
+      id: nextId(cache),
       kind: "primitive",
       type: wellKnown,
       ...annotations,
@@ -265,7 +276,7 @@ export function extractTypeIR(
   // Primitive Boolean (union of true and false)
   if (type.flags & ts.TypeFlags.Boolean) {
     const res: TypeIR = {
-      id: nextId(),
+      id: nextId(cache),
       kind: "primitive",
       type: "boolean",
       ...annotations,
@@ -277,7 +288,7 @@ export function extractTypeIR(
   // String
   if (type.flags & ts.TypeFlags.String) {
     const res: TypeIR = {
-      id: nextId(),
+      id: nextId(cache),
       kind: "primitive",
       type: "string",
       ...annotations,
@@ -289,7 +300,7 @@ export function extractTypeIR(
   // Number
   if (type.flags & ts.TypeFlags.Number) {
     const res: TypeIR = {
-      id: nextId(),
+      id: nextId(cache),
       kind: "primitive",
       type: "number",
       ...annotations,
@@ -301,7 +312,7 @@ export function extractTypeIR(
   // BigInt
   if (type.flags & ts.TypeFlags.BigInt) {
     const res: TypeIR = {
-      id: nextId(),
+      id: nextId(cache),
       kind: "primitive",
       type: "bigint",
       ...annotations,
@@ -312,49 +323,49 @@ export function extractTypeIR(
 
   // Null
   if (type.flags & ts.TypeFlags.Null) {
-    const res: TypeIR = { id: nextId(), kind: "primitive", type: "null" };
+    const res: TypeIR = { id: nextId(cache), kind: "primitive", type: "null" };
     cache.set(type, res);
     return res;
   }
 
   // Undefined
   if (type.flags & ts.TypeFlags.Undefined) {
-    const res: TypeIR = { id: nextId(), kind: "primitive", type: "undefined" };
+    const res: TypeIR = { id: nextId(cache), kind: "primitive", type: "undefined" };
     cache.set(type, res);
     return res;
   }
 
   // Symbol
   if (type.flags & (ts.TypeFlags.ESSymbol | ts.TypeFlags.UniqueESSymbol)) {
-    const res: TypeIR = { id: nextId(), kind: "primitive", type: "symbol" };
+    const res: TypeIR = { id: nextId(cache), kind: "primitive", type: "symbol" };
     cache.set(type, res);
     return res;
   }
 
   // Unknown
   if (type.flags & ts.TypeFlags.Unknown) {
-    const res: TypeIR = { id: nextId(), kind: "primitive", type: "unknown" };
+    const res: TypeIR = { id: nextId(cache), kind: "primitive", type: "unknown" };
     cache.set(type, res);
     return res;
   }
 
   // Any
   if (type.flags & ts.TypeFlags.Any) {
-    const res: TypeIR = { id: nextId(), kind: "primitive", type: "any" };
+    const res: TypeIR = { id: nextId(cache), kind: "primitive", type: "any" };
     cache.set(type, res);
     return res;
   }
 
   // Void
   if (type.flags & ts.TypeFlags.Void) {
-    const res: TypeIR = { id: nextId(), kind: "primitive", type: "void" };
+    const res: TypeIR = { id: nextId(cache), kind: "primitive", type: "void" };
     cache.set(type, res);
     return res;
   }
 
   // Never
   if (type.flags & ts.TypeFlags.Never) {
-    const res: TypeIR = { id: nextId(), kind: "primitive", type: "never" };
+    const res: TypeIR = { id: nextId(cache), kind: "primitive", type: "never" };
     cache.set(type, res);
     return res;
   }
@@ -362,7 +373,7 @@ export function extractTypeIR(
   // Literals
   if (type.isStringLiteral()) {
     const res: TypeIR = {
-      id: nextId(),
+      id: nextId(cache),
       kind: "literal",
       value: type.value,
       ...annotations,
@@ -373,7 +384,7 @@ export function extractTypeIR(
 
   if (type.isNumberLiteral()) {
     const res: TypeIR = {
-      id: nextId(),
+      id: nextId(cache),
       kind: "literal",
       value: type.value,
       ...annotations,
@@ -385,7 +396,7 @@ export function extractTypeIR(
   if (type.flags & ts.TypeFlags.BooleanLiteral) {
     const isTrue = "intrinsicName" in type && (type as ts.Type & { intrinsicName?: string }).intrinsicName === "true";
     const res: TypeIR = {
-      id: nextId(),
+      id: nextId(cache),
       kind: "literal",
       value: isTrue,
       ...annotations,
@@ -397,7 +408,7 @@ export function extractTypeIR(
   if (type.flags & ts.TypeFlags.BigIntLiteral) {
     const bigintVal = (type as ts.BigIntLiteralType).value;
     const res: TypeIR = {
-      id: nextId(),
+      id: nextId(cache),
       kind: "literal",
       value: BigInt(`${bigintVal.negative ? "-" : ""}${bigintVal.base10Value}`),
       ...annotations,
@@ -423,7 +434,7 @@ export function extractTypeIR(
       });
     }
     const res: TypeIR = {
-      id: nextId(),
+      id: nextId(cache),
       kind: "enum",
       name: typeName,
       members,
@@ -438,7 +449,7 @@ export function extractTypeIR(
     const typeArgs = checker.getTypeArguments(type as ts.TypeReference);
     const elemType = typeArgs[0] ?? checker.getAnyType();
     const placeholder: ArrayTypeIR = {
-      id: nextId(),
+      id: nextId(cache),
       kind: "array",
       element: { id: "placeholder", kind: "primitive", type: "any" },
       name: typeName,
@@ -458,7 +469,7 @@ export function extractTypeIR(
     const elementFlags = target?.elementFlags ?? [];
 
     const placeholder: TupleTypeIR = {
-      id: nextId(),
+      id: nextId(cache),
       kind: "tuple",
       elements: [],
       name: typeName,
@@ -561,7 +572,7 @@ function numberedUnionEntries(
 }
   if (type.isUnion()) {
     const placeholder: UnionTypeIR = {
-      id: nextId(),
+      id: nextId(cache),
       kind: "union",
       types: [],
       name: typeName,
@@ -589,7 +600,7 @@ function numberedUnionEntries(
   // Intersections
   if (type.isIntersection()) {
     const placeholder: IntersectionTypeIR = {
-      id: nextId(),
+      id: nextId(cache),
       kind: "intersection",
       types: [],
       name: typeName,
@@ -610,10 +621,10 @@ function numberedUnionEntries(
   if ((stringIndexType || numberIndexType) && properties.length === 0) {
     const valType = stringIndexType || numberIndexType!;
     const placeholder: RecordTypeIR = {
-      id: nextId(),
+      id: nextId(cache),
       kind: "record",
       keyType: {
-        id: nextId(),
+        id: nextId(cache),
         kind: "primitive",
         type: stringIndexType ? "string" : "number",
       },
@@ -630,7 +641,7 @@ function numberedUnionEntries(
 
   // Objects & Interfaces
   const objectPlaceholder: ObjectTypeIR = {
-    id: nextId(),
+    id: nextId(cache),
     kind: "object",
     properties: [],
     additionalProperties: stringIndexType ? true : undefined,
@@ -668,7 +679,7 @@ function numberedUnionEntries(
         const types = numbered.map((e) => extractTypeIR(e.type, checker, cache));
         propTypeIR = {
           ...propTypeIR,
-          id: nextId(),
+          id: nextId(cache),
           types,
           fieldNumbers: numbered.map((e) => e.fieldNumber),
           discriminator: findDiscriminatorProperty(types),
