@@ -1,13 +1,34 @@
 # Pragmatic Architecture Review — wiz
 
-Deliverable for `ARCHITECTURE_REVIEW_PLAN.md`. Review only: no source, test,
-dependency, or configuration changes were made.
+Deliverable for `ARCHITECTURE_REVIEW_PLAN.md`. The review itself changed no
+source, test, dependency, or configuration file; the fixes it recommended
+landed in the commits listed under Status.
 
 Repo state at review time: `git status` clean apart from the plan file; HEAD
 `dfe7a48` (`refactor: isolate virtual module lifecycle`). One discrepancy vs
 the plan's anchors: `normalizeTypeIR`, `normalizeAnnotations`, and `walkTypeIR`
 live in `src/ir/types.ts`; `src/types.ts` is a re-export shim that adds only
 `getTypeKey` (`src/types.ts:4,14`). The actual state was reviewed.
+
+## Status
+
+The review below is as-of `dfe7a48`. Every finding it raised has since been
+implemented on top of it:
+
+| Finding | Resolution |
+|---|---|
+| §1 TypeIR key omissions (root annotations, `fieldNumber`, `discriminator`, nested names) | `fix: every emitted field participates in the canonical key`. Names are keyed only where they are emitted — bare modules stay shared, payload keys carry names — so the structural dedupe property in `extractor.test.ts` is preserved. |
+| §1 `normalizeServiceMethod` omissions (`operationId`, `summary`, `description`, `tags`, `deprecated`, `bodyRequired`, response and parameter descriptions, components) | same commit |
+| §2 `harvestCache` never invalidated | `fix: re-harvest a route document when its entry is transformed again` |
+| §2 process-wide `idCounter` | `refactor: mint type ids per extraction rather than per process` |
+| §2 `plugin.ts` mixes five responsibilities | `refactor: extract route harvesting from the plugin` (1297 → 646 lines; no public surface change) |
+| §2 `TypeRegistry` staleness | resolved by the key fix; entries are content-addressed again, so a changed type is a new key |
+| §2 `declarationFileCache`, `lastProgram` | kept as-is, as recommended |
+| §4 missing regression scenarios | `test/registry_keys.test.ts` (doc comment, nested component name, field number), `test/ir_contracts.test.ts` (key coverage per field), `test/service_ir.test.ts` (operation metadata), `test/harvest.test.ts` (re-harvest), `test/extractor.test.ts` (id determinism) |
+| §4 registry not cleared between tests | `clearTypeRegistry()` in `beforeEach` for the registry-keyed suite |
+
+Each regression test was confirmed to fail against the unfixed source and pass
+with it. Suite after the changes: 417 pass, 0 fail; `tsc --noEmit` clean.
 
 ## Verification results
 
