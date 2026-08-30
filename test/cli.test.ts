@@ -364,3 +364,157 @@ export const keys = keysOf<User>();
     expect(result.stderr).toContain("no tsconfig.json");
   });
 });
+
+/**
+ * The generator is a plugin, so the tests supply their own rather than leaning
+ * on one that ships with wiz: this keeps the command under test and not the
+ * emitter, and it is the only way to assert that `options` and the IR arrive
+ * intact. It echoes the document version and the `--lenient` flag so both are
+ * observable on disk, and emits a nested path to prove parent directories are
+ * created.
+ */
+const GENERATOR_MODULE = `export default {
+  name: "test emitter",
+  api(ir, context) {
+    return {
+      "types.ts": "// " + ir.version + " lenient=" + context.options.lenient + "\\n",
+      "nested/names.ts": JSON.stringify([...ir.types.keys()]) + "\\n",
+    };
+  },
+};
+`;
+
+const API_DOC = JSON.stringify({
+  openapi: "3.1.0",
+  info: { title: "Users", version: "1.0.0" },
+  paths: {
+    "/users": {
+      get: {
+        operationId: "listUsers",
+        responses: { "200": { description: "ok" } },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      User: {
+        type: "object",
+        properties: { name: { type: "string" } },
+        required: ["name"],
+      },
+    },
+  },
+});
+
+describe("wiz generate through the binary", () => {
+  const scratch: string[] = [];
+
+  afterEach(async () => {
+    for (const dir of scratch.splice(0)) await rm(dir, { recursive: true, force: true });
+  });
+
+  /** Every case needs the generator module and the document, so seed both. */
+  const workspace = async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wiz-generate-cli-"));
+    scratch.push(dir);
+    await Bun.write(join(dir, "gen.ts"), GENERATOR_MODULE);
+    await Bun.write(join(dir, "api.json"), API_DOC);
+    return dir;
+  };
+
+  const run = async (args: string[], cwd: string, stdin = "") => {
+    // stdin is always piped: closing it empty is what a caller that passes a
+    // file path does anyway, and switching between "ignore" and "pipe" would
+    // only make the sink optional.
+    const proc = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "cli.ts"), ...args], {
+      cwd,
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    proc.stdin.write(stdin);
+    await proc.stdin.end();
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    return { code: await proc.exited, stdout, stderr };
+  };
+
+  test("a file into --outdir writes every generated file", async () => {
+    const cwd = await workspace();
+
+    const result = await run(["generate", "-g", "gen.ts", "api.json", "-o", "out"], cwd);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(join("out", "types.ts"));
+
+    expect(await Bun.file(join(cwd, "out", "types.ts")).text()).toBe(
+      "// 3.1 lenient=false\n"
+    );
+    expect(await Bun.file(join(cwd, "out", "nested", "names.ts")).text()).toBe(
+      '["User"]\n'
+    );
+  });
+
+  test("a second run overwrites the outdir, and --lenient reaches the generator", async () => {
+    const cwd = await workspace();
+    await run(["generate", "-g", "gen.ts", "api.json", "--outdir", "out"], cwd);
+
+    const result = await run(
+      ["generate", "-g", "gen.ts", "api.json", "--outdir", "out", "--lenient"],
+      cwd
+    );
+    expect(result.code).toBe(0);
+    expect(await Bun.file(join(cwd, "out", "types.ts")).text()).toBe(
+      "// 3.1 lenient=true\n"
+    );
+  });
+
+  test("a '-' input reads the document from stdin", async () => {
+    const cwd = await workspace();
+
+    const result = await run(
+      ["generate", "-g", "gen.ts", "-", "--outdir", "out", "--format", "json"],
+      cwd,
+      API_DOC
+    );
+    expect(result.code).toBe(0);
+    expect(await Bun.file(join(cwd, "out", "types.ts")).text()).toBe(
+      "// 3.1 lenient=false\n"
+    );
+  });
+
+  test("no outdir prints the whole record as JSON", async () => {
+    const cwd = await workspace();
+
+    const result = await run(["generate", "-g", "gen.ts", "api.json"], cwd);
+    expect(result.code).toBe(0);
+
+    const files = JSON.parse(result.stdout) as Record<string, string>;
+    expect(Object.keys(files).sort()).toEqual(["nested/names.ts", "types.ts"]);
+    expect(files["types.ts"]).toBe("// 3.1 lenient=false\n");
+  });
+
+  test("generate needs a generator", async () => {
+    const cwd = await workspace();
+    const result = await run(["generate", "api.json"], cwd);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("needs --generator");
+  });
+
+  test("a module exporting no generator is refused", async () => {
+    const cwd = await workspace();
+    await Bun.write(join(cwd, "empty.ts"), "export const nothing = 1;\n");
+
+    const result = await run(["generate", "-g", "empty.ts", "api.json"], cwd);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("no usable generator");
+  });
+
+  test("an unknown option fails instead of being ignored", async () => {
+    const cwd = await workspace();
+    const result = await run(["generate", "-g", "gen.ts", "api.json", "--nope"], cwd);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("unknown option '--nope'");
+  });
+});

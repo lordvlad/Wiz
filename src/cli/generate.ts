@@ -1,0 +1,235 @@
+import { mkdir } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import {
+  extractApiIR,
+  extractApiIRFromFile,
+  type ExtractApiOptions,
+} from "../extractors/openapi.ts";
+import {
+  generate,
+  type GeneratedFiles,
+  type Generator,
+} from "../generators/generator.ts";
+import { consoleLogger } from "../logger.ts";
+
+/**
+ * Running one emitter over one document from the command line.
+ *
+ * The generator is not part of wiz: it is a module the caller names, so this
+ * command is the only place that turns a string into code to run. Everything
+ * else here is plumbing around that single decision — read a document, hand it
+ * to the generator, put the files somewhere — and both ends of the plumbing
+ * accept `-` so the command composes in a pipe instead of only on disk.
+ */
+
+/** What the CLI can configure on a generator; the rest is the generator's own. */
+interface GenerateOptions {
+  /** Passed through, not interpreted: a generator decides what it relaxes. */
+  lenient: boolean;
+}
+
+/**
+ * `--format` values, as a table rather than a list so an unknown value is one
+ * lookup and the parsed result is already the extractor's own union.
+ */
+const FORMATS: Record<string, ExtractApiOptions["format"]> = {
+  json: "json",
+  jsonc: "jsonc",
+  json5: "json5",
+  yaml: "yaml",
+};
+
+interface Invocation {
+  generator: string;
+  /** Undefined means stdin; a literal `-` is normalized to it. */
+  input: string | undefined;
+  /** Undefined means stdout; a literal `-` is normalized to it. */
+  outdir: string | undefined;
+  lenient: boolean;
+  format: ExtractApiOptions["format"];
+}
+
+/**
+ * Parsing throws rather than returning a result union: every failure in this
+ * command reports the same way, so one catch in {@link runGenerate} covers the
+ * argument errors, the load errors and the extractor's own.
+ */
+function parse(argv: string[]): Invocation {
+  let generator: string | undefined;
+  let input: string | undefined;
+  let outdir: string | undefined;
+  let lenient = false;
+  let format: ExtractApiOptions["format"];
+
+  /**
+   * Flags that take a value must not silently swallow the next flag. A bare `-`
+   * is exempt: it is a value, and the one `--outdir` legitimately takes.
+   */
+  const valueOf = (flag: string, raw: string | undefined): string => {
+    if (raw === undefined || (raw.startsWith("-") && raw !== "-")) {
+      throw new Error(`${flag} needs a value`);
+    }
+    return raw;
+  };
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!;
+
+    if (arg === "--generator" || arg === "-g") {
+      generator = valueOf(arg, argv[++i]);
+      continue;
+    }
+    if (arg === "--outdir" || arg === "-o") {
+      outdir = valueOf(arg, argv[++i]);
+      continue;
+    }
+    if (arg === "--format") {
+      const raw = valueOf(arg, argv[++i]);
+      format = FORMATS[raw];
+      if (format === undefined) {
+        throw new Error(
+          `unknown format '${raw}'; expected ${Object.keys(FORMATS).join(", ")}`
+        );
+      }
+      continue;
+    }
+    if (arg === "--lenient") {
+      lenient = true;
+      continue;
+    }
+    // A bare `-` is the stdin positional, so only longer dashed words are flags.
+    if (arg.startsWith("-") && arg !== "-") {
+      throw new Error(`unknown option '${arg}'`);
+    }
+    if (input !== undefined) {
+      throw new Error(`unexpected argument '${arg}'`);
+    }
+    input = arg;
+  }
+
+  if (generator === undefined) {
+    throw new Error("needs --generator <module>");
+  }
+
+  // Normalized here so nothing downstream has to know that `-` and an absent
+  // argument mean the same thing at either end of the pipe.
+  return {
+    generator,
+    input: input === "-" ? undefined : input,
+    outdir: outdir === "-" ? undefined : outdir,
+    lenient,
+    format,
+  };
+}
+
+/**
+ * A generator is a plugin, so its shape is only known at runtime. Checking the
+ * three roots individually is what makes the failure message say which export
+ * was missing instead of "not a generator".
+ */
+function usable(value: unknown): value is Generator<GenerateOptions> {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<Generator<GenerateOptions>>;
+  if (typeof candidate.name !== "string") return false;
+  return (
+    typeof candidate.type === "function" ||
+    typeof candidate.service === "function" ||
+    typeof candidate.api === "function"
+  );
+}
+
+async function loadGenerator(
+  module: string
+): Promise<Generator<GenerateOptions>> {
+  // The sanctioned exception to the repo's no-dynamic-import rule: the module
+  // is named on the command line, so no static specifier can exist for it.
+  // `resolve` pins it to the cwd rather than to this file, which is what makes
+  // `--generator ./gen.ts` mean what the caller typed, and `pathToFileURL`
+  // keeps an absolute path a legal specifier on Windows too.
+  const url = pathToFileURL(resolve(module)).href;
+
+  let loaded: Record<string, unknown>;
+  try {
+    loaded = (await import(url)) as Record<string, unknown>;
+  } catch (error) {
+    throw new Error(
+      `cannot load generator '${module}': ${(error as Error).message}`
+    );
+  }
+
+  // `default` first: a module written for this command exports one generator.
+  // A named `generator` export lets a module that already has a default (a
+  // plugin, a config) still be addressable here.
+  const candidate = loaded.default ?? loaded.generator;
+  if (!usable(candidate)) {
+    throw new Error(
+      `'${module}' exports no usable generator; expected a default or 'generator' ` +
+        "export with a string name and a type, service or api method"
+    );
+  }
+  return candidate;
+}
+
+/**
+ * Writes the record to disk, echoing paths the way `wiz eject` does.
+ *
+ * `Bun.write` creates parent directories, so the explicit `mkdir` is only for
+ * the generator that emitted nothing: an outdir the caller asked for should
+ * exist either way. Paths are echoed as given rather than resolved so the
+ * output stays copy-pasteable.
+ */
+async function writeFiles(
+  outdir: string,
+  files: GeneratedFiles
+): Promise<void> {
+  await mkdir(outdir, { recursive: true });
+  for (const [name, contents] of Object.entries(files)) {
+    const path = join(outdir, name);
+    await Bun.write(resolve(path), contents);
+    console.log(`  ${path}`);
+  }
+}
+
+export async function runGenerate(argv: string[]): Promise<number> {
+  try {
+    const invocation = parse(argv);
+    const options: ExtractApiOptions = { format: invocation.format };
+
+    // `extractApiIRFromFile` infers the format from the extension, so a file
+    // path goes through it even though the text path would also work.
+    const ir =
+      invocation.input === undefined
+        ? extractApiIR(await Bun.stdin.text(), options)
+        : await extractApiIRFromFile(invocation.input, options);
+
+    // Dropped keywords are a fact about the output, not a failure: the caller
+    // still gets the files, on stderr so stdout stays one JSON value.
+    for (const diagnostic of ir.diagnostics) {
+      console.warn(
+        `wiz generate: dropped '${diagnostic.keyword}' at ${diagnostic.pointer}: ${diagnostic.message}`
+      );
+    }
+
+    const generator = await loadGenerator(invocation.generator);
+    const files = generate(
+      ir,
+      generator,
+      { lenient: invocation.lenient },
+      consoleLogger
+    );
+
+    if (invocation.outdir === undefined) {
+      // Keys are file names, values are contents, so the whole output is one
+      // JSON value — the same shape `wiz eject <dir>` prints.
+      process.stdout.write(`${JSON.stringify(files, null, 2)}\n`);
+      return 0;
+    }
+
+    await writeFiles(invocation.outdir, files);
+    return 0;
+  } catch (error) {
+    console.error(`wiz generate: ${(error as Error).message}`);
+    return 1;
+  }
+}

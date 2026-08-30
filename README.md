@@ -289,6 +289,7 @@ Only protobuf cares. JSON Schema, OpenAPI and Avro see an ordinary union.
 wiz init [--force]             Register the plugin in the current project
 wiz eject <file.ts> [out.ts]   Eject one file; no output path prints to stdout
 wiz eject <dir> [outdir]       Eject a tsconfig project; no outdir prints JSON
+wiz generate -g <module> [in]  Run a generator over an API document
 wiz --help                     Show usage
 ```
 
@@ -315,6 +316,27 @@ A project ejects through its `tsconfig.json`, mirroring the tree. Generated
 modules stay separate there, since files share types by key and inlining would
 copy the same code into each one. Given no destination, the whole tree is
 printed as JSON with paths for keys.
+
+`generate` runs one generator over one document. The input is a file, or stdin
+when it is missing or `-`; the extractor is chosen by the extension, and
+`--format` overrides it. With `--outdir` the emitted files are written there,
+overwriting silently; without one, the whole `{ filename: contents }` record is
+printed as JSON so it can be post-processed.
+
+```bash
+wiz generate -g wiz/generators/tsClient.ts openapi.json --outdir src/api
+cat openapi.yaml | wiz generate -g ./myGenerator.ts | jq -r '."model.ts"'
+```
+
+The bundled TypeScript client generator emits `model.ts` with the document's
+types and `api.ts` with its operations. Every operation takes exactly the
+parameters it declares — `path`, `query`, `headers`, `cookie`, `body` — and is
+reachable two ways: as a module-level function driven by `configure()`, or
+through `createClient()` when one process talks to several deployments. Both
+run the `beforeCall` and `afterCall` hooks, which is where an `Authorization`
+header comes from. `--lenient` widens the parameter objects, letting headers
+carry any string entry and query any string or boolean one, for the gateway the
+document forgot to mention.
 
 ## Design
 

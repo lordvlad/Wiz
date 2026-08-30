@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { runInit } from "./cli/init.ts";
 import { ejectFile, ejectProject, writeEjected } from "./cli/eject.ts";
+import { runGenerate } from "./cli/generate.ts";
 import { consoleLogger, silentLogger } from "./logger.ts";
 
 const USAGE = `wiz - compile-time type introspection for Bun
@@ -9,6 +10,7 @@ Usage:
   wiz init [--force]              Register the plugin in the current project
   wiz eject <file.ts> [out.ts]    Eject one file; no output path prints to stdout
   wiz eject <dir> [outdir]        Eject a tsconfig project; no outdir prints JSON
+  wiz generate -g <module> [in]   Run a generator over an OpenAPI document
   wiz --help                      Show this message
 
 init writes wizPlugin.ts and points bunfig.toml at it, for both 'bun run'
@@ -20,6 +22,12 @@ plus the generated modules it imports. A single file is ejected on its own and
 fails if anything in it needs to read another file; a directory is ejected
 through its tsconfig.json, which is what makes that traversal available.
 Existing files are overwritten.
+
+generate loads the module named by --generator and hands it the document's IR.
+The input is a file path, or stdin when it is '-' or absent; --outdir writes
+every generated file there and overwrites what is in the way, and without one
+the whole set is printed to stdout as JSON keyed by file name. --format
+overrides the sniffed document format and --lenient is passed to the generator.
 `;
 
 /** A single file ejects to one self-contained file, so stdout always works. */
@@ -103,6 +111,9 @@ async function main(argv: string[]): Promise<number> {
       return 1;
     }
   }
+
+  // runGenerate owns its own reporting, so there is nothing to wrap here.
+  if (command === "generate") return runGenerate(rest);
 
   console.error(`wiz: unknown command '${command}'\n`);
   console.error(USAGE);

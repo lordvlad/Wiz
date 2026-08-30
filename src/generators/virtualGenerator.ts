@@ -10,6 +10,7 @@ import {
 } from "./protobuf.ts";
 import { generateAvroCode, generateAvroSchemaCode } from "./avro.ts";
 import { generateArrowCode, generateArrowSchemaCode } from "./arrow.ts";
+import type { Generator } from "./generator.ts";
 
 export interface VirtualModuleOptions {
   openApiTypes?: Array<{ name: string; ir: TypeIR }>;
@@ -99,3 +100,21 @@ export function generateVirtualModuleCode(
 
   return parts.join("\n\n");
 }
+
+/**
+ * The plugin's emitter, addressed through the pluggable generator interface.
+ *
+ * Only `type` is implemented: a virtual module is what one type compiles to,
+ * and the service and document roots are somebody else's output. The file name
+ * is the bare specifier the plugin resolves, without the content hash the
+ * plugin appends: outside the plugin there is no registry to key, so a hash
+ * here would only make the written file harder to import.
+ */
+export const virtualGenerator: Generator<VirtualModuleOptions> = {
+  name: "wiz virtual module",
+  type(ir, context) {
+    return { "wiz-virtual.js": generateVirtualModuleCode(ir, context.options) };
+  },
+};
+
+export default virtualGenerator;
