@@ -4,10 +4,10 @@ import { extractTypeIR } from "./extractors/typescript.ts";
 import { generateOpenApiSchemaCode } from "./generators/openapi.ts";
 import {
   type HttpMethodName,
+  type HttpRequestIR,
+  type HttpResponseIR,
+  type HttpServiceMethodIR,
   type ParameterIR,
-  type ServiceMethodIR,
-  type ServiceMethodRequestIR,
-  type ServiceMethodResponseIR,
 } from "./ir/service.ts";
 import { silentLogger, type WizLogger } from "./logger.ts";
 import { flattenObjectProperties, type TypeIR } from "./types.ts";
@@ -87,10 +87,10 @@ function slotParameters(
 function httpMethodIR(
   method: string,
   path: string,
-  request: ServiceMethodRequestIR,
-  responses: ServiceMethodResponseIR[],
+  request: HttpRequestIR,
+  responses: HttpResponseIR[],
   overrides?: string
-): ServiceMethodIR {
+): HttpServiceMethodIR {
   return {
     kind: "serviceMethod",
     protocol: "http",
@@ -147,10 +147,10 @@ export function collectOperations(
   arg: ts.Expression | undefined,
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile
-): ServiceMethodIR[] {
+): HttpServiceMethodIR[] {
   if (!arg || !ts.isArrayLiteralExpression(arg)) return [];
 
-  const methods: ServiceMethodIR[] = [];
+  const methods: HttpServiceMethodIR[] = [];
   for (const element of arg.elements) {
     if (!ts.isCallExpression(element)) continue;
     if (!ts.isPropertyAccessExpression(element.expression)) continue;
@@ -168,7 +168,7 @@ export function collectOperations(
       extractTypeIR(checker.getTypeFromTypeNode(typeNode), checker)
     );
 
-    const request: ServiceMethodRequestIR = { protocol: "http" };
+    const request: HttpRequestIR = { protocol: "http" };
     const parameters = [
       ...slotParameters(
         pathParams && !isAbsent(pathParams) ? pathParams : undefined,
@@ -184,7 +184,7 @@ export function collectOperations(
       request.body = [{ mimetype: JSON_MIME, content: requestBody }];
     }
 
-    const responses: ServiceMethodResponseIR[] =
+    const responses: HttpResponseIR[] =
       response && !isAbsent(response)
         ? [
             {
@@ -209,8 +209,8 @@ export function collectOperations(
 }
 
 interface OperationSpec {
-  request: ServiceMethodRequestIR;
-  responses: ServiceMethodResponseIR[];
+  request: HttpRequestIR;
+  responses: HttpResponseIR[];
 }
 
 /**
@@ -225,7 +225,7 @@ function readOperationSpec(
   sourceFile: ts.SourceFile,
   logger: WizLogger
 ): OperationSpec {
-  const request: ServiceMethodRequestIR = { protocol: "http" };
+  const request: HttpRequestIR = { protocol: "http" };
   const specNode = call.typeArguments?.[0];
   if (!specNode) {
     return { request, responses: [{ protocol: "http", status: 204 }] };
@@ -273,7 +273,7 @@ function readOperationSpec(
       ? statusSlot.type.value
       : undefined;
 
-  const responses: ServiceMethodResponseIR[] = [];
+  const responses: HttpResponseIR[] = [];
 
   // `response` is the shorthand for the success case.
   const response = slotType("response");
@@ -346,7 +346,7 @@ export function collectRouteOperations(
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   logger: WizLogger
-): ServiceMethodIR[] {
+): HttpServiceMethodIR[] {
   if (!arg) return [];
   if (!ts.isObjectLiteralExpression(arg)) {
     warnUndocumentable(
@@ -359,7 +359,7 @@ export function collectRouteOperations(
     return [];
   }
 
-  const methods: ServiceMethodIR[] = [];
+  const methods: HttpServiceMethodIR[] = [];
 
   const push = (
     path: string,
@@ -370,9 +370,9 @@ export function collectRouteOperations(
     const spec = call
       ? readOperationSpec(call, checker, sourceFile, logger)
       : {
-          request: { protocol: "http" } as ServiceMethodRequestIR,
+          request: { protocol: "http" } as HttpRequestIR,
           responses: [
-            { protocol: "http", status: 204 } as ServiceMethodResponseIR,
+            { protocol: "http", status: 204 } as HttpResponseIR,
           ],
         };
     const method = httpMethodIR(

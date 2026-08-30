@@ -17,6 +17,7 @@ import {
 } from "../openapiDialect.ts";
 import type {
   HttpMethodName,
+  HttpResponseIR,
   ParameterIR,
   ServiceIR,
   ServiceMethodBodyIR,
@@ -671,8 +672,8 @@ function responseToIR(
   ctx: Ctx,
   pointer: string,
   status: number | "default"
-): ServiceMethodResponseIR {
-  const response: ServiceMethodResponseIR = { protocol: "http", status };
+): HttpResponseIR {
+  const response: HttpResponseIR = { protocol: "http", status };
   if (typeof raw.description === "string") {
     response.description = raw.description;
   }

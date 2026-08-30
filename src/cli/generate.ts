@@ -7,10 +7,15 @@ import {
   type ExtractApiOptions,
 } from "../extractors/openapi.ts";
 import {
+  extractProtoIR,
+  extractProtoIRFromFile,
+} from "../extractors/proto.ts";
+import {
   generate,
   type GeneratedFiles,
   type Generator,
 } from "../generators/generator.ts";
+import type { ApiIR } from "../ir/api.ts";
 import { consoleLogger } from "../logger.ts";
 
 /**
@@ -191,17 +196,38 @@ async function writeFiles(
   }
 }
 
+/**
+ * Reads the input through the front end its shape calls for.
+ *
+ * `.proto` is the only extension that is not an API document, and stdin has no
+ * name at all: there, the `syntax = "proto3"` line is the only signal, and it is
+ * a reliable one because a proto file must open with it.
+ */
+async function extractInput(
+  invocation: Invocation,
+  options: ExtractApiOptions
+): Promise<ApiIR> {
+  if (invocation.input === undefined) {
+    const text = await Bun.stdin.text();
+    return /^\s*syntax\s*=\s*["']proto[23]["']/m.test(text)
+      ? extractProtoIR(text)
+      : extractApiIR(text, options);
+  }
+
+  return invocation.input.toLowerCase().endsWith(".proto")
+    ? await extractProtoIRFromFile(invocation.input)
+    : await extractApiIRFromFile(invocation.input, options);
+}
+
 export async function runGenerate(argv: string[]): Promise<number> {
   try {
     const invocation = parse(argv);
     const options: ExtractApiOptions = { format: invocation.format };
 
-    // `extractApiIRFromFile` infers the format from the extension, so a file
-    // path goes through it even though the text path would also work.
-    const ir =
-      invocation.input === undefined
-        ? extractApiIR(await Bun.stdin.text(), options)
-        : await extractApiIRFromFile(invocation.input, options);
+    // The extension decides the front end: a `.proto` file is a gRPC service
+    // definition, anything else is an API document, and each extractor already
+    // infers its own dialect from the same name.
+    const ir = await extractInput(invocation, options);
 
     // Dropped keywords are a fact about the output, not a failure: the caller
     // still gets the files, on stderr so stdout stays one JSON value.

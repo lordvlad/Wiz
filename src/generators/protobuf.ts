@@ -1195,3 +1195,112 @@ export function generateProtobufSchemaCode(
     `}`,
   ].join("\n");
 }
+
+/**
+ * Per-message readers and writers, as a TypeScript module.
+ *
+ * This composes {@link generateProtobufCode} rather than reimplementing it: one
+ * copy of the wire helpers, then each message's functions renamed so several
+ * roots can share a file, then a typed wrapper per message. The alternative -
+ * a second emitter for the same wire format - is exactly the drift this
+ * codebase keeps finding.
+ *
+ * The generated internals are untyped by construction, so the file opts out of
+ * checking; what callers see is the wrappers, and those are typed from the
+ * model, which is what api.ts is checked against.
+ */
+export function generateProtobufCodecCode(
+  types: Array<{ name: string; ir: TypeIR }>,
+  options: { modelModule?: string; identifiers?: ReadonlyMap<string, string> } = {}
+): string {
+  const MESSAGE_MARKER = "function encodeMsg0(";
+  const PUBLIC_MARKER = "\nexport function encodeProto(";
+
+  const identifierFor = (name: string): string => {
+    const mapped = options.identifiers?.get(name);
+    if (mapped) return mapped;
+    const sanitized = name.replace(/[^A-Za-z0-9_$]/g, "_");
+    return /^[A-Za-z_$]/.test(sanitized) ? sanitized : `_${sanitized}`;
+  };
+
+  const exported = (kind: "encode" | "decode", identifier: string): string =>
+    `${kind}${identifier.charAt(0).toUpperCase()}${identifier.slice(1)}`;
+
+  let helpers: string | undefined;
+  const bodies: string[] = [];
+  const wrappers: string[] = [];
+  const modelTypes: string[] = [];
+
+  types.forEach(({ name, ir }, index) => {
+    const identifier = identifierFor(name);
+    const valueType = options.modelModule ? identifier : "unknown";
+    if (options.modelModule) modelTypes.push(identifier);
+
+    const module = generateProtobufCode(ir);
+    const start = module.indexOf(MESSAGE_MARKER);
+
+    // A type protobuf cannot express still gets a module: the blocked root
+    // emits only throwing exports, and its reason is worth keeping verbatim.
+    if (start < 0) {
+      const reason = /throw new Error\((".*?")\)/.exec(module)?.[1] ?? '"[wiz] not encodable"';
+      wrappers.push(
+        `export function ${exported("encode", identifier)}(value: ${valueType}): Uint8Array {\n` +
+          `  throw new Error(${reason});\n}`,
+        `export function ${exported("decode", identifier)}(bytes: Uint8Array): ${valueType} {\n` +
+          `  throw new Error(${reason});\n}`
+      );
+      return;
+    }
+
+    helpers ??= module.slice(0, start).trimEnd();
+    const end = module.indexOf(PUBLIC_MARKER);
+    // Message ids are per-root, so they are suffixed to keep two roots apart.
+    bodies.push(
+      module
+        .slice(start, end < 0 ? undefined : end)
+        .replace(/\b(encodeMsg|decodeMsg)(\d+)\b/g, `$1$2_${index}`)
+        .trimEnd()
+    );
+
+    wrappers.push(
+      `export function ${exported("encode", identifier)}(value: ${valueType}): Uint8Array {\n` +
+        `  return writeMessage((buf, view) => encodeMsg0_${index}(value, buf, 0, view));\n}`,
+      `export function ${exported("decode", identifier)}(bytes: Uint8Array): ${valueType} {\n` +
+        `  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);\n` +
+        `  return decodeMsg0_${index}(bytes, 0, bytes.length, view);\n}`
+    );
+  });
+
+  const allocator = [
+    `/**`,
+    ` * Encodes into a buffer it owns.`,
+    ` *`,
+    ` * The writers advance their offset past the end of a short buffer while the`,
+    ` * writes themselves are dropped, so a result longer than the buffer is how`,
+    ` * truncation announces itself: grow and write again.`,
+    ` */`,
+    `function writeMessage(write) {`,
+    `  let size = 1024;`,
+    `  for (let attempt = 0; attempt < 16; attempt++) {`,
+    `    const buf = new Uint8Array(size);`,
+    `    const view = new DataView(buf.buffer);`,
+    `    const written = write(buf, view);`,
+    `    if (written <= size) return buf.subarray(0, written);`,
+    `    size = Math.max(size * 2, written + 64);`,
+    `  }`,
+    `  throw new Error("[wiz] message did not fit in any buffer this codec will allocate");`,
+    `}`,
+  ].join("\n");
+
+  return [
+    `// @ts-nocheck - generated wire code; the typed surface is the exports below.`,
+    ...(modelTypes.length > 0
+      ? [`import type { ${[...new Set(modelTypes)].sort().join(", ")} } from ${JSON.stringify(options.modelModule)};`]
+      : []),
+    ``,
+    ...(helpers ? [helpers, ``] : []),
+    ...(bodies.length > 0 ? [bodies.join("\n\n"), ``] : []),
+    ...(bodies.length > 0 ? [allocator, ``] : []),
+    wrappers.join("\n\n"),
+  ].join("\n");
+}

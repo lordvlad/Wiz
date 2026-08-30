@@ -5,7 +5,7 @@ import { normalizeTypeIR, type TypeIR } from "./types.ts";
  * so those pieces stay self-describing when passed around on their own, and
  * `ServiceMethodIR` repeats it so a whole method narrows in one check.
  */
-export type Protocol = "http";
+export type Protocol = "http" | "grpc";
 
 export type HttpMethodName =
   | "GET"
@@ -25,7 +25,22 @@ export interface HttpAddressIR {
   path: string;
 }
 
-export type ServiceMethodAddressIR = HttpAddressIR;
+/**
+ * A gRPC method is addressed by name rather than by path and verb: the
+ * transport puts `/package.Service/Method` on the wire and nothing else varies,
+ * so the three parts are held apart instead of pre-joined into a string.
+ */
+export interface GrpcAddressIR {
+  protocol: "grpc";
+  /** Proto package; absent for a file that declares none. */
+  package?: string;
+  /** The service the rpc was declared in. One file can declare several. */
+  service: string;
+  /** The rpc's own name, as written. */
+  method: string;
+}
+
+export type ServiceMethodAddressIR = HttpAddressIR | GrpcAddressIR;
 
 /**
  * One representation of a payload. A request or response holds a list of these
@@ -59,7 +74,19 @@ export interface HttpRequestIR {
   bodyComponent?: string;
 }
 
-export type ServiceMethodRequestIR = HttpRequestIR;
+/**
+ * A gRPC request is one message, not a set of slots: the transport carries no
+ * query, no headers of its own and one media type, so everything a caller
+ * supplies is inside that message. `streaming` is the `stream` keyword on the
+ * request side, which makes the caller send many of them.
+ */
+export interface GrpcRequestIR {
+  protocol: "grpc";
+  message: TypeIR;
+  streaming: boolean;
+}
+
+export type ServiceMethodRequestIR = HttpRequestIR | GrpcRequestIR;
 
 export interface HttpResponseIR {
   protocol: "http";
@@ -72,7 +99,18 @@ export interface HttpResponseIR {
   component?: string;
 }
 
-export type ServiceMethodResponseIR = HttpResponseIR;
+/**
+ * A gRPC response is one message and a status that only exists at runtime, so
+ * unlike HTTP there is nothing to enumerate at compile time: a method has
+ * exactly one of these, streaming or not.
+ */
+export interface GrpcResponseIR {
+  protocol: "grpc";
+  message: TypeIR;
+  streaming: boolean;
+}
+
+export type ServiceMethodResponseIR = HttpResponseIR | GrpcResponseIR;
 
 /**
  * A single callable endpoint. Responses are a list rather than a TypeScript
@@ -96,6 +134,40 @@ export interface ServiceMethodIR {
    * Deliberately untyped: it is an escape hatch out of the IR, not part of it.
    */
   overrides?: string;
+}
+
+/**
+ * A method known to speak one protocol.
+ *
+ * `ServiceMethodIR` holds the union because a service can mix them; a consumer
+ * that only understands one - an OpenAPI document emitter, a gRPC client - has
+ * to narrow first, and these are the seams for it. The `protocol` field is the
+ * discriminant: address, request and responses all follow from it.
+ */
+export interface HttpServiceMethodIR extends ServiceMethodIR {
+  protocol: "http";
+  address: HttpAddressIR;
+  request: HttpRequestIR;
+  responses: HttpResponseIR[];
+}
+
+export interface GrpcServiceMethodIR extends ServiceMethodIR {
+  protocol: "grpc";
+  address: GrpcAddressIR;
+  request: GrpcRequestIR;
+  responses: GrpcResponseIR[];
+}
+
+export function isHttpMethod(
+  method: ServiceMethodIR
+): method is HttpServiceMethodIR {
+  return method.protocol === "http";
+}
+
+export function isGrpcMethod(
+  method: ServiceMethodIR
+): method is GrpcServiceMethodIR {
+  return method.protocol === "grpc";
 }
 
 /**
@@ -145,6 +217,33 @@ export function normalizeServiceMethod(method: ServiceMethodIR): unknown {
     normalizeTypeIR(p.type, true),
   ];
 
+  // A gRPC method has no slots to key, and two shapes that hash alike must not
+  // become one module: the streaming flags change the emitted signature as much
+  // as the message types do.
+  if (method.request.protocol === "grpc") {
+    const streamed = method.responses.find(
+      (candidate): candidate is GrpcResponseIR => candidate.protocol === "grpc"
+    );
+
+    return {
+      a: method.address,
+      oi: method.operationId ?? null,
+      su: method.summary ?? null,
+      de: method.description ?? null,
+      tg: method.tags ?? null,
+      dp: method.deprecated ?? null,
+      o: method.overrides ?? null,
+      rq: {
+        c: normalizeTypeIR(method.request.message, true),
+        s: method.request.streaming,
+      },
+      rs: streamed
+        ? { c: normalizeTypeIR(streamed.message, true), s: streamed.streaming }
+        : null,
+    };
+  }
+
+  const request = method.request;
   return {
     a: method.address,
     oi: method.operationId ?? null,
@@ -153,16 +252,20 @@ export function normalizeServiceMethod(method: ServiceMethodIR): unknown {
     tg: method.tags ?? null,
     dp: method.deprecated ?? null,
     o: method.overrides ?? null,
-    q: (method.request.parameters ?? []).map(parameterKey),
-    b: bodyKey(method.request.body),
-    br: method.request.bodyRequired ?? null,
-    bc: method.request.bodyComponent ?? null,
-    r: method.responses.map((response) => ({
-      s: response.status,
-      de: response.description ?? null,
-      cp: response.component ?? null,
-      b: bodyKey(response.body),
-      h: (response.headers ?? []).map(parameterKey),
-    })),
+    q: (request.parameters ?? []).map(parameterKey),
+    b: bodyKey(request.body),
+    br: request.bodyRequired ?? null,
+    bc: request.bodyComponent ?? null,
+    r: method.responses.map((response) =>
+      response.protocol === "grpc"
+        ? { c: normalizeTypeIR(response.message, true), s: response.streaming }
+        : {
+            s: response.status,
+            de: response.description ?? null,
+            cp: response.component ?? null,
+            b: bodyKey(response.body),
+            h: (response.headers ?? []).map(parameterKey),
+          }
+    ),
   };
 }

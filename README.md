@@ -318,8 +318,9 @@ copy the same code into each one. Given no destination, the whole tree is
 printed as JSON with paths for keys.
 
 `generate` runs one generator over one document. The input is a file, or stdin
-when it is missing or `-`; the extractor is chosen by the extension, and
-`--format` overrides it. With `--outdir` the emitted files are written there,
+when it is missing or `-`; the front end follows from the extension — `.proto`
+is a gRPC service definition, anything else an API document — and `--format`
+overrides the dialect. With `--outdir` the emitted files are written there,
 overwriting silently; without one, the whole `{ filename: contents }` record is
 printed as JSON so it can be post-processed.
 
@@ -337,6 +338,45 @@ run the `beforeCall` and `afterCall` hooks, which is where an `Authorization`
 header comes from. `--lenient` widens the parameter objects, letting headers
 carry any string entry and query any string or boolean one, for the gateway the
 document forgot to mention.
+
+### gRPC
+
+A `.proto` file is a front end like any other: messages, enums, `oneof`, `map`,
+`repeated`, `optional`, nested types and every scalar width become IR, and each
+`rpc` becomes a service method addressed by package, service and name. Anything
+the IR cannot hold — `extend`, groups, `reserved`, proto2's `required` — is
+reported as a diagnostic rather than dropped quietly.
+
+```bash
+wiz generate -g wiz/generators/tsClient.ts pets.proto --outdir src/api
+```
+
+That emits a third file, `codec.ts`, with a reader and a writer per message,
+generated from the same protobuf codec the `encodeProto` helper uses. `api.ts`
+calls into it, so a method takes and returns messages, not bytes:
+
+```ts
+const pet = await getPet({ id: "p1" });          // unary
+for await (const pet of watchPets({ id: "*" })) { /* server stream */ }
+```
+
+**The transport is gRPC-Web, not gRPC.** gRPC proper needs HTTP/2 trailers and a
+duplex request body, and `fetch` exposes neither, so the emitted client speaks
+the framing designed for that constraint — which is what a proxy in front of a
+gRPC server (Envoy, `grpcwebproxy`, Connect) accepts. What follows from that,
+and what a client built on `@grpc/grpc-js` would give you instead:
+
+| | wiz | notes |
+|---|---|---|
+| Unary, server streaming | yes | verified against protobufjs's own wire format |
+| Client and bidirectional streaming | no | needs a duplex body; the method is emitted and throws, so it is not silently missing |
+| Deadlines, cancellation | no | no `AbortSignal` or `grpc-timeout` yet |
+| Metadata | via `beforeCall`/`afterCall` | headers, not a typed metadata object; trailing metadata beyond `grpc-status`/`grpc-message` is not surfaced |
+| Retries, load balancing, channel state | no | one `baseUrl`, one `fetch` |
+| TLS and credentials | the runtime's | whatever `fetch` does |
+| Compression | no | frames are always sent uncompressed, and a compressed reply is refused rather than mis-read |
+| Interceptors | `beforeCall`/`afterCall` | one hook each way, not a chain |
+| Reflection, health checking, `Any`, `Struct` | no | unmapped well-known types become diagnostics |
 
 ## Design
 

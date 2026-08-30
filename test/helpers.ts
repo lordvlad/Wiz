@@ -1,13 +1,29 @@
 import ts from "typescript";
 import { extractTypeIR } from "../src/extractors/typescript.ts";
 import { flattenObjectProperties, type TypeIR } from "../src/types.ts";
+import { isHttpMethod } from "../src/ir/service.ts";
 import type {
   HttpMethodName,
+  HttpRequestIR,
+  HttpServiceMethodIR,
   ParameterIR,
   ServiceIR,
   ServiceMethodIR,
-  ServiceMethodRequestIR,
 } from "../src/ir/service.ts";
+
+/**
+ * Narrows an extracted method to the HTTP shape.
+ *
+ * `ServiceMethodIR` covers gRPC too now, and a test asserting on paths, query
+ * parameters or status codes is asserting about HTTP; this fails loudly rather
+ * than letting an assertion read `undefined` off the wrong protocol.
+ */
+export function asHttp(method: ServiceMethodIR): HttpServiceMethodIR {
+  if (!isHttpMethod(method)) {
+    throw new Error(`expected an HTTP method, got '${method.protocol}'`);
+  }
+  return method;
+}
 
 const VIRTUAL_ENTRY = "test.ts";
 
@@ -180,8 +196,8 @@ export function httpMethod(spec: {
   response?: TypeIR;
   status?: number;
   overrides?: string;
-}): ServiceMethodIR {
-  const request: ServiceMethodRequestIR = { protocol: "http" };
+}): HttpServiceMethodIR {
+  const request: HttpRequestIR = { protocol: "http" };
   if (spec.parameters && spec.parameters.length > 0) {
     request.parameters = spec.parameters;
   }

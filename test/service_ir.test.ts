@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { generateOpenApiSchemaCode } from "../src/generators/openapi.ts";
 import {
   normalizeServiceMethod,
+  type HttpServiceMethodIR,
   type ServiceIR,
   type ServiceMethodIR,
 } from "../src/ir/service.ts";
@@ -246,7 +247,7 @@ describe("capabilities the flat operation IR could not express", () => {
  */
 describe("service method key coverage", () => {
   const payload: TypeIR = { id: "s_1", kind: "primitive", type: "string" };
-  const base: ServiceMethodIR = {
+  const base: HttpServiceMethodIR = {
     kind: "serviceMethod",
     protocol: "http",
     address: { protocol: "http", method: "GET", path: "/users" },
@@ -264,7 +265,7 @@ describe("service method key coverage", () => {
     ],
   };
 
-  const key = (over: Partial<ServiceMethodIR> = {}): string =>
+  const key = (over: Partial<HttpServiceMethodIR> = {}): string =>
     JSON.stringify(normalizeServiceMethod({ ...base, ...over }));
   const bare = key();
 
@@ -300,7 +301,7 @@ describe("service method key coverage", () => {
   });
 
   test("a payload's component name is part of the key", () => {
-    const named = (name: string): ServiceMethodIR => ({
+    const named = (name: string): HttpServiceMethodIR => ({
       ...base,
       responses: [
         {

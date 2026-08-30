@@ -1,9 +1,9 @@
 import type { TypeIR } from "./types.ts";
 import type {
+  HttpResponseIR,
   ParameterIR,
   ServiceIR,
   ServiceMethodBodyIR,
-  ServiceMethodResponseIR,
 } from "./service.ts";
 
 /** One keyword the document used that the IR cannot represent. */
@@ -37,20 +37,29 @@ export interface ApiComponentsIR {
   /**
    * `components.responses`. A response component has no status of its own, so
    * `status` is `"default"` as a placeholder; the operation that uses it holds
-   * the real status.
+   * the real status. HTTP-shaped, because components are an OpenAPI concept:
+   * a gRPC method has one response and nothing to reuse.
    */
-  responses: Map<string, ServiceMethodResponseIR>;
+  responses: Map<string, HttpResponseIR>;
 }
 
 export interface ApiIR {
   kind: "api";
-  /** OpenAPI dialect the document declared. */
-  version: "3.0" | "3.1";
-  /** `components.schemas`, by name, in document order. */
+  /**
+   * The dialect the document was written in. An OpenAPI version, or `proto3`
+   * for a `.proto` file: one field, because every consumer that cares asks the
+   * same question - what shape was this before it became IR.
+   */
+  version: "3.0" | "3.1" | "proto3";
+  /** `components.schemas`, or a proto file's messages and enums, by name. */
   types: Map<string, TypeIR>;
-  /** The other four component sections, by name. */
+  /** The other four component sections, by name. Empty for a proto file. */
   components: ApiComponentsIR;
-  /** `paths` as callable methods, plus `info` mapped onto name/version/description. */
+  /**
+   * `paths` as callable methods, plus `info` mapped onto name/version/
+   * description. For a proto file, every rpc of every service in it: the
+   * service each one belongs to is part of its address.
+   */
   service: ServiceIR;
   /** Everything dropped, so a caller can see what was lost. */
   diagnostics: ApiDiagnostic[];

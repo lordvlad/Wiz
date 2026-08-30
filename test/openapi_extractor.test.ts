@@ -10,7 +10,7 @@ import {
   parseApiDocument,
 } from "../src/extractors/openapi.ts";
 import { generateOpenApiSchemaCode } from "../src/generators/openapi.ts";
-import { evalModule } from "./helpers.ts";
+import { asHttp, evalModule } from "./helpers.ts";
 
 /** Fails with the validator's own messages, which name the offending path. */
 async function expectValid(document: unknown) {
@@ -26,6 +26,7 @@ async function expectValid(document: unknown) {
 /** Extracts, then runs the IR straight back through the forward generator. */
 function regenerate(document: unknown) {
   const ir = extractApiIR(JSON.stringify(document));
+  if (ir.version === "proto3") throw new Error("expected an OpenAPI document");
   const types = [...ir.types].map(([name, typeIR]) => ({ name, ir: typeIR }));
   const code = generateOpenApiSchemaCode(types, ir.version, ir.service);
   const regenerated = evalModule<{
@@ -596,7 +597,7 @@ describe("component names survive extraction", () => {
 
   test("use sites carry the component name alongside the resolved value", () => {
     const ir = extractApiIR(JSON.stringify(document));
-    const method = ir.service.methods[0]!;
+    const method = asHttp(ir.service.methods[0]!);
 
     expect(method.request.parameters).toEqual([
       {
@@ -748,7 +749,7 @@ describe("path-item parameters merge with operation parameters", () => {
 
   test("an operation parameter replaces the path-item one of the same name", () => {
     const ir = extractApiIR(JSON.stringify(document));
-    const parameters = ir.service.methods[0]!.request.parameters!;
+    const parameters = asHttp(ir.service.methods[0]!).request.parameters!;
     expect(
       parameters.map((p) => [p.name, p.in, p.required, p.type.kind])
     ).toEqual([
@@ -1050,7 +1051,7 @@ describe("diagnostics and refusals", () => {
         message: "skipped response with range status key '2XX'",
       },
     ]);
-    expect(ir.service.methods[0]!.responses.map((r) => r.status)).toEqual([200]);
+    expect(asHttp(ir.service.methods[0]!).responses.map((r) => r.status)).toEqual([200]);
   });
 
   test("a parameter using content instead of schema is reported and skipped", () => {
@@ -1075,6 +1076,6 @@ describe("diagnostics and refusals", () => {
       })
     );
     expect(ir.diagnostics.map((d) => d.keyword)).toEqual(["content"]);
-    expect(ir.service.methods[0]!.request.parameters).toBeUndefined();
+    expect(asHttp(ir.service.methods[0]!).request.parameters).toBeUndefined();
   });
 });

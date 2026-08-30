@@ -11,10 +11,11 @@ import {
 } from "../openapiDialect.ts";
 import {
   emptyService,
+  isHttpMethod,
+  type HttpServiceMethodIR,
   type ParameterIR,
   type ServiceIR,
   type ServiceMethodBodyIR,
-  type ServiceMethodIR,
 } from "../ir/service.ts";
 
 function applyConstraints(
@@ -327,7 +328,7 @@ function contentFor(
  * override (`description`, or even a hand-written `responses`) wins.
  */
 function operationSource(
-  method: ServiceMethodIR,
+  method: HttpServiceMethodIR,
   version: "3.0" | "3.1"
 ): string {
   const operation: Record<string, unknown> = {};
@@ -381,6 +382,10 @@ function operationSource(
 function pathsSource(service: ServiceIR, version: "3.0" | "3.1"): string {
   const byPath = new Map<string, Array<[string, string]>>();
   for (const method of service.methods) {
+    // An OpenAPI document describes HTTP. A gRPC method has no path and no
+    // verb, so there is nothing here to render it as; the client generator is
+    // where it belongs.
+    if (!isHttpMethod(method)) continue;
     const entries = byPath.get(method.address.path) ?? [];
     entries.push([
       method.address.method.toLowerCase(),
@@ -400,7 +405,7 @@ function pathsSource(service: ServiceIR, version: "3.0" | "3.1"): string {
 }
 
 /** Every TypeIR a method references, for component hoisting. */
-function typesReferencedBy(method: ServiceMethodIR): TypeIR[] {
+function typesReferencedBy(method: HttpServiceMethodIR): TypeIR[] {
   const referenced: TypeIR[] = [];
   const { request } = method;
   for (const p of request.parameters ?? []) referenced.push(p.type);
@@ -435,8 +440,10 @@ export function generateOpenApiSchemaCode(
   }
   for (const { ir } of types) collect(ir);
 
-  // Method payload types contribute component schemas too.
+  // Method payload types contribute component schemas too, for the HTTP
+  // methods this document can describe.
   for (const method of service.methods) {
+    if (!isHttpMethod(method)) continue;
     for (const ir of typesReferencedBy(method)) collect(ir);
   }
 

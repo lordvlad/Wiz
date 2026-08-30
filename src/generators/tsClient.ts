@@ -1,13 +1,18 @@
 import type { ApiIR } from "../ir/api.ts";
-import type {
-  ParameterIR,
-  ServiceIR,
-  ServiceMethodBodyIR,
-  ServiceMethodIR,
-  ServiceMethodResponseIR,
+import {
+  isGrpcMethod,
+  isHttpMethod,
+  type GrpcServiceMethodIR,
+  type HttpResponseIR,
+  type HttpServiceMethodIR,
+  type ParameterIR,
+  type ServiceIR,
+  type ServiceMethodBodyIR,
+  type ServiceMethodIR,
 } from "../ir/service.ts";
 import { collectNamedTypes, type TypeIR } from "../types.ts";
 import type { GeneratedFiles, Generator, GeneratorContext } from "./generator.ts";
+import { generateProtobufCodecCode } from "./protobuf.ts";
 import { docComment, tsDeclarations, typeIdentifiers, typeText } from "./tsTypes.ts";
 
 /**
@@ -35,6 +40,8 @@ export interface TsClientOptions {
    */
   lenient?: boolean;
 }
+
+const CODEC_FILE = "codec.ts";
 
 const JSON_MIME = "application/json";
 const MODEL_FILE = "model.ts";
@@ -68,8 +75,17 @@ function jsonBody(
   return chosen && !isAbsent(chosen.content) ? chosen.content : undefined;
 }
 
-/** `/pets/{petId}` -> `getPetsByPetId`, for an operation that named nothing. */
+/**
+ * A method name for an operation that named none: `/pets/{petId}` becomes
+ * `getPetsByPetId`. An rpc always carries its own name, so the gRPC side is
+ * only reached for a method assembled by hand.
+ */
 function derivedName(method: ServiceMethodIR): string {
+  if (isGrpcMethod(method)) {
+    return camelCase(`${method.address.service} ${method.address.method}`);
+  }
+  if (!isHttpMethod(method)) return "call";
+
   const segments = method.address.path
     .split("/")
     .filter((segment) => segment.length > 0)
@@ -155,7 +171,7 @@ interface Slot {
 }
 
 function requestSlots(
-  method: ServiceMethodIR,
+  method: HttpServiceMethodIR,
   identifiers: ReadonlyMap<string, string>,
   options: TsClientOptions,
   onSkipped: (mimetype: string) => void
@@ -218,11 +234,11 @@ function requestSlots(
  * the type - a caller that wants them reads `ApiError.body`.
  */
 function successType(
-  method: ServiceMethodIR,
+  method: HttpServiceMethodIR,
   identifiers: ReadonlyMap<string, string>,
   onSkipped: (mimetype: string) => void
 ): string {
-  const isSuccess = (response: ServiceMethodResponseIR) =>
+  const isSuccess = (response: HttpResponseIR) =>
     typeof response.status === "number" &&
     response.status >= 200 &&
     response.status < 300;
@@ -248,13 +264,13 @@ function successType(
 
 /** The URL template, reading path parameters off the caller's slot object. */
 function urlTemplate(
-  method: ServiceMethodIR,
+  method: HttpServiceMethodIR,
   access: string,
   hasQuery: boolean
 ): string {
   const path = method.address.path.replace(
     /\{([^}]+)\}/g,
-    (_match, name: string) => {
+    (_match: string, name: string) => {
       const key = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)
         ? `.${name}`
         : `[${JSON.stringify(name)}]`;
@@ -267,19 +283,21 @@ function urlTemplate(
     : `\`\${config.baseUrl}${path}\``;
 }
 
-/** One operation, in the three shapes the emitted file needs it in. */
+/** One operation, in the shapes the emitted file needs it in. */
 interface Operation {
   name: string;
   doc: string;
-  /** `options: { … }`, `options?: { … }`, or nothing at all. */
+  /** `options: { … }`, `request: Msg`, or nothing at all. */
   parameter: string;
   returns: string;
   /** The method body, as a member of the object `createClient` returns. */
   implementation: string;
+  /** A server stream is an async generator, which reads differently. */
+  streaming: boolean;
 }
 
-function operationFor(
-  method: ServiceMethodIR,
+function httpOperation(
+  method: HttpServiceMethodIR,
   name: string,
   identifiers: ReadonlyMap<string, string>,
   options: TsClientOptions,
@@ -330,10 +348,106 @@ function operationFor(
       ""
     ),
     parameter,
-    returns,
+    returns: returns === "void" ? "Promise<void>" : `Promise<${returns}>`,
     // Parameters are left unannotated: the object literal is contextually typed
     // by `Client`, so the signature has exactly one source of truth.
     implementation: `    async ${name}(${slots.length === 0 ? "" : "options"}) {\n${body}\n    },`,
+    streaming: false,
+  };
+}
+
+/** `encodePet`, from the identifier the model declares the message under. */
+function codecName(kind: "encode" | "decode", identifier: string): string {
+  return `${kind}${identifier.charAt(0).toUpperCase()}${identifier.slice(1)}`;
+}
+
+/** `/pets.Pets/GetPet`, which is the whole of a gRPC address on the wire. */
+function grpcPath(method: GrpcServiceMethodIR): string {
+  const qualified = method.address.package
+    ? `${method.address.package}.${method.address.service}`
+    : method.address.service;
+  return `/${qualified}/${method.address.method}`;
+}
+
+function grpcOperation(
+  method: GrpcServiceMethodIR,
+  name: string,
+  identifiers: ReadonlyMap<string, string>,
+  onUnsupported: (name: string, reason: string) => void
+): Operation {
+  const response = method.responses[0];
+  const requestName = method.request.message.name;
+  const responseName = response?.message.name;
+  const requestIdentifier = requestName ? identifiers.get(requestName) : undefined;
+  const responseIdentifier = responseName
+    ? identifiers.get(responseName)
+    : undefined;
+
+  const doc = docComment(
+    {
+      description:
+        [method.summary, method.description]
+          .filter((line): line is string => Boolean(line))
+          .join("\n\n") || undefined,
+      deprecated: method.deprecated ? { isDeprecated: true } : undefined,
+    },
+    ""
+  );
+
+  // A request stream needs to send frames after the response has begun, which
+  // is a duplex exchange; `fetch` has one request body, sent whole. Emitting a
+  // method that throws beats omitting it: the name is in the document, so a
+  // caller looking for it deserves to be told why it cannot work here.
+  if (method.request.streaming || !requestIdentifier || !responseIdentifier) {
+    const reason = method.request.streaming
+      ? "client and bidirectional streaming need a duplex transport, which fetch is not"
+      : "its request or response message is not declared in this document";
+    onUnsupported(name, reason);
+
+    return {
+      name,
+      doc,
+      parameter: "",
+      returns: "Promise<never>",
+      implementation: `    async ${name}() {\n      throw new Error(${JSON.stringify(
+        `[wiz] ${name} is not callable: ${reason}`
+      )});\n    },`,
+      streaming: false,
+    };
+  }
+
+  const path = JSON.stringify(grpcPath(method));
+  const encode = codecName("encode", requestIdentifier);
+  const decode = codecName("decode", responseIdentifier);
+
+  if (response?.streaming) {
+    return {
+      name,
+      doc,
+      parameter: `request: ${requestIdentifier}`,
+      returns: `AsyncIterable<${responseIdentifier}>`,
+      implementation: [
+        `    async *${name}(request) {`,
+        `      for await (const message of grpcStream(config, ${path}, ${encode}(request))) {`,
+        `        yield ${decode}(message);`,
+        `      }`,
+        `    },`,
+      ].join("\n"),
+      streaming: true,
+    };
+  }
+
+  return {
+    name,
+    doc,
+    parameter: `request: ${requestIdentifier}`,
+    returns: `Promise<${responseIdentifier}>`,
+    implementation: [
+      `    async ${name}(request) {`,
+      `      return ${decode}(await grpcUnary(config, ${path}, ${encode}(request)));`,
+      `    },`,
+    ].join("\n"),
+    streaming: false,
   };
 }
 
@@ -351,7 +465,8 @@ export interface Call {
   method: string;
   url: string;
   headers: Record<string, string>;
-  body?: string;
+  /** JSON text for an HTTP call, a framed protobuf message for a gRPC one. */
+  body?: string | Uint8Array;
 }
 
 /** A call and what came back, before the status is judged. */
@@ -366,7 +481,11 @@ export interface CallResult {
  */
 export type FetchLike = (
   url: string,
-  init: { method: string; headers: Record<string, string>; body?: string }
+  init: {
+    method: string;
+    headers: Record<string, string>;
+    body?: string | Uint8Array;
+  }
 ) => Promise<Response>;
 
 export interface ClientConfig {
@@ -396,7 +515,15 @@ export interface ClientConfig {
 
 const DEFAULTS: ClientConfig = {
   baseUrl: "",
-  fetch: (url, init) => globalThis.fetch(url, init),
+  fetch: (url, init) =>
+    globalThis.fetch(url, {
+      method: init.method,
+      headers: init.headers,
+      // A framed message is a \`Uint8Array\`, which is a body every runtime
+      // accepts; the DOM types spell it as an ArrayBuffer-backed view, and a
+      // plain \`Uint8Array\` is not that narrower type.
+      body: init.body as BodyInit | undefined,
+    }),
 };
 
 /** A response outside 2xx. The parsed body is kept: that is where APIs explain. */
@@ -492,6 +619,192 @@ async function send(config: ClientConfig, call: Call): Promise<unknown> {
 }`;
 
 /**
+ * The gRPC half of the runtime, emitted only when the document declares rpcs.
+ *
+ * The transport is gRPC-Web, not gRPC: gRPC proper needs HTTP/2 trailers and a
+ * duplex body, neither of which `fetch` exposes, so a fetch client that claimed
+ * to speak gRPC would be lying. gRPC-Web is the framing designed for exactly
+ * this constraint, and it is what a proxy in front of a gRPC server speaks.
+ */
+const GRPC_PRELUDE = `const GRPC_MIME = "application/grpc-web+proto";
+
+/** A gRPC status other than OK. \`code\` is the canonical numeric status. */
+export class GrpcError extends Error {
+  readonly code: number;
+  readonly details: string;
+
+  constructor(code: number, details: string) {
+    super(\`gRPC status \${code}\${details ? \`: \${details}\` : ""}\`);
+    this.name = "GrpcError";
+    this.code = code;
+    this.details = details;
+  }
+}
+
+/** One length-prefixed frame: a flag byte, a big-endian length, the message. */
+function frameMessage(payload: Uint8Array): Uint8Array {
+  const framed = new Uint8Array(payload.length + 5);
+  const view = new DataView(framed.buffer);
+  view.setUint8(0, 0);
+  view.setUint32(1, payload.length, false);
+  framed.set(payload, 5);
+  return framed;
+}
+
+/** Trailers arrive as a frame, as HTTP/1 has nowhere else to put them. */
+function trailerStatus(payload: Uint8Array): { code: number; details: string } {
+  let code = 0;
+  let details = "";
+  for (const line of new TextDecoder().decode(payload).split(/\\r?\\n/)) {
+    const separator = line.indexOf(":");
+    if (separator < 0) continue;
+    const name = line.slice(0, separator).trim().toLowerCase();
+    const value = line.slice(separator + 1).trim();
+    if (name === "grpc-status") code = Number(value);
+    if (name === "grpc-message") details = decodeURIComponent(value);
+  }
+  return { code, details };
+}
+
+/**
+ * Status can arrive in the headers - a "trailers-only" reply, which is how a
+ * server reports a failure before producing anything - or in a trailer frame.
+ */
+function headerStatus(response: Response): { code: number; details: string } | undefined {
+  const raw = response.headers.get("grpc-status");
+  if (raw === null) return undefined;
+  return {
+    code: Number(raw),
+    details: decodeURIComponent(response.headers.get("grpc-message") ?? ""),
+  };
+}
+
+async function grpcSend(
+  config: ClientConfig,
+  path: string,
+  request: Uint8Array
+): Promise<{ call: Call; response: Response }> {
+  const call: Call = {
+    method: "POST",
+    url: \`\${config.baseUrl}\${path}\`,
+    // \`x-grpc-web\` is what marks this as the framed dialect rather than proto
+    // over plain HTTP; a proxy keys off it.
+    headers: { "content-type": GRPC_MIME, accept: GRPC_MIME, "x-grpc-web": "1" },
+    body: frameMessage(request),
+  };
+
+  const prepared = config.beforeCall ? await config.beforeCall(call) : call;
+  const response = await config.fetch(prepared.url, {
+    method: prepared.method,
+    headers: prepared.headers,
+    body: prepared.body,
+  });
+  return config.afterCall
+    ? await config.afterCall({ call: prepared, response })
+    : { call: prepared, response };
+}
+
+async function grpcUnary(
+  config: ClientConfig,
+  path: string,
+  request: Uint8Array
+): Promise<Uint8Array> {
+  const { response } = await grpcSend(config, path, request);
+
+  // A transport failure has no gRPC status at all, so it stays an ApiError:
+  // the caller is looking at a proxy or a network, not at an rpc.
+  const early = headerStatus(response);
+  if (!response.ok && !early) {
+    throw new ApiError(response.status, await response.text(), response);
+  }
+  if (early && early.code !== 0) throw new GrpcError(early.code, early.details);
+
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  let message: Uint8Array | undefined;
+  let status = early ?? { code: 0, details: "" };
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 0;
+  while (offset + 5 <= bytes.length) {
+    const flags = bytes[offset]!;
+    const length = view.getUint32(offset + 1, false);
+    const start = offset + 5;
+    const payload = bytes.subarray(start, start + length);
+    if ((flags & 0x80) !== 0) status = trailerStatus(payload);
+    // Bit 0 marks a compressed frame. Reading it as-is would hand the codec
+    // deflated bytes, so it is refused with UNIMPLEMENTED instead.
+    else if ((flags & 0x01) !== 0) throw new GrpcError(12, "compressed frames are not supported");
+    else message ??= payload;
+    offset = start + length;
+  }
+
+  if (status.code !== 0) throw new GrpcError(status.code, status.details);
+  if (!message) throw new GrpcError(13, "the response carried no message");
+  return message;
+}
+
+/**
+ * A server stream, yielded frame by frame.
+ *
+ * The body is read incrementally rather than buffered: a stream that only
+ * arrives once the server is finished is not a stream.
+ */
+async function* grpcStream(
+  config: ClientConfig,
+  path: string,
+  request: Uint8Array
+): AsyncGenerator<Uint8Array> {
+  const { response } = await grpcSend(config, path, request);
+
+  const early = headerStatus(response);
+  if (!response.ok && !early) {
+    throw new ApiError(response.status, await response.text(), response);
+  }
+  if (early && early.code !== 0) throw new GrpcError(early.code, early.details);
+
+  const reader = response.body?.getReader();
+  if (!reader) throw new GrpcError(13, "the response had no body to stream");
+
+  let buffer = new Uint8Array(0);
+  let status = early ?? { code: 0, details: "" };
+
+  const take = (length: number): Uint8Array => {
+    const taken = buffer.subarray(0, length);
+    buffer = buffer.subarray(length);
+    return taken;
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (value && value.length > 0) {
+      const merged = new Uint8Array(buffer.length + value.length);
+      merged.set(buffer, 0);
+      merged.set(value, buffer.length);
+      buffer = merged;
+    }
+
+    // A frame is only readable once its header and its whole payload arrived.
+    while (buffer.length >= 5) {
+      const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+      const length = view.getUint32(1, false);
+      if (buffer.length < 5 + length) break;
+      const flags = buffer[0]!;
+      take(5);
+      const payload = take(length);
+      if ((flags & 0x80) !== 0) status = trailerStatus(payload);
+      else if ((flags & 0x01) !== 0) {
+        throw new GrpcError(12, "compressed frames are not supported");
+      }
+      else yield payload;
+    }
+
+    if (done) break;
+  }
+
+  if (status.code !== 0) throw new GrpcError(status.code, status.details);
+}`;
+
+/**
  * Every named type the client refers to.
  *
  * `components.schemas` is the declared set; a document can also name a type
@@ -514,6 +827,12 @@ function declaredTypes(
   };
 
   for (const method of service.methods) {
+    if (isGrpcMethod(method)) {
+      collect(method.request.message);
+      for (const response of method.responses) collect(response.message);
+      continue;
+    }
+    if (!isHttpMethod(method)) continue;
     for (const parameter of method.request.parameters ?? []) collect(parameter.type);
     for (const body of method.request.body ?? []) collect(body.content);
     for (const response of method.responses) {
@@ -542,9 +861,25 @@ function emitFiles(
     );
   };
 
+  const unsupported: Record<string, true> = {};
+  const onUnsupported = (name: string, reason: string) => {
+    if (unsupported[name]) return;
+    unsupported[name] = true;
+    context.logger.warn(`[wiz] ${name} is emitted as a throwing stub: ${reason}`);
+  };
+
   const names = methodNames(service);
+  const grpcMethods = service.methods.filter(isGrpcMethod);
   const operations = service.methods.map((method) =>
-    operationFor(method, names.get(method)!, identifiers, context.options, onSkipped)
+    isGrpcMethod(method)
+      ? grpcOperation(method, names.get(method)!, identifiers, onUnsupported)
+      : httpOperation(
+          method as HttpServiceMethodIR,
+          names.get(method)!,
+          identifiers,
+          context.options,
+          onSkipped
+        )
   );
 
   const banner = (what: string) =>
@@ -574,7 +909,7 @@ function emitFiles(
               .map((line) => `  ${line}`)
               .join("\n") + "\n"
           : "";
-        return `${doc}  ${operation.name}(${operation.parameter}): Promise<${operation.returns}>;`;
+        return `${doc}  ${operation.name}(${operation.parameter}): ${operation.returns};`;
       })
       .join("\n"),
     "}",
@@ -617,7 +952,12 @@ function emitFiles(
       .map((operation) => {
         // Typed from `Client`, so a delegate cannot drift from the method it
         // forwards to, and reads `client` per call so `configure` still applies.
-        const argument = operation.parameter === "" ? "" : "options";
+        const argument =
+          operation.parameter === ""
+            ? ""
+            : operation.parameter.startsWith("request")
+              ? "request"
+              : "options";
         return `${operation.doc}export const ${operation.name}: Client[${JSON.stringify(
           operation.name
         )}] = (${argument}) => client.${operation.name}(${argument});`;
@@ -632,16 +972,65 @@ function emitFiles(
     .filter((identifier) => new RegExp(`\\b${identifier}\\b`).test(declarations))
     .sort();
 
+  // The wire codec is a file of its own: it is the only generated code with no
+  // types in it, it is large, and a caller may well want to frame a message
+  // without going through a method.
+  const codecTypes = grpcMethods.length > 0 ? messageTypes(grpcMethods, declared) : [];
+  const codecImports = [...new Set(
+    codecTypes.flatMap(({ name }) => {
+      const identifier = identifiers.get(name);
+      return identifier
+        ? [codecName("encode", identifier), codecName("decode", identifier)]
+        : [];
+    })
+  )]
+    .filter((fn) => new RegExp(`\\b${fn}\\b`).test(declarations))
+    .sort();
+
   const api = [
     banner("Every operation the document declares."),
     imported.length > 0
       ? `\nimport type { ${imported.join(", ")} } from "./${MODEL_FILE}";\n`
       : "",
+    codecImports.length > 0
+      ? `import { ${codecImports.join(", ")} } from "./${CODEC_FILE}";\n`
+      : "",
     `\n${PRELUDE}\n`,
+    grpcMethods.length > 0 ? `\n${GRPC_PRELUDE}\n` : "",
     operations.length > 0 ? `\n${declarations}\n` : "",
   ].join("");
 
-  return { [MODEL_FILE]: model, [API_FILE]: api };
+  const files: GeneratedFiles = { [MODEL_FILE]: model, [API_FILE]: api };
+  if (codecTypes.length > 0) {
+    files[CODEC_FILE] = `${banner("Protobuf readers and writers.")}\n${generateProtobufCodecCode(
+      codecTypes,
+      { modelModule: `./${MODEL_FILE}`, identifiers }
+    )}\n`;
+  }
+  return files;
+}
+
+/** Every message a gRPC method puts on the wire, in a stable order. */
+function messageTypes(
+  methods: GrpcServiceMethodIR[],
+  declared: ReadonlyMap<string, TypeIR>
+): Array<{ name: string; ir: TypeIR }> {
+  const wanted = new Map<string, TypeIR>();
+
+  for (const method of methods) {
+    for (const message of [
+      method.request.message,
+      ...method.responses.map((response) => response.message),
+    ]) {
+      const name = message.name;
+      if (!name) continue;
+      // The declared copy is the definition; a method may hold a `ref` to it.
+      const ir = declared.get(name) ?? message;
+      if (ir.kind !== "ref") wanted.set(name, ir);
+    }
+  }
+
+  return [...wanted].map(([name, ir]) => ({ name, ir }));
 }
 
 export const tsClientGenerator: Generator<TsClientOptions> = {
