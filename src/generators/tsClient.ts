@@ -429,7 +429,7 @@ function grpcOperation(
 
   const outgoing = streamsIn
     ? `grpcEncoded(requests, ${encode})`
-    : `grpcOnce(${encode}(request))`;
+    : `[${encode}(request)]`;
 
   if (streamsOut) {
     return {
@@ -472,13 +472,13 @@ function grpcOperation(
 /**
  * The runtime every emitted method shares.
  *
- * It is deliberately small and dependency-free: one configuration shape, two
- * hooks, and the encoding rules. Anything larger would be a framework the
- * consumer did not ask for. `send` takes the configuration rather than reading
- * a module-level one, which is what lets one file serve both a per-instance
- * client and the module-level default.
+ * It is deliberately small and dependency-free: one configuration shape, one
+ * interceptor chain, and the encoding rules. Anything larger would be a
+ * framework the consumer did not ask for. `send` takes the configuration rather
+ * than reading a module-level one, which is what lets one file serve both a
+ * per-instance client and the module-level default.
  */
-const PRELUDE = `/** One outgoing call, as built by a method and seen by the hooks. */
+const PRELUDE = `/** One outgoing call, as built by a method and seen by every interceptor. */
 export interface Call {
   method: string;
   url: string;
@@ -491,6 +491,44 @@ export interface Call {
 export interface CallResult {
   call: Call;
   response: Response;
+}
+
+/**
+ * A wrapper around one call.
+ *
+ * One shape serves both protocols, so an interceptor can do the same four
+ * things either side: change the call on the way in, change what comes back on
+ * the way out, call \`next\` more than once to retry, or never call it and
+ * answer from somewhere else. The call type is shared too, so an interceptor
+ * that only touches the request - the common case, a token - is one generic
+ * function that both sides accept.
+ */
+export type Interceptor<TResult> = (
+  call: Call,
+  next: (call: Call) => TResult
+) => TResult;
+
+/** Wraps an HTTP call. The response is raw: its status is judged afterwards. */
+export type HttpInterceptor = Interceptor<Promise<CallResult>>;
+
+/**
+ * A chain per protocol, because what an interceptor gets back differs. Only the
+ * protocols this document speaks are here, so an array can never be written
+ * into a key nothing will read.
+ */
+export interface Interceptors {
+__INTERCEPTOR_KEYS__}
+
+/** Folds the chain right to left, so the first interceptor is the outermost. */
+function chain<TResult>(
+  interceptors: ReadonlyArray<Interceptor<TResult>> | undefined,
+  invoke: (call: Call) => TResult
+): (call: Call) => TResult {
+  if (!interceptors || interceptors.length === 0) return invoke;
+  return interceptors.reduceRight<(call: Call) => TResult>(
+    (next, interceptor) => (call) => interceptor(call, next),
+    invoke
+  );
 }
 
 /**
@@ -520,15 +558,10 @@ export interface ClientConfig {
    */
   fetch: FetchLike;
   /**
-   * Runs before the request is sent and may replace it: this is where an
-   * Authorization header comes from. Awaited, so refreshing a token is allowed.
+   * Wrappers around every call, outermost first. This is where an
+   * Authorization header comes from, and where a retry or a log belongs.
    */
-  beforeCall?: (call: Call) => Call | Promise<Call>;
-  /**
-   * Runs once the response arrives, before its status is judged or its body
-   * parsed. Awaited, and may substitute a different response.
-   */
-  afterCall?: (result: CallResult) => CallResult | Promise<CallResult>;
+  interceptors?: Interceptors;
 __GRPC_CONFIG__}
 
 const DEFAULTS: ClientConfig = {
@@ -619,15 +652,18 @@ async function parseBody(response: Response): Promise<unknown> {
 }
 
 async function send(config: ClientConfig, call: Call): Promise<unknown> {
-  const prepared = config.beforeCall ? await config.beforeCall(call) : call;
-  const response = await config.fetch(prepared.url, {
-    method: prepared.method,
-    headers: prepared.headers,
-    body: prepared.body,
+  const invoke = async (outgoing: Call): Promise<CallResult> => ({
+    call: outgoing,
+    response: await config.fetch(outgoing.url, {
+      method: outgoing.method,
+      headers: outgoing.headers,
+      body: outgoing.body,
+    }),
   });
-  const settled = config.afterCall
-    ? await config.afterCall({ call: prepared, response })
-    : { call: prepared, response };
+
+  // The status is judged after the chain, so an interceptor sees the response
+  // that a retry or a token refresh has to look at, not an exception.
+  const settled = await __HTTP_CHAIN__(call);
 
   const body = await parseBody(settled.response);
   if (!settled.response.ok) {
@@ -641,7 +677,7 @@ async function send(config: ClientConfig, call: Call): Promise<unknown> {
  *
  * It is separate because it imports `node:http2`, which a browser bundle must
  * never see. A consumer on a server opts in - `configure({ transport:
- * createHttp2Transport(...) })` - and gains what gRPC needs and `fetch` cannot
+ * createHttp2Transport() })` - and gains what gRPC needs and `fetch` cannot
  * give: HTTP/2 trailers for the status, and a request body that stays open, so
  * client and bidirectional streaming work.
  */
@@ -660,36 +696,38 @@ import {
 const GRPC_MIME = "application/grpc+proto";
 
 export interface Http2TransportOptions {
-  /** \`https://host:port\` for TLS, \`http://host:port\` for cleartext h2c. */
-  baseUrl: string;
   /** Passed to \`http2.connect\`, for a CA bundle or a client certificate. */
   session?: http2.SecureClientSessionOptions;
 }
 
 export interface Http2Transport extends GrpcTransport {
-  /** Closes the pooled session. A process that exits does not need this. */
+  /** Closes every pooled session. A process that exits does not need this. */
   close(): void;
 }
 
 /**
- * One session per transport, reopened when it goes away.
+ * One session per origin, reopened when it goes away.
  *
  * HTTP/2 multiplexes every call over one connection, which is the whole reason
- * gRPC uses it: a stream is cheap, a connection is not.
+ * gRPC uses it: a stream is cheap, a connection is not. The origin comes off
+ * the call rather than out of an option, so the client's \`baseUrl\` stays the
+ * only place a URL is written - and one transport can serve several of them.
  */
 export function createHttp2Transport(
-  options: Http2TransportOptions
+  options: Http2TransportOptions = {}
 ): Http2Transport {
-  const origin = new URL(options.baseUrl).origin;
-  let session: http2.ClientHttp2Session | undefined;
+  const sessions = new Map<string, http2.ClientHttp2Session>();
 
-  const connected = (): http2.ClientHttp2Session => {
-    if (session && !session.closed && !session.destroyed) return session;
-    session = http2.connect(origin, options.session);
+  const connected = (origin: string): http2.ClientHttp2Session => {
+    const existing = sessions.get(origin);
+    if (existing && !existing.closed && !existing.destroyed) return existing;
+
+    const session = http2.connect(origin, options.session);
     // Without this an idle session's error takes the process down.
     session.on("error", () => {
-      session = undefined;
+      sessions.delete(origin);
     });
+    sessions.set(origin, session);
     return session;
   };
 
@@ -697,14 +735,15 @@ export function createHttp2Transport(
     duplex: true,
 
     close() {
-      session?.close();
-      session = undefined;
+      for (const session of sessions.values()) session.close();
+      sessions.clear();
     },
 
     call(call: GrpcTransportCall): GrpcTransportResponse {
-      const stream = connected().request({
+      const target = new URL(call.url);
+      const stream = connected(target.origin).request({
         ":method": "POST",
-        ":path": call.path,
+        ":path": \`\${target.pathname}\${target.search}\`,
         "content-type": GRPC_MIME,
         // \`te: trailers\` is how a gRPC client announces it will read them.
         te: "trailers",
@@ -721,7 +760,7 @@ export function createHttp2Transport(
           rejectHeaders = reject;
         }
       );
-      // A caller only awaits the headers when it has an \`afterCall\` hook. The
+      // A caller only awaits the headers when an interceptor asked for them. The
       // real failure travels through \`messages\`; without this, rejecting an
       // unobserved promise would surface as an unhandled rejection instead.
       headers.catch(() => {});
@@ -946,11 +985,15 @@ export interface GrpcCallOptions {
 }
 
 export interface GrpcTransportCall {
-  /** \`/package.Service/Method\`. */
-  path: string;
+  /** Absolute: the client's \`baseUrl\` plus \`/package.Service/Method\`. */
+  url: string;
   headers: Record<string, string>;
-  /** One message for a unary request, many for a client stream. */
-  messages: AsyncIterable<Uint8Array>;
+  /**
+   * One message for a unary request, many for a client stream. A plain array is
+   * allowed, and is what a unary call passes: re-iterable, so an interceptor
+   * can send it twice.
+   */
+  messages: AsyncIterable<Uint8Array> | Iterable<Uint8Array>;
   signal?: AbortSignal;
   timeoutMs?: number;
 }
@@ -974,6 +1017,16 @@ export interface GrpcTransport {
   readonly duplex: boolean;
   call(call: GrpcTransportCall): GrpcTransportResponse;
 }
+
+/**
+ * Wraps a gRPC call.
+ *
+ * \`next\` returns before the response exists - a stream has no single moment of
+ * arrival - so an interceptor reads \`headers\` or \`trailers\` off the result
+ * instead of awaiting the call. Attach a \`catch\` to either: a failed call
+ * rejects both, and the error itself travels through \`messages\`.
+ */
+export type GrpcInterceptor = Interceptor<GrpcTransportResponse>;
 
 /**
  * The message encodings a gRPC peer may name.
@@ -1034,11 +1087,6 @@ export async function frameMessage(
   view.setUint32(1, compressed.length, false);
   framed.set(compressed, 5);
   return framed;
-}
-
-/** The one-message stream a unary or server-streaming request sends. */
-async function* grpcOnce(message: Uint8Array): AsyncGenerator<Uint8Array> {
-  yield message;
 }
 
 /** Encodes a caller's stream on the way out, one message at a time. */
@@ -1173,7 +1221,7 @@ function fetchTransport(config: ClientConfig): GrpcTransport {
 
           const requestEncoding = (call.headers["grpc-encoding"] ??
             "identity") as GrpcCompression;
-          const response = await config.fetch(\`\${config.baseUrl}\${call.path}\`, {
+          const response = await config.fetch(call.url, {
             method: "POST",
             headers: { ...call.headers, "content-type": GRPC_WEB_MIME, accept: GRPC_WEB_MIME, "x-grpc-web": "1" },
             body: await frameMessage(collected[0]!, requestEncoding),
@@ -1266,16 +1314,18 @@ function callHeaders(
 }
 
 /**
- * Runs one call: hooks, then the transport, then the response messages.
+ * Runs one call: the interceptor chain, then the transport, then the response
+ * messages.
  *
- * The hooks are the same two an HTTP call runs, so a token injected for one is
- * injected for the other. \`afterCall\` sees a \`Response\` synthesised from the
- * response headers when the transport has no \`Response\` of its own.
+ * The chain is the same mechanism an HTTP call runs and sees the same \`Call\`,
+ * so an interceptor that only adds a header is one function serving both. What
+ * differs is what it gets back: a response that has not arrived yet, because a
+ * stream never arrives all at once.
  */
 async function* grpcCall(
   config: ClientConfig,
   path: string,
-  requests: AsyncIterable<Uint8Array>,
+  requests: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
   options: GrpcCallOptions | undefined,
   needsDuplex: boolean
 ): AsyncGenerator<Uint8Array> {
@@ -1292,41 +1342,17 @@ async function* grpcCall(
     url: \`\${config.baseUrl}\${path}\`,
     headers: callHeaders(options, config),
   };
-  const prepared = config.beforeCall ? await config.beforeCall(call) : call;
 
-  const response = transport.call({
-    path,
-    headers: prepared.headers,
-    messages: requests,
-    signal: options?.signal,
-    timeoutMs: options?.timeoutMs ?? config.timeoutMs,
-  });
-
-  if (config.afterCall) {
-    const received = await response.headers;
-    // HTTP/2 pseudo-headers are not headers: \`Response\` rejects a name starting
-    // with a colon, and \`:status\` is carried as the status anyway.
-    const plain: Record<string, string> = {};
-    for (const [name, value] of Object.entries(received.headers)) {
-      if (!name.startsWith(":")) plain[name] = value;
-    }
-
-    await config.afterCall({
-      call: prepared,
-      response: new Response(null, { status: received.status, headers: plain }),
+  const invoke = (outgoing: Call): GrpcTransportResponse =>
+    transport.call({
+      url: outgoing.url,
+      headers: outgoing.headers,
+      messages: requests,
+      signal: options?.signal,
+      timeoutMs: options?.timeoutMs ?? config.timeoutMs,
     });
-  }
 
-  yield* response.messages;
-
-  // Trailing metadata is only known once the stream is done, which is why it is
-  // its own hook rather than part of \`afterCall\`: that one runs when the
-  // headers arrive, and awaiting trailers there would wait for messages nobody
-  // is reading yet. A caller that abandons the iteration early never gets here,
-  // and a failure carries its metadata on \`GrpcError\` instead.
-  if (config.onTrailers) {
-    await config.onTrailers(await response.trailers, prepared);
-  }
+  yield* chain(config.interceptors?.grpc, invoke)(call).messages;
 }
 
 /** A unary call: exactly one message out, exactly one back. */
@@ -1337,7 +1363,9 @@ async function grpcUnary(
   options?: GrpcCallOptions
 ): Promise<Uint8Array> {
   let message: Uint8Array | undefined;
-  for await (const received of grpcCall(config, path, grpcOnce(request), options, false)) {
+  // A plain array rather than a generator, so an interceptor that calls \`next\`
+  // twice sends the same message again instead of an empty stream.
+  for await (const received of grpcCall(config, path, [request], options, false)) {
     message ??= received;
   }
 
@@ -1547,35 +1575,47 @@ function emitFiles(
 
   // The gRPC fields only exist on a client that has rpcs to make, so the shared
   // configuration carries them conditionally rather than always.
-  const grpcConfig =
-    grpcMethods.length > 0
+  const speaksGrpc = grpcMethods.length > 0;
+  const grpcConfig = speaksGrpc
+    ? [
+        "  /**",
+        "   * How gRPC calls travel. Defaults to gRPC-Web over `fetch`, which runs",
+        "   * anywhere; `createHttp2Transport()` from ./transport.ts speaks gRPC",
+        "   * proper and is the only one that can stream requests.",
+        "   */",
+        "  transport?: GrpcTransport;",
+        "  /**",
+        "   * Compresses outgoing messages. A client always advertises that it",
+        "   * accepts `gzip` and `deflate`, so a server may compress its replies",
+        "   * whatever this is set to.",
+        "   */",
+        "  compression?: GrpcCompression;",
+        "  /** A deadline for every gRPC call, unless the call overrides it. */",
+        "  timeoutMs?: number;",
+        "",
+      ].join("\n")
+    : "";
+
+  // A key per protocol the document speaks, so an interceptor array is never
+  // written into a slot nothing reads. Both are the same mechanism either way.
+  const speaksHttp = service.methods.some(isHttpMethod);
+  const interceptorKeys = [
+    ...(speaksHttp
       ? [
-          "  /**",
-          "   * How gRPC calls travel. Defaults to gRPC-Web over `fetch`, which runs",
-          "   * anywhere; `createHttp2Transport()` from ./transport.ts speaks gRPC",
-          "   * proper and is the only one that can stream requests.",
-          "   */",
-          "  transport?: GrpcTransport;",
-          "  /**",
-          "   * Compresses outgoing messages. A client always advertises that it",
-          "   * accepts `gzip` and `deflate`, so a server may compress its replies",
-          "   * whatever this is set to.",
-          "   */",
-          "  compression?: GrpcCompression;",
-          "  /**",
-          "   * Runs once a call's stream has ended, with whatever the server",
-          "   * appended. A failure reports its own metadata on `GrpcError`",
-          "   * instead, since a failed call has no stream to end.",
-          "   */",
-          "  onTrailers?: (",
-          "    trailers: Record<string, string>,",
-          "    call: Call",
-          "  ) => void | Promise<void>;",
-          "  /** A deadline for every gRPC call, unless the call overrides it. */",
-          "  timeoutMs?: number;",
-          "",
-        ].join("\n")
-      : "";
+          "  /** Outermost first: `[a, b]` runs a around b around the request. */",
+          "  http?: HttpInterceptor[];",
+        ]
+      : []),
+    ...(speaksGrpc
+      ? [
+          speaksHttp
+            ? "  /** Outermost first, exactly as `http`. */"
+            : "  /** Outermost first: `[a, b]` runs a around b around the call. */",
+          "  grpc?: GrpcInterceptor[];",
+        ]
+      : []),
+    "",
+  ].join("\n");
 
   const api = [
     banner("Every operation the document declares."),
@@ -1585,7 +1625,12 @@ function emitFiles(
     codecImports.length > 0
       ? `import { ${codecImports.join(", ")} } from "./${CODEC_FILE}";\n`
       : "",
-    `\n${PRELUDE.replace("__GRPC_CONFIG__", grpcConfig)}\n`,
+    `\n${PRELUDE.replace("__GRPC_CONFIG__", grpcConfig)
+      .replace("__INTERCEPTOR_KEYS__", interceptorKeys)
+      .replace(
+        "__HTTP_CHAIN__",
+        speaksHttp ? "chain(config.interceptors?.http, invoke)" : "invoke"
+      )}\n`,
     grpcMethods.length > 0 ? `\n${GRPC_PRELUDE}\n` : "",
     operations.length > 0 ? `\n${declarations}\n` : "",
   ].join("");

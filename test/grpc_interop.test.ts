@@ -44,7 +44,18 @@ interface ClientModule {
     baseUrl?: string;
     transport?: Transport;
     compression?: "identity" | "gzip" | "deflate";
-    onTrailers?: (trailers: Record<string, string>) => void;
+    interceptors?: {
+      grpc?: Array<
+        (
+          call: { method: string; url: string; headers: Record<string, string> },
+          next: (call: {
+            method: string;
+            url: string;
+            headers: Record<string, string>;
+          }) => { trailers: Promise<Record<string, string>> }
+        ) => { trailers: Promise<Record<string, string>> }
+      >;
+    };
   }): EchoClient;
   GrpcError: new (...args: never[]) => Error & {
     code: number;
@@ -54,7 +65,8 @@ interface ClientModule {
 }
 
 interface TransportModule {
-  createHttp2Transport(options: { baseUrl: string }): Transport;
+  /** No URL: the origin comes off each call, from the client's `baseUrl`. */
+  createHttp2Transport(): Transport;
 }
 
 let server: RunningServer;
@@ -81,9 +93,7 @@ beforeAll(async () => {
     join(directory, "transport.ts")
   )) as unknown as TransportModule;
 
-  transport = transportModule.createHttp2Transport({
-    baseUrl: `http://127.0.0.1:${server.port}`,
-  });
+  transport = transportModule.createHttp2Transport();
   client = api.createClient({
     baseUrl: `http://127.0.0.1:${server.port}`,
     transport,
@@ -195,20 +205,50 @@ describe("against @grpc/grpc-js over HTTP/2", () => {
   });
 
   /**
-   * Trailing metadata is where a server says what a status code cannot. It has
-   * its own hook because it is only known once the stream has ended.
+   * The transport takes no URL, so the origin comes off each call. One
+   * transport therefore serves several base URLs, one session each - which is
+   * also what keeps `baseUrl` the single place a URL is written.
    */
-  test("trailing metadata reaches the onTrailers hook", async () => {
+  test("one transport serves two origins", async () => {
+    const other = await startEchoServer();
+    try {
+      const elsewhere = api.createClient({
+        baseUrl: `http://127.0.0.1:${other.port}`,
+        transport,
+      });
+
+      expect(await elsewhere.unary(ping("second"))).toEqual({ text: "pong:second" });
+      expect(await client.unary(ping("first"))).toEqual({ text: "pong:first" });
+    } finally {
+      await other.close();
+    }
+  });
+
+  /**
+   * Trailing metadata is where a server says what a status code cannot. An
+   * interceptor reads it off the result rather than awaiting the call, which is
+   * the only way it can be read at all: trailers arrive after the messages a
+   * caller has not consumed yet.
+   */
+  test("an interceptor reads the trailing metadata off the result", async () => {
     const seen: Array<Record<string, string>> = [];
     const observed = api.createClient({
       baseUrl: `http://127.0.0.1:${server.port}`,
       transport,
-      onTrailers: (trailers) => {
-        seen.push(trailers);
+      interceptors: {
+        grpc: [
+          (call, next) => {
+            const result = next(call);
+            void result.trailers.then((trailers) => seen.push(trailers)).catch(() => {});
+            return result;
+          },
+        ],
       },
     });
 
     expect(await observed.unary(ping("watched"))).toEqual({ text: "pong:watched" });
+    // The call is over, but the promise callback is a microtask behind it.
+    await Promise.resolve();
     expect(seen).toHaveLength(1);
     expect(seen[0]!["x-request-id"]).toBe("req-42");
   });

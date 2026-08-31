@@ -333,11 +333,34 @@ The bundled TypeScript client generator emits `model.ts` with the document's
 types and `api.ts` with its operations. Every operation takes exactly the
 parameters it declares — `path`, `query`, `headers`, `cookie`, `body` — and is
 reachable two ways: as a module-level function driven by `configure()`, or
-through `createClient()` when one process talks to several deployments. Both
-run the `beforeCall` and `afterCall` hooks, which is where an `Authorization`
-header comes from. `--lenient` widens the parameter objects, letting headers
-carry any string entry and query any string or boolean one, for the gateway the
-document forgot to mention.
+through `createClient()` when one process talks to several deployments. Both run
+the same interceptor chain. `--lenient` widens the parameter objects, letting
+headers carry any string entry and query any string or boolean one, for the
+gateway the document forgot to mention.
+
+### Interceptors
+
+An interceptor wraps one call: `(call, next) => result`. It may change the call
+on the way in, change what comes back on the way out, call `next` more than once
+to retry, or never call it and answer from a cache. `[a, b]` nests, `a` outside
+`b`, and the response's status is judged *after* the chain, so a retry decides
+on a `503` rather than catching a thrown error.
+
+Both protocols use that one shape and share the `Call` type, so an interceptor
+that only touches the request is written once and used on either:
+
+```ts
+const bearer = <R>(call: Call, next: (call: Call) => R): R =>
+  next({ ...call, headers: { ...call.headers, authorization: `Bearer ${token}` } });
+
+configure({ interceptors: { http: [bearer], grpc: [bearer] } });
+```
+
+What differs is only what comes back. An HTTP interceptor awaits a `Response`; a
+gRPC one is handed a result whose messages have not arrived yet, and reads
+`headers` or `trailers` off it rather than awaiting the call — a stream has no
+single moment of arrival. Each key exists only when the document speaks that
+protocol, so an array can never be filed under a name nothing reads.
 
 ### gRPC
 
@@ -364,7 +387,7 @@ import { createHttp2Transport } from "./transport.ts";
 
 configure({
   baseUrl: "http://127.0.0.1:50051",
-  transport: createHttp2Transport({ baseUrl: "http://127.0.0.1:50051" }),
+  transport: createHttp2Transport(),
 });
 
 await unary({ text: "hi" });                                  // one to one
@@ -386,7 +409,9 @@ guessed at.
 
 **Two transports, because two environments.** `transport.ts` speaks gRPC proper
 over `node:http2` — real HTTP/2, real trailers, a request body that stays open —
-and is the only one that can stream requests. It is a separate file so a browser
+and is the only one that can stream requests. It takes no URL: the origin comes
+off each call, so the client's `baseUrl` is the only place a URL is written and
+one transport serves several of them. It is a separate file so a browser
 bundle never imports `node:http2`. Without it, calls fall back to gRPC-Web over
 `fetch`, which runs anywhere and needs a proxy (Envoy, `grpcwebproxy`, Connect)
 in front of a gRPC server; a call that streams requests over that transport
@@ -401,12 +426,12 @@ What a client built on `@grpc/grpc-js` still gives you that this does not:
 | Unary and all three streaming directions | yes, over HTTP/2 | gRPC-Web carries unary and server streaming only |
 | Deadlines, cancellation | yes | `timeoutMs` and `AbortSignal` per call, or a default on the client |
 | Wire format | verified | checked byte for byte against protobufjs, both directions |
-| Metadata | headers plus trailing metadata | `beforeCall` sets it, `onTrailers` reads what the server appended, and a failure carries it on `GrpcError.metadata`. Not a typed `Metadata` object, and binary (`-bin`) values are not base64-decoded |
-| Retries, hedging | no | a failed call is a failed call |
-| Load balancing, name resolution, channel state | no | one origin per transport, one pooled session |
+| Metadata | headers plus trailing metadata | an interceptor sets it going out and reads `trailers` off the result coming back; a failure carries it on `GrpcError.metadata`. Not a typed `Metadata` object, and binary (`-bin`) values are not base64-decoded |
+| Retries, hedging | writable, not built in | an interceptor may call `next` again — a unary request is re-iterable, so the retry sends the same message. No policy, no backoff, no hedging |
+| Load balancing, name resolution, channel state | no | one session per origin, pooled; no resolver and no channel state to read |
 | TLS and credentials | the runtime's | `http2.connect` options are passed through; no per-call credentials |
 | Compression | `gzip`, `deflate` | per message, both directions, via `CompressionStream`; verified against grpc-js. `snappy` and zstd are not offered |
-| Interceptors | one hook each way | `beforeCall`/`afterCall`, not a chain |
+| Interceptors | a chain, both protocols | `(call, next) => result`, nested outermost first, sharing one `Call` type. No per-method interception |
 | Reflection, health checking | no | generate a client from their own `.proto` like any other service |
 | Well-known types | `Timestamp`, `Duration`, `Empty`, `FieldMask`, the nine wrappers | declared as the messages the spec defines, so the bytes match protobufjs. `Any` and `Struct` carry meaning in the runtime rather than in their fields, and stay diagnosed |
 

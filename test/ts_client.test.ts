@@ -230,14 +230,23 @@ describe("emitted code compiles and runs", () => {
     body?: string;
   }
 
+  interface ResultLike {
+    call: Sent;
+    response: Response;
+  }
+
+  type InterceptorLike = (
+    call: Sent,
+    next: (call: Sent) => Promise<ResultLike>
+  ) => Promise<ResultLike>;
+
   interface ClientConfigLike {
     baseUrl?: string;
     fetch?: (
       url: string,
       init: { method: string; headers: Record<string, string>; body?: string }
     ) => Promise<Response>;
-    beforeCall?: (call: Sent) => Sent | Promise<Sent>;
-    afterCall?: (result: { call: Sent; response: Response }) => unknown;
+    interceptors?: { http?: InterceptorLike[] };
   }
 
   interface Operations {
@@ -272,13 +281,20 @@ describe("emitted code compiles and runs", () => {
         sent.push(call);
         return respond(call);
       },
-      beforeCall: (call) =>
-        hooks.authorization
-          ? { ...call, headers: { ...call.headers, authorization: hooks.authorization } }
-          : call,
-      afterCall: (result) => {
-        hooks.seen?.push(result.response.status);
-        return result;
+      // One interceptor covers both directions: the token on the way in, the
+      // status on the way out.
+      interceptors: {
+        http: [
+          async (call, next) => {
+            const result = await next(
+              hooks.authorization
+                ? { ...call, headers: { ...call.headers, authorization: hooks.authorization } }
+                : call
+            );
+            hooks.seen?.push(result.response.status);
+            return result;
+          },
+        ],
       },
     });
 
@@ -373,10 +389,12 @@ describe("emitted code compiles and runs", () => {
         first.push({ url, method: init.method, headers: init.headers, body: init.body });
         return json({ id: "a", name: "A" });
       },
-      beforeCall: (call) => ({
-        ...call,
-        headers: { ...call.headers, authorization: "Bearer a" },
-      }),
+      interceptors: {
+        http: [
+          (call, next) =>
+            next({ ...call, headers: { ...call.headers, authorization: "Bearer a" } }),
+        ],
+      },
     });
 
     const tenantB = client.createClient({
@@ -403,5 +421,52 @@ describe("emitted code compiles and runs", () => {
     expect(second[0]!.headers.authorization).toBeUndefined();
     // And neither disturbs the module-level configuration.
     expect(second).toHaveLength(1);
+  });
+
+  /**
+   * An interceptor is a wrapper, not a callback: the chain nests, and calling
+   * `next` twice sends the request twice. That is what makes a retry the
+   * caller's to write rather than a feature the client has to ship.
+   */
+  test("the chain nests outermost first, and may call next twice", async () => {
+    const client = await load(() => json({}), []);
+    const order: string[] = [];
+    let attempts = 0;
+
+    const retrying = client.createClient({
+      baseUrl: "https://r.test",
+      fetch: async () => {
+        attempts += 1;
+        return attempts === 1
+          ? json({ error: "busy" }, 503)
+          : json({ id: "p1", name: "Rex" });
+      },
+      interceptors: {
+        http: [
+          async (call, next) => {
+            order.push("outer in");
+            const result = await next(call);
+            order.push("outer out");
+            return result;
+          },
+          async (call, next) => {
+            order.push("inner in");
+            let result = await next(call);
+            // A 503 reaches the chain as a response, not as a throw: that is
+            // what lets this decide rather than catch.
+            if (result.response.status === 503) result = await next(call);
+            order.push("inner out");
+            return result;
+          },
+        ],
+      },
+    });
+
+    expect(await retrying.getPetById({ path: { petId: "x" } })).toEqual({
+      id: "p1",
+      name: "Rex",
+    });
+    expect(attempts).toBe(2);
+    expect(order).toEqual(["outer in", "inner in", "inner out", "outer out"]);
   });
 });

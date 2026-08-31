@@ -226,19 +226,33 @@ describe("emitted gRPC client", () => {
     body?: string | Uint8Array;
   }
 
-  interface ClientModule {
-    configure(next: {
-      baseUrl?: string;
-      fetch?: (
-        url: string,
-        init: { method: string; headers: Record<string, string>; body?: string | Uint8Array }
-      ) => Promise<Response>;
-      beforeCall?: (call: Sent) => Sent | Promise<Sent>;
-    }): void;
-    GrpcError: new (...args: never[]) => Error & { code: number; details: string };
+  interface ResultLike {
+    headers: Promise<{ status: number; headers: Record<string, string> }>;
+    messages: AsyncIterable<Uint8Array>;
+    trailers: Promise<Record<string, string>>;
+  }
+
+  type InterceptorLike = (call: Sent, next: (call: Sent) => ResultLike) => ResultLike;
+
+  interface ConfigLike {
+    baseUrl?: string;
+    fetch?: (
+      url: string,
+      init: { method: string; headers: Record<string, string>; body?: string | Uint8Array }
+    ) => Promise<Response>;
+    interceptors?: { grpc?: InterceptorLike[] };
+  }
+
+  interface Operations {
     getPet(request: { id: string }): Promise<Record<string, unknown>>;
     watchPets(request: { id: string }): AsyncIterable<Record<string, unknown>>;
     upload(requests: AsyncIterable<{ text: string }>): Promise<unknown>;
+  }
+
+  interface ClientModule extends Operations {
+    configure(next: ConfigLike): void;
+    createClient(overrides?: ConfigLike): Operations;
+    GrpcError: new (...args: never[]) => Error & { code: number; details: string };
   }
 
   /** gRPC-Web framing, written independently of the generator under test. */
@@ -281,10 +295,12 @@ describe("emitted gRPC client", () => {
         sent.push(call);
         return respond(call);
       },
-      beforeCall: (call) => ({
-        ...call,
-        headers: { ...call.headers, authorization: "Bearer token" },
-      }),
+      interceptors: {
+        grpc: [
+          (call, next) =>
+            next({ ...call, headers: { ...call.headers, authorization: "Bearer token" } }),
+        ],
+      },
     });
     return client;
   };
@@ -329,7 +345,7 @@ describe("emitted gRPC client", () => {
     expect(call.method).toBe("POST");
     expect(call.headers["content-type"]).toBe("application/grpc-web+proto");
     expect(call.headers["x-grpc-web"]).toBe("1");
-    // The hooks apply to gRPC exactly as they do to HTTP.
+    // The chain applies to gRPC exactly as it does to HTTP.
     expect(call.headers.authorization).toBe("Bearer token");
 
     const body = call.body as Uint8Array;
@@ -338,6 +354,70 @@ describe("emitted gRPC client", () => {
       body.length - 5
     );
     expect(requestType.decode(body.subarray(5)).toJSON()).toEqual({ id: "p1" });
+  });
+
+  /**
+   * A retry is the caller's to write, and this is what makes it possible: the
+   * unary request is a re-iterable array, so calling `next` a second time sends
+   * the same message again instead of an empty stream. Wrapping `messages` is
+   * how an interceptor sees a failure at all - it arrives as a throw from the
+   * stream, not as a rejected result.
+   */
+  test("a gRPC interceptor can retry a failed unary call", async () => {
+    const petType = root.lookupType("pets.v1.Pet");
+    const requestType = root.lookupType("pets.v1.GetPetRequest");
+    const webHeaders = { "content-type": "application/grpc-web+proto" };
+
+    // The module-level client is only how the module is imported here; the
+    // retrying client below answers its own calls.
+    const client = await load(
+      () => new Response(trailer(), { status: 200, headers: webHeaders }),
+      []
+    );
+
+    const sent: Sent[] = [];
+    const retrying = client.createClient({
+      baseUrl: "https://grpc.test",
+      fetch: async (url, init) => {
+        sent.push({ url, method: init.method, headers: init.headers, body: init.body });
+        return sent.length === 1
+          ? new Response(trailer(14, "try again"), { status: 200, headers: webHeaders })
+          : new Response(
+              concat(frame(petType.encode({ id: "p1", name: "Rex" }).finish()), trailer()),
+              { status: 200, headers: webHeaders }
+            );
+      },
+      interceptors: {
+        grpc: [
+          (call, next) => {
+            const first = next(call);
+            return {
+              headers: first.headers,
+              trailers: first.trailers,
+              messages: (async function* () {
+                try {
+                  yield* first.messages;
+                } catch {
+                  // Nothing was yielded, so the second attempt is the whole call.
+                  yield* next(call).messages;
+                }
+              })(),
+            };
+          },
+        ],
+      },
+    });
+
+    const received = await retrying.getPet({ id: "p1" });
+
+    expect(received.name).toBe("Rex");
+    expect(sent).toHaveLength(2);
+    // The same request, sent twice: the array was iterated again.
+    for (const call of sent) {
+      expect(requestType.decode((call.body as Uint8Array).subarray(5)).toJSON()).toEqual({
+        id: "p1",
+      });
+    }
   });
 
   /** A frame flagged compressed, whatever the algorithm turns out to be. */
