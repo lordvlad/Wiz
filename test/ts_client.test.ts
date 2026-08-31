@@ -140,13 +140,21 @@ describe("emitted files", () => {
     const source = files["api.ts"]!;
 
     // Only an optional query, so the whole argument is optional.
-    expect(source).toContain("listPets(options?: { query?: { limit?: number } }): Promise<Pet[]>;");
+    expect(source).toContain(
+      "listPets(options?: { query?: { limit?: number } }, callOptions?: HttpCallOptions): Promise<Pet[]>;"
+    );
     // A required body is a required argument.
-    expect(source).toContain("createPet(options: { body: NewPet }): Promise<Pet>;");
+    expect(source).toContain(
+      "createPet(options: { body: NewPet }, callOptions?: HttpCallOptions): Promise<Pet>;"
+    );
     // Path is required, the header is not, and the header name needs quoting.
-    expect(source).toContain('getPetById(options: { path: { petId: string }; headers?: { "x-trace-id"?: string } }): Promise<Pet>;');
+    expect(source).toContain(
+      'getPetById(options: { path: { petId: string }; headers?: { "x-trace-id"?: string } }, callOptions?: HttpCallOptions): Promise<Pet>;'
+    );
     // No content means no payload to type.
-    expect(source).toContain("deletePet(options: { path: { petId: string } }): Promise<void>;");
+    expect(source).toContain(
+      "deletePet(options: { path: { petId: string } }, callOptions?: HttpCallOptions): Promise<void>;"
+    );
   });
 
   test("operations are reachable as a client and as module-level functions", () => {
@@ -156,9 +164,10 @@ describe("emitted files", () => {
     expect(source).toContain(
       "export function createClient(overrides: Partial<ClientConfig> = {}): Client {"
     );
-    // The free function is typed from the interface, so the two cannot drift.
+    // The free function is typed from the interface, so the two cannot drift,
+    // and it forwards the per-call options along with the slots.
     expect(source).toContain(
-      'export const listPets: Client["listPets"] = (options) => client.listPets(options);'
+      "export const listPets: Client[\"listPets\"] = (options, callOptions) => client.listPets(options, callOptions);"
     );
     // Four operations, four request bodies: the delegates forward, they do not
     // re-implement.
@@ -242,21 +251,32 @@ describe("emitted code compiles and runs", () => {
 
   interface ClientConfigLike {
     baseUrl?: string;
+    timeoutMs?: number;
     fetch?: (
       url: string,
-      init: { method: string; headers: Record<string, string>; body?: string }
+      init: {
+        method: string;
+        headers: Record<string, string>;
+        body?: string;
+        signal?: AbortSignal;
+      }
     ) => Promise<Response>;
     interceptors?: { http?: InterceptorLike[] };
   }
 
+  interface CallOptionsLike {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  }
+
   interface Operations {
-    listPets(options?: { query?: { limit?: number } }): Promise<unknown>;
-    createPet(options: { body: { name: string } }): Promise<unknown>;
-    getPetById(options: {
-      path: { petId: string };
-      headers?: { "x-trace-id"?: string };
-    }): Promise<unknown>;
-    deletePet(options: { path: { petId: string } }): Promise<unknown>;
+    listPets(options?: { query?: { limit?: number } }, callOptions?: CallOptionsLike): Promise<unknown>;
+    createPet(options: { body: { name: string } }, callOptions?: CallOptionsLike): Promise<unknown>;
+    getPetById(
+      options: { path: { petId: string }; headers?: { "x-trace-id"?: string } },
+      callOptions?: CallOptionsLike
+    ): Promise<unknown>;
+    deletePet(options: { path: { petId: string } }, callOptions?: CallOptionsLike): Promise<unknown>;
   }
 
   interface ClientModule extends Operations {
@@ -468,5 +488,123 @@ describe("emitted code compiles and runs", () => {
     });
     expect(attempts).toBe(2);
     expect(order).toEqual(["outer in", "inner in", "inner out", "outer out"]);
+  });
+
+  /**
+   * The same two things a gRPC call takes. `signal` reaches `fetch` untouched;
+   * `timeoutMs` is enforced by the client, so a server that never answers
+   * cannot hang the caller either.
+   *
+   * The deadline is `AbortSignal.timeout` inside the emitted client, a platform
+   * timer fake timers cannot reach, so this exercises the real clock. The
+   * 250ms fallback is deliberately past the deadline: if enforcement broke, the
+   * call would succeed and the name assertion below would fail, not hang.
+   */
+  test("a call can be cancelled through its signal, and a timeout aborts it", async () => {
+    const client = await load(() => json({}), []);
+
+    // A fetch that behaves like the real one: it settles when told, and it
+    // rejects the moment its signal is aborted, not after its own timer.
+    const slow = (init: { signal?: AbortSignal }): Promise<Response> => {
+      const { promise, resolve, reject } = Promise.withResolvers<Response>();
+      const timer = setTimeout(() => resolve(json({ id: "late" })), 250);
+      init.signal?.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          reject(init.signal!.reason);
+        },
+        { once: true }
+      );
+      return promise;
+    };
+
+    const controlled = client.createClient({
+      baseUrl: "https://c.test",
+      fetch: (_url, init) => slow(init),
+    });
+
+    const controller = new AbortController();
+    const inFlight = controlled.getPetById(
+      { path: { petId: "x" } },
+      { signal: controller.signal }
+    );
+    controller.abort();
+    const cancelled = await inFlight.catch((error: unknown) => error);
+
+    expect((cancelled as Error).name).toBe("AbortError");
+
+    const timedOut = await controlled
+      .getPetById({ path: { petId: "x" } }, { timeoutMs: 25 })
+      .catch((error: unknown) => error);
+
+    // `AbortSignal.timeout` names its own failure, which is what keeps a
+    // deadline apart from a caller changing their mind.
+    expect((timedOut as Error).name).toBe("TimeoutError");
+
+    // The same deadline can be a default on the client rather than per call.
+    const byDefault = client.createClient({
+      baseUrl: "https://c.test",
+      timeoutMs: 25,
+      fetch: (_url, init) => slow(init),
+    });
+    const defaulted = await byDefault
+      .deletePet({ path: { petId: "x" } })
+      .catch((error: unknown) => error);
+
+    expect((defaulted as Error).name).toBe("TimeoutError");
+  });
+
+  /**
+   * The deadline is per attempt, not per call: the signal is built inside the
+   * attempt, so an interceptor that retries after a timeout is not handed a
+   * signal that has already fired.
+   */
+  test("a retried attempt gets a fresh deadline", async () => {
+    const client = await load(() => json({}), []);
+    let attempts = 0;
+
+    const retrying = client.createClient({
+      baseUrl: "https://r.test",
+      fetch: (_url, init) => {
+        const { promise, resolve, reject } = Promise.withResolvers<Response>();
+        attempts += 1;
+        if (attempts === 1) {
+          // The first attempt hangs until its deadline aborts it.
+          init.signal?.addEventListener(
+            "abort",
+            () => reject(init.signal!.reason),
+            { once: true }
+          );
+        } else {
+          // Resolves only if the second attempt really got a fresh signal; an
+          // already-aborted one would reject immediately.
+          init.signal?.addEventListener(
+            "abort",
+            () => reject(init.signal!.reason),
+            { once: true }
+          );
+          resolve(json({ id: "second" }));
+        }
+        return promise;
+      },
+      interceptors: {
+        http: [
+          async (call, next) => {
+            try {
+              return await next(call);
+            } catch (error) {
+              if ((error as Error).name !== "TimeoutError") throw error;
+              return await next(call);
+            }
+          },
+        ],
+      },
+    });
+
+    const pet = await retrying.getPetById({ path: { petId: "x" } }, { timeoutMs: 25 });
+
+    expect(pet).toEqual({ id: "second" });
+    expect(attempts).toBe(2);
   });
 });

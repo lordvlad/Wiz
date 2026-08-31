@@ -338,6 +338,13 @@ the same interceptor chain. `--lenient` widens the parameter objects, letting
 headers carry any string entry and query any string or boolean one, for the
 gateway the document forgot to mention.
 
+Every call also takes a second argument — `getPetById({ path: { petId } }, {
+signal, timeoutMs: 250 })` — the same cancellation and deadline a gRPC call
+takes. `signal` reaches `fetch` untouched, and the timeout is enforced locally:
+the call aborts with a `TimeoutError` when it passes, whatever the server is
+doing. A retried attempt (an interceptor calling `next` again) gets a fresh
+deadline; `timeoutMs` can also be a default on the client or `configure()`.
+
 ### Interceptors
 
 An interceptor wraps one call: `(call, next) => result`. It may change the call
@@ -396,8 +403,9 @@ await up(pings());                                             // many to one
 for await (const pong of both(pings())) { /* … */ }            // many to many
 ```
 
-Calls take a second argument for a deadline and cancellation:
-`unary(request, { timeoutMs: 250, signal })`. A deadline is sent as
+Calls take a second argument for a deadline and cancellation —
+`unary(request, { timeoutMs: 250, signal })` — exactly as HTTP calls do, except
+that gRPC also carries ambient metadata there. A deadline is sent as
 `grpc-timeout` and enforced locally too, so a server that ignores it cannot hang
 the caller. `configure({ compression: "gzip" })` compresses what the client
 sends; replies are decompressed whenever the server says it compressed them,

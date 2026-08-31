@@ -313,10 +313,10 @@ function httpOperation(
 
   const parameter =
     slots.length === 0
-      ? ""
+      ? "callOptions?: HttpCallOptions"
       : `options${required ? "" : "?"}: { ${slots
           .map((slot) => `${slot.name}${slot.required ? "" : "?"}: ${slot.type}`)
-          .join("; ")} }`;
+          .join("; ")} }, callOptions?: HttpCallOptions`;
 
   const has = (name: string) => slots.some((slot) => slot.name === name);
   const call = [
@@ -330,7 +330,7 @@ function httpOperation(
     ...(has("body") ? [`        body: JSON.stringify(${access}.body),`] : []),
   ].join("\n");
 
-  const send = `send(config, {\n${call}\n      })`;
+  const send = `send(config, {\n${call}\n      }, callOptions)`;
   const body =
     returns === "void"
       ? `      await ${send};`
@@ -352,7 +352,7 @@ function httpOperation(
     returns: returns === "void" ? "Promise<void>" : `Promise<${returns}>`,
     // Parameters are left unannotated: the object literal is contextually typed
     // by `Client`, so the signature has exactly one source of truth.
-    implementation: `    async ${name}(${slots.length === 0 ? "" : "options"}) {\n${body}\n    },`,
+    implementation: `    async ${name}(${slots.length === 0 ? "callOptions" : "options, callOptions"}) {\n${body}\n    },`,
     streaming: false,
   };
 }
@@ -494,6 +494,36 @@ export interface CallResult {
 }
 
 /**
+ * Per-call cancellation and deadline, the same two things a gRPC call takes.
+ * There is deliberately no \`headers\` here: an HTTP document declares its
+ * headers, so they are slots on the method rather than ambient metadata.
+ */
+export interface HttpCallOptions {
+  /** Cancels the call. Whatever \`fetch\` does with an aborted signal happens. */
+  signal?: AbortSignal;
+  /**
+   * A deadline for this call, enforced locally: the call aborts with a
+   * \`TimeoutError\` when it passes, whatever the server is doing.
+   */
+  timeoutMs?: number;
+}
+
+/**
+ * The caller's signal and the deadline as one signal, built per attempt so an
+ * interceptor that calls \`next\` again gets a fresh deadline rather than one
+ * that has already fired.
+ */
+function effectiveSignal(
+  signal: AbortSignal | undefined,
+  timeoutMs: number | undefined
+): AbortSignal | undefined {
+  const deadline =
+    timeoutMs === undefined ? [] : [AbortSignal.timeout(timeoutMs)];
+  return signal ? AbortSignal.any([signal, ...deadline]) : deadline[0];
+}
+
+
+/**
  * A wrapper around one call.
  *
  * One shape serves both protocols, so an interceptor can do the same four
@@ -541,6 +571,7 @@ export type FetchLike = (
     method: string;
     headers: Record<string, string>;
     body?: string | Uint8Array;
+    signal?: AbortSignal;
   }
 ) => Promise<Response>;
 
@@ -562,6 +593,11 @@ export interface ClientConfig {
    * Authorization header comes from, and where a retry or a log belongs.
    */
   interceptors?: Interceptors;
+  /**
+   * A deadline for every call, unless the call overrides it. Sent as
+   * \`grpc-timeout\` where the protocol has one, and always enforced locally.
+   */
+  timeoutMs?: number;
 __GRPC_CONFIG__}
 
 const DEFAULTS: ClientConfig = {
@@ -574,6 +610,7 @@ const DEFAULTS: ClientConfig = {
       // accepts; the DOM types spell it as an ArrayBuffer-backed view, and a
       // plain \`Uint8Array\` is not that narrower type.
       body: init.body as BodyInit | undefined,
+      signal: init.signal,
     }),
 };
 
@@ -651,13 +688,24 @@ async function parseBody(response: Response): Promise<unknown> {
   }
 }
 
-async function send(config: ClientConfig, call: Call): Promise<unknown> {
+async function send(
+  config: ClientConfig,
+  call: Call,
+  options: HttpCallOptions | undefined
+): Promise<unknown> {
+  // The signal is built inside the attempt, not once per call, so an
+  // interceptor that calls \`next\` again gets a fresh deadline rather than one
+  // that has already fired. The caller's own signal spans every attempt.
   const invoke = async (outgoing: Call): Promise<CallResult> => ({
     call: outgoing,
     response: await config.fetch(outgoing.url, {
       method: outgoing.method,
       headers: outgoing.headers,
       body: outgoing.body,
+      signal: effectiveSignal(
+        options?.signal,
+        options?.timeoutMs ?? config.timeoutMs
+      ),
     }),
   });
 
@@ -1521,8 +1569,8 @@ function emitFiles(
     "let client: Client = createClient();",
     "",
     "/**",
-    " * Merges into the configuration the module-level functions use, so a base URL",
-    " * and a hook can be set from different places.",
+    " * Merges into the configuration the module-level functions use, so a base",
+    " * URL and an interceptor can be set from different places.",
     " */",
     "export function configure(next: Partial<ClientConfig>): void {",
     "  defaults = { ...defaults, ...next };",
@@ -1590,8 +1638,7 @@ function emitFiles(
         "   * whatever this is set to.",
         "   */",
         "  compression?: GrpcCompression;",
-        "  /** A deadline for every gRPC call, unless the call overrides it. */",
-        "  timeoutMs?: number;",
+        // `timeoutMs` is shared with HTTP, so it lives on ClientConfig proper.
         "",
       ].join("\n")
     : "";
