@@ -40,7 +40,11 @@ interface EchoClient {
 
 interface ClientModule {
   configure(next: { baseUrl?: string; transport?: Transport; timeoutMs?: number }): void;
-  createClient(overrides: { baseUrl?: string; transport?: Transport }): EchoClient;
+  createClient(overrides: {
+    baseUrl?: string;
+    transport?: Transport;
+    compression?: "identity" | "gzip" | "deflate";
+  }): EchoClient;
   GrpcError: new (...args: never[]) => Error & { code: number; details: string };
 }
 
@@ -184,4 +188,37 @@ describe("against @grpc/grpc-js over HTTP/2", () => {
 
     expect(await unary(ping("module"))).toEqual({ text: "pong:module" });
   });
+  /**
+   * Compression is negotiated per message, in both directions, and neither side
+   * here is ours: grpc-js compresses its replies because the client said it
+   * accepts gzip, and it decompresses our requests because we said we sent gzip.
+   */
+  test("gzip travels both ways", async () => {
+    const compressing = api.createClient({
+      baseUrl: `http://127.0.0.1:${server.port}`,
+      transport,
+      compression: "gzip",
+    });
+
+    // Long enough that compression is not a no-op on the wire.
+    const text = "compress me ".repeat(40);
+    expect(await compressing.unary(ping(text))).toEqual({ text: `pong:${text}` });
+
+    const seen: string[] = [];
+    for await (const pong of compressing.down(ping(text, 2))) seen.push(pong.text);
+    expect(seen).toEqual([`${text}#0`, `${text}#1`]);
+  });
+
+  test("deflate is accepted too", async () => {
+    const deflating = api.createClient({
+      baseUrl: `http://127.0.0.1:${server.port}`,
+      transport,
+      compression: "deflate",
+    });
+
+    expect(await deflating.unary(ping("deflated"))).toEqual({
+      text: "pong:deflated",
+    });
+  });
+
 });

@@ -374,7 +374,13 @@ for await (const pong of both(pings())) { /* … */ }            // many to many
 Calls take a second argument for a deadline and cancellation:
 `unary(request, { timeoutMs: 250, signal })`. A deadline is sent as
 `grpc-timeout` and enforced locally too, so a server that ignores it cannot hang
-the caller.
+the caller. `configure({ compression: "gzip" })` compresses what the client
+sends; replies are decompressed whenever the server says it compressed them,
+since every call advertises `grpc-accept-encoding: gzip, deflate, identity`.
+Compression goes through `CompressionStream`, so the same client does it in a
+browser as on a server. `gzip` and `deflate` are the registered gRPC encodings
+a browser can also perform; zstd is not one, so it is refused rather than
+guessed at.
 
 **Two transports, because two environments.** `transport.ts` speaks gRPC proper
 over `node:http2` — real HTTP/2, real trailers, a request body that stays open —
@@ -397,7 +403,7 @@ What a client built on `@grpc/grpc-js` still gives you that this does not:
 | Retries, hedging | no | a failed call is a failed call |
 | Load balancing, name resolution, channel state | no | one origin per transport, one pooled session |
 | TLS and credentials | the runtime's | `http2.connect` options are passed through; no per-call credentials |
-| Compression | no | frames are sent uncompressed, and a compressed reply is refused rather than mis-read |
+| Compression | `gzip`, `deflate` | per message, both directions, via `CompressionStream`; verified against grpc-js. `snappy` and zstd are not offered |
 | Interceptors | one hook each way | `beforeCall`/`afterCall`, not a chain |
 | Reflection, health checking, `Any`, `Struct` | no | unmapped well-known types become diagnostics |
 

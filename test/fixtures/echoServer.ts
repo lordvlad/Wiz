@@ -40,7 +40,10 @@ export async function startEchoServer(): Promise<RunningServer> {
     v1: { Echo: grpc.ServiceClientConstructor };
   };
 
-  const server = new grpc.Server();
+  // 2 is gzip in grpc-js's algorithm table: replies come back compressed when
+  // the client says it accepts them that way, which is what exercises our
+  // decompression against a real implementation.
+  const server = new grpc.Server({ "grpc.default_compression_algorithm": 2 });
   server.addService(echo.v1.Echo.service, {
     // Unary, plus the one path that answers with a status instead of a message.
     Unary: (call: grpc.ServerUnaryCall<Ping, Pong>, callback: Callback) => {
@@ -87,7 +90,6 @@ export async function startEchoServer(): Promise<RunningServer> {
       (error, bound) => (error ? reject(error) : resolve(bound))
     );
   });
-
   return {
     port,
     close: () =>

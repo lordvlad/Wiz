@@ -647,9 +647,11 @@ async function send(config: ClientConfig, call: Call): Promise<unknown> {
  */
 const HTTP2_TRANSPORT = `import http2 from "node:http2";
 import {
+  frameMessage,
   GrpcError,
   grpcFrames,
   parseGrpcStatus,
+  type GrpcCompression,
   type GrpcTransport,
   type GrpcTransportCall,
   type GrpcTransportResponse,
@@ -735,6 +737,8 @@ export function createHttp2Transport(
 
       let status: { code: number; details: string } | undefined;
       let httpStatus = 200;
+      // What the server compressed its messages with, if it did.
+      let responseEncoding = "identity";
 
       // Reading state lives here rather than inside the generator below: the
       // listeners have to be attached before the stream can emit anything, and
@@ -752,6 +756,7 @@ export function createHttp2Transport(
       stream.on("response", (raw) => {
         const flat = flatten(raw);
         httpStatus = Number(flat[":status"] ?? 200);
+        responseEncoding = flat["grpc-encoding"] ?? "identity";
         // A trailers-only reply carries the status here, and ends.
         if (flat["grpc-status"] !== undefined) {
           status = {
@@ -813,13 +818,13 @@ export function createHttp2Transport(
       // call: a bidirectional stream reads replies while it is still sending.
       const writing = (async () => {
         try {
+          // The header the caller set decides the request encoding; framing is
+          // shared with the fetch transport so both compress identically.
+          const requestEncoding = (call.headers["grpc-encoding"] ??
+            "identity") as GrpcCompression;
           for await (const message of call.messages) {
             if (finished) break;
-            const framed = new Uint8Array(message.length + 5);
-            const view = new DataView(framed.buffer);
-            view.setUint8(0, 0);
-            view.setUint32(1, message.length, false);
-            framed.set(message, 5);
+            const framed = await frameMessage(message, requestEncoding);
             if (!stream.write(framed)) {
               await new Promise<void>((resolve) => stream.once("drain", resolve));
             }
@@ -848,7 +853,7 @@ export function createHttp2Transport(
 
       const messages = (async function* (): AsyncGenerator<Uint8Array> {
         try {
-          for await (const frame of grpcFrames(chunks)) {
+          for await (const frame of grpcFrames(chunks, responseEncoding)) {
             // Over HTTP/2 the status is in the trailers, so a trailer frame is
             // gRPC-Web's device and does not belong here; it is read anyway
             // rather than handed to the codec.
@@ -946,13 +951,64 @@ export interface GrpcTransport {
   call(call: GrpcTransportCall): GrpcTransportResponse;
 }
 
-/** One length-prefixed frame: a flag byte, a big-endian length, the message. */
-function frameMessage(payload: Uint8Array): Uint8Array {
-  const framed = new Uint8Array(payload.length + 5);
+/**
+ * The message encodings a gRPC peer may name.
+ *
+ * \`gzip\` and \`deflate\` are the registered ones a browser can also do, through
+ * \`CompressionStream\`; anything else a server asks for is refused rather than
+ * guessed at. (zstd is not a registered gRPC encoding.)
+ */
+export type GrpcCompression = "identity" | "gzip" | "deflate";
+
+const GRPC_ACCEPT_ENCODING = "gzip, deflate, identity";
+
+/**
+ * Compression goes through the web streams rather than a runtime's own zlib, so
+ * one emitted client works in Bun, Node, Deno and a browser alike.
+ */
+async function compressMessage(
+  payload: Uint8Array,
+  encoding: Exclude<GrpcCompression, "identity">
+): Promise<Uint8Array> {
+  const squeezed = new Blob([payload as BlobPart])
+    .stream()
+    .pipeThrough(new CompressionStream(encoding));
+  return new Uint8Array(await new Response(squeezed).arrayBuffer());
+}
+
+async function decompressMessage(
+  payload: Uint8Array,
+  encoding: string
+): Promise<Uint8Array> {
+  if (encoding !== "gzip" && encoding !== "deflate") {
+    throw new GrpcError(
+      12,
+      \`the server compressed with '\${encoding}', which this client cannot read\`
+    );
+  }
+  const expanded = new Blob([payload as BlobPart])
+    .stream()
+    .pipeThrough(new DecompressionStream(encoding));
+  return new Uint8Array(await new Response(expanded).arrayBuffer());
+}
+
+/**
+ * One length-prefixed frame: a flag byte, a big-endian length, the message.
+ *
+ * Bit 0 of the flag says this message is compressed with whatever the
+ * \`grpc-encoding\` header named, which is per-message by design: a stream may
+ * mix compressed and plain frames.
+ */
+export async function frameMessage(
+  payload: Uint8Array,
+  encoding: GrpcCompression = "identity"
+): Promise<Uint8Array> {
+  const compressed = encoding === "identity" ? payload : await compressMessage(payload, encoding);
+  const framed = new Uint8Array(compressed.length + 5);
   const view = new DataView(framed.buffer);
-  view.setUint8(0, 0);
-  view.setUint32(1, payload.length, false);
-  framed.set(payload, 5);
+  view.setUint8(0, encoding === "identity" ? 0 : 1);
+  view.setUint32(1, compressed.length, false);
+  framed.set(compressed, 5);
   return framed;
 }
 
@@ -976,7 +1032,8 @@ async function* grpcEncoded<TMessage>(
  * so the leftovers are carried between chunks rather than assumed to align.
  */
 export function grpcFrames(
-  chunks: AsyncIterable<Uint8Array>
+  chunks: AsyncIterable<Uint8Array>,
+  encoding: string = "identity"
 ): AsyncGenerator<{ trailer: boolean; payload: Uint8Array }> {
   return (async function* () {
     let buffer = new Uint8Array(0);
@@ -996,12 +1053,16 @@ export function grpcFrames(
         const flags = buffer[0]!;
         const payload = buffer.subarray(5, 5 + length);
         buffer = buffer.subarray(5 + length);
-        // Bit 0 marks a compressed payload. Reading it as-is would hand the
-        // codec deflated bytes, so it is refused with UNIMPLEMENTED.
-        if ((flags & 0x01) !== 0) {
-          throw new GrpcError(12, "compressed frames are not supported");
-        }
-        yield { trailer: (flags & 0x80) !== 0, payload };
+        const trailer = (flags & 0x80) !== 0;
+        // A trailer frame is metadata and is never compressed; a message frame
+        // is, whenever bit 0 says the server used the encoding it announced.
+        yield {
+          trailer,
+          payload:
+            (flags & 0x01) !== 0 && !trailer
+              ? await decompressMessage(payload, encoding)
+              : payload,
+        };
       }
     }
   })();
@@ -1064,10 +1125,12 @@ function fetchTransport(config: ClientConfig): GrpcTransport {
             );
           }
 
+          const requestEncoding = (call.headers["grpc-encoding"] ??
+            "identity") as GrpcCompression;
           const response = await config.fetch(\`\${config.baseUrl}\${call.path}\`, {
             method: "POST",
             headers: { ...call.headers, "content-type": GRPC_WEB_MIME, accept: GRPC_WEB_MIME, "x-grpc-web": "1" },
-            body: frameMessage(collected[0]!),
+            body: await frameMessage(collected[0]!, requestEncoding),
           });
 
           const received: Record<string, string> = {};
@@ -1096,7 +1159,7 @@ function fetchTransport(config: ClientConfig): GrpcTransport {
               }
             })();
 
-            for await (const frame of grpcFrames(chunks)) {
+            for await (const frame of grpcFrames(chunks, received["grpc-encoding"])) {
               if (frame.trailer) {
                 status = parseGrpcStatus(new TextDecoder().decode(frame.payload));
                 continue;
@@ -1123,12 +1186,26 @@ function grpcTransport(config: ClientConfig): GrpcTransport {
   return config.transport ?? fetchTransport(config);
 }
 
-/** \`grpc-timeout\` is a number plus a unit; milliseconds is \`m\`. */
+/**
+ * The metadata every call carries: how it may be compressed, how long it may
+ * take, and whatever the caller added.
+ *
+ * \`grpc-accept-encoding\` goes out even when the request itself is plain, since
+ * it is what lets the server compress its reply.
+ */
 function callHeaders(
   options: GrpcCallOptions | undefined,
   config: ClientConfig
 ): Record<string, string> {
-  const headers: Record<string, string> = { te: "trailers", ...options?.headers };
+  const headers: Record<string, string> = {
+    te: "trailers",
+    "grpc-accept-encoding": GRPC_ACCEPT_ENCODING,
+    ...options?.headers,
+  };
+
+  const compression = config.compression ?? "identity";
+  if (compression !== "identity") headers["grpc-encoding"] = compression;
+
   const timeout = options?.timeoutMs ?? config.timeoutMs;
   if (timeout !== undefined) headers["grpc-timeout"] = \`\${Math.ceil(timeout)}m\`;
   return headers;
@@ -1412,6 +1489,12 @@ function emitFiles(
           "   * proper and is the only one that can stream requests.",
           "   */",
           "  transport?: GrpcTransport;",
+          "  /**",
+          "   * Compresses outgoing messages. A client always advertises that it",
+          "   * accepts `gzip` and `deflate`, so a server may compress its replies",
+          "   * whatever this is set to.",
+          "   */",
+          "  compression?: GrpcCompression;",
           "  /** A deadline for every gRPC call, unless the call overrides it. */",
           "  timeoutMs?: number;",
           "",

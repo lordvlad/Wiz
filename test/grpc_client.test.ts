@@ -340,21 +340,52 @@ describe("emitted gRPC client", () => {
     expect(requestType.decode(body.subarray(5)).toJSON()).toEqual({ id: "p1" });
   });
 
-  test("a compressed frame is refused rather than fed to the codec", async () => {
-    const compressed = (payload: Uint8Array): Uint8Array => {
-      const out = new Uint8Array(payload.length + 5);
-      const view = new DataView(out.buffer);
-      // Bit 0 is the compressed-payload flag.
-      view.setUint8(0, 0x01);
-      view.setUint32(1, payload.length, false);
-      out.set(payload, 5);
-      return out;
-    };
+  /** A frame flagged compressed, whatever the algorithm turns out to be. */
+  const compressedFrame = (payload: Uint8Array): Uint8Array => {
+    const out = new Uint8Array(payload.length + 5);
+    const view = new DataView(out.buffer);
+    // Bit 0 is the compressed-payload flag.
+    view.setUint8(0, 0x01);
+    view.setUint32(1, payload.length, false);
+    out.set(payload, 5);
+    return out;
+  };
+
+  const gzipped = async (payload: Uint8Array): Promise<Uint8Array> => {
+    const stream = new Blob([payload]).stream().pipeThrough(new CompressionStream("gzip"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  };
+
+  test("a compressed reply is decompressed with the encoding the server named", async () => {
+    const petType = root.lookupType("pets.v1.Pet");
+    const body = concat(
+      compressedFrame(await gzipped(petType.encode({ id: "z", name: "Zip" }).finish())),
+      trailer()
+    );
 
     const sent: Sent[] = [];
     const client = await load(
       () =>
-        new Response(concat(compressed(new Uint8Array([1, 2, 3])), trailer()), {
+        new Response(body, {
+          status: 200,
+          headers: {
+            "content-type": "application/grpc-web+proto",
+            "grpc-encoding": "gzip",
+          },
+        }),
+      sent
+    );
+
+    expect(await client.getPet({ id: "z" })).toMatchObject({ id: "z", name: "Zip" });
+    // Every call advertises what it can read, so a server may compress at will.
+    expect(sent[0]!.headers["grpc-accept-encoding"]).toBe("gzip, deflate, identity");
+  });
+
+  test("a frame flagged compressed with no encoding named is refused", async () => {
+    const sent: Sent[] = [];
+    const client = await load(
+      () =>
+        new Response(concat(compressedFrame(new Uint8Array([1, 2, 3])), trailer()), {
           status: 200,
           headers: { "content-type": "application/grpc-web+proto" },
         }),
@@ -364,7 +395,7 @@ describe("emitted gRPC client", () => {
     const failure = await client.getPet({ id: "x" }).catch((error: unknown) => error);
     if (!(failure instanceof client.GrpcError)) throw new Error("expected GrpcError");
     expect(failure.code).toBe(12);
-    expect(failure.details).toBe("compressed frames are not supported");
+    expect(failure.details).toContain("'identity'");
   });
 
   test("a server stream yields each frame as it arrives", async () => {
