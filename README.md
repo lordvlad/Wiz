@@ -489,6 +489,8 @@ flowchart LR
   TC --> GF
   GF --> VU
   GF --> FS
+```
+
 
 Every generator now returns the same contract: a map of filenames to contents
 (`GeneratedFiles`). The two ways out differ only in their driver: the plugin
