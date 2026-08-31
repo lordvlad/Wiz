@@ -22,7 +22,11 @@ interface Pong {
   text: string;
 }
 
-type Callback = (error: grpc.ServiceError | null, value?: Pong) => void;
+type Callback = (
+  error: grpc.ServiceError | null,
+  value?: Pong,
+  trailing?: grpc.Metadata
+) => void;
 
 export interface RunningServer {
   port: number;
@@ -46,18 +50,24 @@ export async function startEchoServer(): Promise<RunningServer> {
   const server = new grpc.Server({ "grpc.default_compression_algorithm": 2 });
   server.addService(echo.v1.Echo.service, {
     // Unary, plus the one path that answers with a status instead of a message.
+    // Both append trailing metadata, which is where a real server explains
+    // itself beyond the status code.
     Unary: (call: grpc.ServerUnaryCall<Ping, Pong>, callback: Callback) => {
+      const trailing = new grpc.Metadata();
+      trailing.set("x-request-id", "req-42");
+
       if (call.request.text === "boom") {
+        trailing.set("x-retry-after", "5");
         callback({
           code: grpc.status.INVALID_ARGUMENT,
           details: "no booms here",
-          metadata: new grpc.Metadata(),
+          metadata: trailing,
           name: "Error",
           message: "no booms here",
         });
         return;
       }
-      callback(null, { text: `pong:${call.request.text}` });
+      callback(null, { text: `pong:${call.request.text}` }, trailing);
     },
 
     Down: (call: grpc.ServerWritableStream<Ping, Pong>) => {

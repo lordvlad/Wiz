@@ -8,6 +8,7 @@ import {
   extractProtoIR,
   extractProtoIRFromFile,
 } from "../src/extractors/proto.ts";
+import { generateProtobufCodecCode } from "../src/generators/protobuf.ts";
 import { isGrpcMethod } from "../src/ir/service.ts";
 import type { TypeIR } from "../src/types.ts";
 
@@ -89,18 +90,26 @@ describe("constructs the IR cannot hold", () => {
   const diagnosticsOf = (text: string) =>
     extractProtoIR(text).diagnostics.map((diagnostic) => diagnostic.keyword);
 
-  test("proto2-only keywords are reported, and the file is still parsed", () => {
+  test("proto2 presence and defaults are carried, not dropped", () => {
     const ir = extractProtoIR(`syntax = "proto2";
 message M {
   required string a = 1;
+  optional int32 b = 2 [default = 7];
+  optional bool c = 3 [default = true];
+  optional string d = 4 [default = "anon"];
 }`);
 
-    expect(ir.diagnostics.map((d) => d.keyword).sort()).toEqual([
-      "required",
-      "syntax",
-    ]);
-    // Best-effort: the message still arrives, so a client can be generated.
-    expect(propertyOf(ir.types.get("M"), "a").type.kind).toBe("primitive");
+    // Only the syntax itself is a diagnostic now: `required` is presence, which
+    // the IR states as `optional: false`, and a default has its own slot.
+    expect(ir.diagnostics.map((d) => d.keyword)).toEqual(["syntax"]);
+
+    expect(propertyOf(ir.types.get("M"), "a").optional).toBe(false);
+    expect(propertyOf(ir.types.get("M"), "b")).toMatchObject({
+      optional: true,
+      default: 7,
+    });
+    expect(propertyOf(ir.types.get("M"), "c").default).toBe(true);
+    expect(propertyOf(ir.types.get("M"), "d").default).toBe("anon");
   });
 
   test("an unresolvable type is carried rather than thrown", () => {
@@ -136,7 +145,13 @@ extend M {
 });
 
 describe("well-known types and imports", () => {
-  test("Timestamp becomes the instant primitive without reading a file", () => {
+  /**
+   * A `Timestamp` is a message of `seconds` and `nanos`. It used to collapse to
+   * the `date` primitive, which read nicely and wrote a bare varint that every
+   * other implementation skipped as an unknown field - silently, since skipping
+   * unknown fields is legal. The shape the spec gives it is declared instead.
+   */
+  test("a well-known type is declared as the message it is", () => {
     const ir = extractProtoIR(`syntax = "proto3";
 import "google/protobuf/timestamp.proto";
 message M {
@@ -144,10 +159,78 @@ message M {
 }`);
 
     expect(ir.diagnostics).toEqual([]);
-    expect(propertyOf(ir.types.get("M"), "at").type).toMatchObject({
-      kind: "primitive",
-      type: "date",
+    expect(ir.types.has("google.protobuf.Timestamp")).toBe(true);
+
+    const at = propertyOf(ir.types.get("M"), "at").type;
+    expect(at).toMatchObject({ kind: "object", name: "google.protobuf.Timestamp" });
+    expect(
+      propertyOf(ir.types.get("google.protobuf.Timestamp"), "seconds")
+    ).toMatchObject({ fieldNumber: 1 });
+    expect(
+      propertyOf(ir.types.get("google.protobuf.Timestamp"), "nanos")
+    ).toMatchObject({ fieldNumber: 2 });
+  });
+
+  test("a wrapper is declared with its single value field", () => {
+    const ir = extractProtoIR(`syntax = "proto3";
+import "google/protobuf/wrappers.proto";
+message M {
+  google.protobuf.StringValue note = 1;
+}`);
+
+    expect(ir.diagnostics).toEqual([]);
+    expect(
+      propertyOf(ir.types.get("google.protobuf.StringValue"), "value")
+    ).toMatchObject({ fieldNumber: 1, type: { kind: "primitive", type: "string" } });
+  });
+
+  /**
+   * The reason the mapping changed, stated as bytes: protobufjs holds the real
+   * descriptor, so if our encoder agrees with it the field survives the trip.
+   */
+  test("a well-known field is on the wire where protobufjs expects it", async () => {
+    const source = `syntax = "proto3";
+import "google/protobuf/timestamp.proto";
+message Event {
+  string id = 1;
+  google.protobuf.Timestamp at = 2;
+}`;
+
+    const ir = extractProtoIR(source);
+    const directory = await mkdtemp(join(tmpdir(), "wiz-wkt-"));
+    const path = join(directory, "codec.ts");
+    await Bun.write(
+      path,
+      generateProtobufCodecCode([{ name: "Event", ir: ir.types.get("Event")! }])
+    );
+
+    const codec = (await import(path)) as unknown as {
+      encodeEvent(value: unknown): Uint8Array;
+    };
+    const ours = codec.encodeEvent({
+      id: "e1",
+      at: { seconds: 1700000000n, nanos: 123000000 },
     });
+
+    const root = new protobuf.Root();
+    root.loadSync(
+      join(import.meta.dir, "..", "node_modules/protobufjs/google/protobuf/timestamp.proto")
+    );
+    protobuf.parse(source, root, { keepCase: true });
+    root.resolveAll();
+
+    const theirs = root
+      .lookupType("Event")
+      .encode({ id: "e1", at: { seconds: 1700000000, nanos: 123000000 } })
+      .finish();
+
+    expect([...ours]).toEqual([...theirs]);
+    expect(root.lookupType("Event").decode(ours).toJSON()).toEqual({
+      id: "e1",
+      at: { seconds: "1700000000", nanos: 123000000 },
+    });
+
+    await rm(directory, { recursive: true, force: true });
   });
 
   test("an unmapped well-known type is reported", () => {

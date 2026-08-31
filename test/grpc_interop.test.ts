@@ -44,8 +44,13 @@ interface ClientModule {
     baseUrl?: string;
     transport?: Transport;
     compression?: "identity" | "gzip" | "deflate";
+    onTrailers?: (trailers: Record<string, string>) => void;
   }): EchoClient;
-  GrpcError: new (...args: never[]) => Error & { code: number; details: string };
+  GrpcError: new (...args: never[]) => Error & {
+    code: number;
+    details: string;
+    metadata: Record<string, string>;
+  };
 }
 
 interface TransportModule {
@@ -188,6 +193,35 @@ describe("against @grpc/grpc-js over HTTP/2", () => {
 
     expect(await unary(ping("module"))).toEqual({ text: "pong:module" });
   });
+
+  /**
+   * Trailing metadata is where a server says what a status code cannot. It has
+   * its own hook because it is only known once the stream has ended.
+   */
+  test("trailing metadata reaches the onTrailers hook", async () => {
+    const seen: Array<Record<string, string>> = [];
+    const observed = api.createClient({
+      baseUrl: `http://127.0.0.1:${server.port}`,
+      transport,
+      onTrailers: (trailers) => {
+        seen.push(trailers);
+      },
+    });
+
+    expect(await observed.unary(ping("watched"))).toEqual({ text: "pong:watched" });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!["x-request-id"]).toBe("req-42");
+  });
+
+  test("a failure carries the trailing metadata the server appended", async () => {
+    const failure = await client.unary(ping("boom")).catch((error: unknown) => error);
+
+    if (!(failure instanceof api.GrpcError)) throw new Error("expected GrpcError");
+    expect(failure.code).toBe(3);
+    expect(failure.metadata["x-retry-after"]).toBe("5");
+    expect(failure.metadata["x-request-id"]).toBe("req-42");
+  });
+
   /**
    * Compression is negotiated per message, in both directions, and neither side
    * here is ours: grpc-js compresses its replies because the client said it

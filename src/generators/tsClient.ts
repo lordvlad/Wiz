@@ -753,6 +753,15 @@ export function createHttp2Transport(
         wake = undefined;
       };
 
+      // Trailing metadata is everything the server appended, status included:
+      // it is kept whole, because what a server puts beside \`grpc-status\` -
+      // error details, a retry hint, a request id - is the caller's business.
+      let resolveTrailers!: (value: Record<string, string>) => void;
+      const trailers = new Promise<Record<string, string>>((resolve) => {
+        resolveTrailers = resolve;
+      });
+      let trailing: Record<string, string> = {};
+
       stream.on("response", (raw) => {
         const flat = flatten(raw);
         httpStatus = Number(flat[":status"] ?? 200);
@@ -763,11 +772,13 @@ export function createHttp2Transport(
             code: Number(flat["grpc-status"]),
             details: decodeURIComponent(flat["grpc-message"] ?? ""),
           };
+          trailing = flat;
         }
         resolveHeaders({ status: httpStatus, headers: flat });
       });
       stream.on("trailers", (raw) => {
         const flat = flatten(raw);
+        trailing = flat;
         if (flat["grpc-status"] !== undefined) {
           status = {
             code: Number(flat["grpc-status"]),
@@ -867,24 +878,26 @@ export function createHttp2Transport(
           await writing;
 
           if (httpStatus !== 200 && status === undefined) {
-            throw new GrpcError(2, \`the server answered HTTP \${httpStatus}\`);
+            throw new GrpcError(2, \`the server answered HTTP \${httpStatus}\`, trailing);
           }
           if (status && status.code !== 0) {
-            throw new GrpcError(status.code, status.details);
+            throw new GrpcError(status.code, status.details, trailing);
           }
           if (status === undefined) {
-            throw new GrpcError(2, "the response carried no gRPC status");
+            throw new GrpcError(2, "the response carried no gRPC status", trailing);
           }
         } catch (error) {
           rejectHeaders(error);
           throw error;
         } finally {
+          // Whatever happened, a caller awaiting the trailers gets what arrived.
+          resolveTrailers(trailing);
           clearTimeout(deadline);
           call.signal?.removeEventListener("abort", onAbort);
         }
       })();
 
-      return { headers, messages };
+      return { headers, messages, trailers };
     },
   };
 }`;
@@ -908,12 +921,18 @@ const GRPC_PRELUDE = `const GRPC_WEB_MIME = "application/grpc-web+proto";
 export class GrpcError extends Error {
   readonly code: number;
   readonly details: string;
+  /**
+   * Trailing metadata, which is where a server puts what a status code cannot
+   * say - \`grpc-status-details-bin\`, a retry hint, a request id.
+   */
+  readonly metadata: Record<string, string>;
 
-  constructor(code: number, details: string) {
+  constructor(code: number, details: string, metadata: Record<string, string> = {}) {
     super(\`gRPC status \${code}\${details ? \`: \${details}\` : ""}\`);
     this.name = "GrpcError";
     this.code = code;
     this.details = details;
+    this.metadata = metadata;
   }
 }
 
@@ -940,6 +959,11 @@ export interface GrpcTransportResponse {
   /** Resolves when the server's headers arrive, before any message. */
   headers: Promise<{ status: number; headers: Record<string, string> }>;
   messages: AsyncIterable<Uint8Array>;
+  /**
+   * Resolves once the call is over, with whatever the server appended. A
+   * transport with nowhere to put trailers resolves it empty rather than never.
+   */
+  trailers: Promise<Record<string, string>>;
 }
 
 export interface GrpcTransport {
@@ -1065,7 +1089,23 @@ export function grpcFrames(
         };
       }
     }
+
   })();
+}
+/**
+ * A trailer block as a record, for the gRPC-Web dialect where trailers arrive
+ * as text in a frame rather than as HTTP/2 trailers.
+ */
+export function parseTrailerBlock(text: string): Record<string, string> {
+  const trailers: Record<string, string> = {};
+  for (const line of text.split(/\\r?\\n/)) {
+    const separator = line.indexOf(":");
+    if (separator < 0) continue;
+    trailers[line.slice(0, separator).trim().toLowerCase()] = line
+      .slice(separator + 1)
+      .trim();
+  }
+  return trailers;
 }
 
 /** Trailers arrive as text, whether in a frame or in an HTTP/2 trailer block. */
@@ -1114,6 +1154,12 @@ function fetchTransport(config: ClientConfig): GrpcTransport {
       );
       headers.catch(() => {});
 
+      let resolveTrailers!: (value: Record<string, string>) => void;
+      const trailers = new Promise<Record<string, string>>((resolve) => {
+        resolveTrailers = resolve;
+      });
+      let trailing: Record<string, string> = {};
+
       const messages = (async function* () {
         try {
           const collected: Uint8Array[] = [];
@@ -1161,23 +1207,31 @@ function fetchTransport(config: ClientConfig): GrpcTransport {
 
             for await (const frame of grpcFrames(chunks, received["grpc-encoding"])) {
               if (frame.trailer) {
-                status = parseGrpcStatus(new TextDecoder().decode(frame.payload));
+                // The trailer frame is a header block in text form, so the
+                // metadata beside the status comes out of the same parse.
+                const text = new TextDecoder().decode(frame.payload);
+                status = parseGrpcStatus(text);
+                trailing = parseTrailerBlock(text);
                 continue;
               }
               yield frame.payload;
             }
           }
 
-          if (status.code !== 0) throw new GrpcError(status.code, status.details);
+          if (status.code !== 0) {
+            throw new GrpcError(status.code, status.details, trailing);
+          }
         } catch (error) {
           // A failure before the headers arrived has to reach whoever awaited
           // them, or that promise never settles.
           rejectHeaders(error);
           throw error;
+        } finally {
+          resolveTrailers(trailing);
         }
       })();
 
-      return { headers, messages };
+      return { headers, messages, trailers };
     },
   };
 }
@@ -1250,16 +1304,29 @@ async function* grpcCall(
 
   if (config.afterCall) {
     const received = await response.headers;
+    // HTTP/2 pseudo-headers are not headers: \`Response\` rejects a name starting
+    // with a colon, and \`:status\` is carried as the status anyway.
+    const plain: Record<string, string> = {};
+    for (const [name, value] of Object.entries(received.headers)) {
+      if (!name.startsWith(":")) plain[name] = value;
+    }
+
     await config.afterCall({
       call: prepared,
-      response: new Response(null, {
-        status: received.status,
-        headers: received.headers,
-      }),
+      response: new Response(null, { status: received.status, headers: plain }),
     });
   }
 
   yield* response.messages;
+
+  // Trailing metadata is only known once the stream is done, which is why it is
+  // its own hook rather than part of \`afterCall\`: that one runs when the
+  // headers arrive, and awaiting trailers there would wait for messages nobody
+  // is reading yet. A caller that abandons the iteration early never gets here,
+  // and a failure carries its metadata on \`GrpcError\` instead.
+  if (config.onTrailers) {
+    await config.onTrailers(await response.trailers, prepared);
+  }
 }
 
 /** A unary call: exactly one message out, exactly one back. */
@@ -1495,6 +1562,15 @@ function emitFiles(
           "   * whatever this is set to.",
           "   */",
           "  compression?: GrpcCompression;",
+          "  /**",
+          "   * Runs once a call's stream has ended, with whatever the server",
+          "   * appended. A failure reports its own metadata on `GrpcError`",
+          "   * instead, since a failed call has no stream to end.",
+          "   */",
+          "  onTrailers?: (",
+          "    trailers: Record<string, string>,",
+          "    call: Call",
+          "  ) => void | Promise<void>;",
           "  /** A deadline for every gRPC call, unless the call overrides it. */",
           "  timeoutMs?: number;",
           "",

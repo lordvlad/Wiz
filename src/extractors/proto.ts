@@ -201,6 +201,8 @@ interface FieldNode {
   optional: boolean;
   map?: { key: string; value: string };
   description?: string;
+  /** proto2's `default = X`, which `Annotated.default` carries verbatim. */
+  default?: unknown;
 }
 
 interface OneofNode {
@@ -347,21 +349,37 @@ function skipStatement(p: P): void {
   }
 }
 
-function parseFieldOptions(p: P, pointer: string): void {
+/**
+ * Field options, of which one is worth keeping.
+ *
+ * proto2's `default = X` is exactly what `Annotated.default` holds, so it is
+ * read rather than dropped; it reaches a generated JSON Schema's `default` and
+ * a model file's doc comment. Everything else in the brackets is an option the
+ * IR has no slot for, and is skipped in silence because options are ubiquitous.
+ */
+function parseFieldOptions(p: P): { default?: unknown } {
+  const options: { default?: unknown } = {};
   let depth = 1;
+
   while (depth > 0 && p.index < p.tokens.length) {
     const token = next(p);
     if (token.value === "[" || token.value === "{") depth += 1;
     else if (token.value === "]" || token.value === "}") depth -= 1;
-    else if (depth === 1 && token.value === "default") {
-      diagnose(
-        p.ctx,
-        pointer,
-        "default",
-        "dropped proto2 field default; proto3 presence is the only default the IR carries"
-      );
+    else if (depth === 1 && token.value === "default" && peek(p)?.value === "=") {
+      next(p);
+      const value = next(p);
+      options.default =
+        value.kind === "number"
+          ? Number(value.value)
+          : value.value === "true"
+            ? true
+            : value.value === "false"
+              ? false
+              : value.value;
     }
   }
+
+  return options;
 }
 
 function parseField(p: P, scope: string, description?: string): FieldNode | undefined {
@@ -419,21 +437,22 @@ function parseField(p: P, scope: string, description?: string): FieldNode | unde
   expect(p, "=");
   const number = expectInteger(p);
   const pointer = `${scope}.${name}`;
-  if (accept(p, "[")) parseFieldOptions(p, pointer);
+  const options = accept(p, "[") ? parseFieldOptions(p) : {};
   expect(p, ";");
 
-  if (required) {
-    diagnose(
-      p.ctx,
-      pointer,
-      "required",
-      "dropped proto2 'required'; the field is carried as present-or-absent"
-    );
-  }
-
-  const field: FieldNode = { kind: "field", name, type, number, repeated, optional };
+  // proto2's `required` is presence the other way round, which is what
+  // `optional: false` already means to every generator downstream.
+  const field: FieldNode = {
+    kind: "field",
+    name,
+    type,
+    number,
+    repeated,
+    optional: optional && !required,
+  };
   if (map) field.map = map;
   if (description) field.description = description;
+  if (options.default !== undefined) field.default = options.default;
   return field;
 }
 
@@ -488,7 +507,9 @@ function parseEnum(p: P, scope: string, description?: string): EnumNode {
     const valueName = expectName(p);
     expect(p, "=");
     const value = expectInteger(p);
-    if (accept(p, "[")) parseFieldOptions(p, `${fqn}.${valueName}`);
+    // An enum value's options have no slot in `EnumMemberIR`; they are consumed
+    // so the parser stays in step, and dropped.
+    if (accept(p, "[")) parseFieldOptions(p);
     expect(p, ";");
     node.values.push({ name: valueName, value });
   }
@@ -734,18 +755,34 @@ const SCALARS: Record<string, ProtoScalar> = {
 };
 
 /**
- * Well-known types with a JS shape that needs no struct. `Timestamp` is an
- * instant and `Duration` is ISO 8601 text, so both collapse to a primitive and
- * their `.proto` files never have to be read. Everything else under
- * `google.protobuf` - `Any`, `Struct`, `Empty`, the wrappers - is a message
- * whose meaning lives in the runtime, not in its fields, and is diagnosed.
+ * The well-known types, as the messages they actually are.
+ *
+ * A `Timestamp` used to collapse to the `date` primitive, which reads nicely
+ * and is wrong: on the wire it is a message of `seconds` and `nanos`, so a
+ * `date` was written as a bare varint and every other implementation skipped
+ * the field as unknown - silently, since an unknown field is legal. These are
+ * declared instead, so the bytes are the bytes protobuf specifies.
+ *
+ * Only the ones with a fixed shape are here. `Any` and `Struct` carry meaning
+ * in the runtime rather than in their fields, so they stay diagnosed.
  */
-const WELL_KNOWN_TYPES: Record<string, PrimitiveTypeIR["type"]> = {
-  "google.protobuf.Timestamp": "date",
-  "google.protobuf.Duration": "string",
+const WELL_KNOWN_SOURCES: Record<string, string> = {
+  "google.protobuf.Timestamp": "int64 seconds = 1; int32 nanos = 2;",
+  "google.protobuf.Duration": "int64 seconds = 1; int32 nanos = 2;",
+  "google.protobuf.Empty": "",
+  "google.protobuf.FieldMask": "repeated string paths = 1;",
+  "google.protobuf.DoubleValue": "double value = 1;",
+  "google.protobuf.FloatValue": "float value = 1;",
+  "google.protobuf.Int64Value": "int64 value = 1;",
+  "google.protobuf.UInt64Value": "uint64 value = 1;",
+  "google.protobuf.Int32Value": "int32 value = 1;",
+  "google.protobuf.UInt32Value": "uint32 value = 1;",
+  "google.protobuf.BoolValue": "bool value = 1;",
+  "google.protobuf.StringValue": "string value = 1;",
+  "google.protobuf.BytesValue": "bytes value = 1;",
 };
 
-/** Imports satisfied by {@link WELL_KNOWN_TYPES} rather than from disk. */
+/** Imports satisfied by {@link WELL_KNOWN_SOURCES} rather than from disk. */
 const WELL_KNOWN_PREFIX = "google/protobuf/";
 
 type Declaration =
@@ -818,6 +855,34 @@ function registerDeclarations(
   }
 }
 
+
+/**
+ * Declares a well-known message the first time something references it.
+ *
+ * Parsing the definition the spec gives it beats shipping copies of Google's
+ * `.proto` files, and what comes out is an ordinary declaration, so every
+ * generator downstream treats `Timestamp` exactly as it treats a message the
+ * document wrote itself.
+ */
+function wellKnownDeclaration(
+  ctx: Ctx,
+  qualified: string
+): Declaration | undefined {
+  const existing = ctx.declarations.get(qualified);
+  if (existing) return existing;
+
+  const body = WELL_KNOWN_SOURCES[qualified];
+  if (body === undefined) return undefined;
+
+  const simple = qualified.slice("google.protobuf.".length);
+  const file = parseProtoFile(
+    ctx,
+    `<${qualified}>`,
+    `syntax = "proto3";\npackage google.protobuf;\nmessage ${simple} { ${body} }`
+  );
+  registerDeclarations(ctx, "google.protobuf", file.messages, file.enums);
+  return ctx.declarations.get(qualified);
+}
 /**
  * proto scoping: an unqualified name is looked up in the innermost enclosing
  * scope first and then outwards, so `Inner` inside `pkg.Outer` finds
@@ -927,8 +992,8 @@ function singularIR(ctx: Ctx, name: string, scope: string, pointer: string): Typ
   if (declaration) return declarationIR(ctx, declaration);
 
   const qualified = name.startsWith(".") ? name.slice(1) : name;
-  const wellKnown = WELL_KNOWN_TYPES[qualified];
-  if (wellKnown) return { id: nextId(ctx), kind: "primitive", type: wellKnown };
+  const wellKnown = wellKnownDeclaration(ctx, qualified);
+  if (wellKnown) return declarationIR(ctx, wellKnown);
 
   diagnose(
     ctx,
@@ -954,6 +1019,7 @@ function messageIR(ctx: Ctx, fqn: string, node: MessageNode): TypeIR {
         fieldNumber: member.number,
       };
       if (member.description) property.description = member.description;
+      if (member.default !== undefined) property.default = member.default;
       properties.push(property);
       continue;
     }

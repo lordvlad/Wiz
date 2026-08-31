@@ -343,9 +343,11 @@ document forgot to mention.
 
 A `.proto` file is a front end like any other: messages, enums, `oneof`, `map`,
 `repeated`, `optional`, nested types and every scalar width become IR, and each
-`rpc` becomes a service method addressed by package, service and name. Anything
-the IR cannot hold — `extend`, groups, `reserved`, proto2's `required` — is
-reported as a diagnostic rather than dropped quietly.
+`rpc` becomes a service method addressed by package, service and name. proto2's
+`required` is presence the other way round, so it lands as a non-optional field,
+and `default = X` lands in the slot the IR already had for a default. What the
+IR genuinely cannot hold — `extend`, groups, `reserved` — is reported as a
+diagnostic rather than dropped quietly.
 
 ```bash
 wiz generate -g wiz/generators/tsClient.ts pets.proto --outdir src/api
@@ -399,13 +401,14 @@ What a client built on `@grpc/grpc-js` still gives you that this does not:
 | Unary and all three streaming directions | yes, over HTTP/2 | gRPC-Web carries unary and server streaming only |
 | Deadlines, cancellation | yes | `timeoutMs` and `AbortSignal` per call, or a default on the client |
 | Wire format | verified | checked byte for byte against protobufjs, both directions |
-| Metadata | headers, via `beforeCall`/`afterCall` | not a typed `Metadata` object; trailing metadata beyond `grpc-status`/`grpc-message` is not surfaced |
+| Metadata | headers plus trailing metadata | `beforeCall` sets it, `onTrailers` reads what the server appended, and a failure carries it on `GrpcError.metadata`. Not a typed `Metadata` object, and binary (`-bin`) values are not base64-decoded |
 | Retries, hedging | no | a failed call is a failed call |
 | Load balancing, name resolution, channel state | no | one origin per transport, one pooled session |
 | TLS and credentials | the runtime's | `http2.connect` options are passed through; no per-call credentials |
 | Compression | `gzip`, `deflate` | per message, both directions, via `CompressionStream`; verified against grpc-js. `snappy` and zstd are not offered |
 | Interceptors | one hook each way | `beforeCall`/`afterCall`, not a chain |
-| Reflection, health checking, `Any`, `Struct` | no | unmapped well-known types become diagnostics |
+| Reflection, health checking | no | generate a client from their own `.proto` like any other service |
+| Well-known types | `Timestamp`, `Duration`, `Empty`, `FieldMask`, the nine wrappers | declared as the messages the spec defines, so the bytes match protobufjs. `Any` and `Struct` carry meaning in the runtime rather than in their fields, and stay diagnosed |
 
 ## Design
 
