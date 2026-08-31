@@ -471,8 +471,10 @@ flowchart LR
     TC["TS client<br>model · api · codec<br>· transport"]
   end
 
-  VU["virtual modules<br>on the wire"]
-  FS["files on disk<br><code>wiz generate</code>"]
+  GF[("GeneratedFiles<br>filename → contents")]
+
+  VU["virtual modules<br>on the wire<br><code>wiz-virtual/&lt;key&gt;/index.js</code>"]
+  FS["files on disk<br><code>wiz generate</code><br><code>wiz eject</code>"]
 
   TS --> IR
   OA --> IR
@@ -481,17 +483,20 @@ flowchart LR
   IR --> OP
   IR --> PB
   IR --> TC
-  SC --> VU
-  OP --> VU
-  PB --> VU
-  TC --> FS
-```
+  SC --> GF
+  OP --> GF
+  PB --> GF
+  TC --> GF
+  GF --> VU
+  GF --> FS
 
-Three front ends in, one IR, and every generator reads that and nothing else —
-there is no path from an input format straight to an output format. The two
-ways out differ only in destination: the plugin registers generated modules by
-structural hash and rewrites call sites to import them, while `wiz generate`
-writes a generator's files to disk for anything that wants post-processing.
+Every generator now returns the same contract: a map of filenames to contents
+(`GeneratedFiles`). The two ways out differ only in their driver: the plugin
+mounts generated modules virtually (under `wiz-virtual/<key>/index.js`) and
+rewrites call sites to import them, while `wiz generate` and `wiz eject` write
+the files to disk for anything that wants post-processing. Multi-file virtual
+modules are now possible, and deduplication of modules by content remains
+hash-keyed.
 
 ### Verification
 
