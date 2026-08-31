@@ -162,33 +162,42 @@ describe("emitted gRPC client", () => {
   afterAll(async () => {
     await rm(directory, { recursive: true, force: true });
   });
-  test("a codec file is emitted and used by the api", () => {
-    expect(Object.keys(files).sort()).toEqual(["api.ts", "codec.ts", "model.ts"]);
-    // Only the codecs the signatures reach: the streaming-in methods are stubs,
-    // so `Note` never needs framing.
-    expect(files["api.ts"]).toContain(
-      'import { decodePets_v1_Pet, encodePets_v1_GetPetRequest } from "./codec.ts";'
-    );
+  test("the codec and the HTTP/2 transport are emitted alongside the api", () => {
+    expect(Object.keys(files).sort()).toEqual([
+      "api.ts",
+      "codec.ts",
+      "model.ts",
+      "transport.ts",
+    ]);
+    expect(files["api.ts"]).toContain('from "./codec.ts";');
     expect(files["codec.ts"]).toContain("export function encodePets_v1_Pet(");
     expect(files["codec.ts"]).toContain("export function decodePets_v1_Pet(");
+    // The transport is the only file that may mention node.
+    expect(files["transport.ts"]).toContain('import http2 from "node:http2";');
+    expect(files["api.ts"]).not.toContain("node:http2");
   });
 
-  test("unary, server streaming and the unsupported directions each read right", () => {
+  test("all four streaming directions are emitted with the shape callers expect", () => {
     const source = files["api.ts"]!;
 
     // Proto names are fully qualified, so the model identifier is too.
-    expect(source).toContain("getPet(request: pets_v1_GetPetRequest): Promise<pets_v1_Pet>;");
     expect(source).toContain(
-      "watchPets(request: pets_v1_GetPetRequest): AsyncIterable<pets_v1_Pet>;"
+      "getPet(request: pets_v1_GetPetRequest, options?: GrpcCallOptions): Promise<pets_v1_Pet>;"
     );
-    // A duplex exchange cannot be built on fetch, so the method exists and says so.
-    expect(source).toContain("upload(): Promise<never>;");
-    expect(source).toContain("chat(): Promise<never>;");
-    expect(source).toContain("is not callable: client and bidirectional streaming");
+    expect(source).toContain(
+      "watchPets(request: pets_v1_GetPetRequest, options?: GrpcCallOptions): AsyncIterable<pets_v1_Pet>;"
+    );
+    // Streaming in takes a stream in, whichever transport ends up carrying it.
+    expect(source).toContain(
+      "upload(requests: AsyncIterable<pets_v1_Note>, options?: GrpcCallOptions): Promise<pets_v1_Note>;"
+    );
+    expect(source).toContain(
+      "chat(requests: AsyncIterable<pets_v1_Note>, options?: GrpcCallOptions): AsyncIterable<pets_v1_Note>;"
+    );
   });
 
   test("the emitted api typechecks under strict TypeScript", () => {
-    const program = ts.createProgram([apiPath], {
+    const program = ts.createProgram([apiPath, join(directory, "transport.ts")], {
       strict: true,
       noEmit: true,
       target: ts.ScriptTarget.ESNext,
@@ -197,6 +206,7 @@ describe("emitted gRPC client", () => {
       allowImportingTsExtensions: true,
       skipLibCheck: true,
       lib: ["lib.esnext.d.ts", "lib.dom.d.ts"],
+      types: ["bun"],
     });
 
     const diagnostics = [
@@ -228,7 +238,7 @@ describe("emitted gRPC client", () => {
     GrpcError: new (...args: never[]) => Error & { code: number; details: string };
     getPet(request: { id: string }): Promise<Record<string, unknown>>;
     watchPets(request: { id: string }): AsyncIterable<Record<string, unknown>>;
-    upload(): Promise<never>;
+    upload(requests: AsyncIterable<{ text: string }>): Promise<unknown>;
   }
 
   /** gRPC-Web framing, written independently of the generator under test. */
@@ -428,12 +438,25 @@ describe("emitted gRPC client", () => {
     expect(failure.details).toBe("denied");
   });
 
-  test("an unsupported direction throws rather than pretending", async () => {
+  /**
+   * The method exists with its real signature; what it cannot do is run over a
+   * transport that sends one complete body. That refusal belongs to the
+   * transport, not to the generated method, because a client can be
+   * reconfigured onto the HTTP/2 one and the same method then works.
+   */
+  test("streaming a request refuses on the fetch transport, naming the fix", async () => {
     const sent: Sent[] = [];
     const client = await load(() => new Response(null), sent);
 
-    await expect(client.upload()).rejects.toThrow(
-      "client and bidirectional streaming need a duplex transport"
-    );
+    async function* notes(): AsyncGenerator<{ text: string }> {
+      yield { text: "one" };
+      yield { text: "two" };
+    }
+
+    const failure = await client.upload(notes()).catch((error: unknown) => error);
+    if (!(failure instanceof client.GrpcError)) throw new Error("expected GrpcError");
+    // 12 is UNIMPLEMENTED, which is what this transport is for this call.
+    expect(failure.code).toBe(12);
+    expect(failure.details).toContain("createHttp2Transport()");
   });
 });

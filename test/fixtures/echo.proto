@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package echo.v1;
+
+// What a caller sends.
+message Ping {
+  string text = 1;
+  int32 count = 2;
+}
+
+// What comes back.
+message Pong {
+  string text = 1;
+}
+
+service Echo {
+  // One in, one out.
+  rpc Unary (Ping) returns (Pong);
+  // One in, many out.
+  rpc Down (Ping) returns (stream Pong);
+  // Many in, one out.
+  rpc Up (stream Ping) returns (Pong);
+  // Many in, many out, interleaved.
+  rpc Both (stream Ping) returns (stream Pong);
+  // Answers nothing, so a deadline has something to expire against.
+  rpc Never (Ping) returns (Pong);
+}

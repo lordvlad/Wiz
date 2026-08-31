@@ -42,6 +42,7 @@ export interface TsClientOptions {
 }
 
 const CODEC_FILE = "codec.ts";
+const TRANSPORT_FILE = "transport.ts";
 
 const JSON_MIME = "application/json";
 const MODEL_FILE = "model.ts";
@@ -394,14 +395,10 @@ function grpcOperation(
     ""
   );
 
-  // A request stream needs to send frames after the response has begun, which
-  // is a duplex exchange; `fetch` has one request body, sent whole. Emitting a
-  // method that throws beats omitting it: the name is in the document, so a
-  // caller looking for it deserves to be told why it cannot work here.
-  if (method.request.streaming || !requestIdentifier || !responseIdentifier) {
-    const reason = method.request.streaming
-      ? "client and bidirectional streaming need a duplex transport, which fetch is not"
-      : "its request or response message is not declared in this document";
+  // A message the document never declared leaves nothing to encode with, so the
+  // method is emitted and says so rather than quietly disappearing.
+  if (!requestIdentifier || !responseIdentifier) {
+    const reason = "its request or response message is not declared in this document";
     onUnsupported(name, reason);
 
     return {
@@ -419,18 +416,31 @@ function grpcOperation(
   const path = JSON.stringify(grpcPath(method));
   const encode = codecName("encode", requestIdentifier);
   const decode = codecName("decode", responseIdentifier);
+  const streamsIn = method.request.streaming;
+  const streamsOut = response?.streaming === true;
 
-  if (response?.streaming) {
+  // The caller's side of each direction: one message or a stream of them,
+  // resolving once or yielding until the server is done. The transport decides
+  // whether the streaming-in directions can run at all, and says so at the
+  // call rather than here, because a client can be reconfigured.
+  const parameter = streamsIn
+    ? `requests: AsyncIterable<${requestIdentifier}>, options?: GrpcCallOptions`
+    : `request: ${requestIdentifier}, options?: GrpcCallOptions`;
+
+  const outgoing = streamsIn
+    ? `grpcEncoded(requests, ${encode})`
+    : `grpcOnce(${encode}(request))`;
+
+  if (streamsOut) {
     return {
       name,
       doc,
-      parameter: `request: ${requestIdentifier}`,
+      parameter,
       returns: `AsyncIterable<${responseIdentifier}>`,
       implementation: [
-        `    async *${name}(request) {`,
-        `      for await (const message of grpcStream(config, ${path}, ${encode}(request))) {`,
-        `        yield ${decode}(message);`,
-        `      }`,
+        `    async *${name}(${streamsIn ? "requests" : "request"}, options) {`,
+        `      const messages = grpcCall(config, ${path}, ${outgoing}, options, ${streamsIn});`,
+        `      for await (const message of messages) yield ${decode}(message);`,
         `    },`,
       ].join("\n"),
       streaming: true,
@@ -440,13 +450,21 @@ function grpcOperation(
   return {
     name,
     doc,
-    parameter: `request: ${requestIdentifier}`,
+    parameter,
     returns: `Promise<${responseIdentifier}>`,
-    implementation: [
-      `    async ${name}(request) {`,
-      `      return ${decode}(await grpcUnary(config, ${path}, ${encode}(request)));`,
-      `    },`,
-    ].join("\n"),
+    implementation: streamsIn
+      ? [
+          `    async ${name}(requests, options) {`,
+          `      return ${decode}(`,
+          `        await grpcClientStream(config, ${path}, ${outgoing}, options)`,
+          `      );`,
+          `    },`,
+        ].join("\n")
+      : [
+          `    async ${name}(request, options) {`,
+          `      return ${decode}(await grpcUnary(config, ${path}, ${encode}(request), options));`,
+          `    },`,
+        ].join("\n"),
     streaming: false,
   };
 }
@@ -511,7 +529,7 @@ export interface ClientConfig {
    * parsed. Awaited, and may substitute a different response.
    */
   afterCall?: (result: CallResult) => CallResult | Promise<CallResult>;
-}
+__GRPC_CONFIG__}
 
 const DEFAULTS: ClientConfig = {
   baseUrl: "",
@@ -619,14 +637,267 @@ async function send(config: ClientConfig, call: Call): Promise<unknown> {
 }`;
 
 /**
+ * The real gRPC transport, in a file of its own.
+ *
+ * It is separate because it imports `node:http2`, which a browser bundle must
+ * never see. A consumer on a server opts in - `configure({ transport:
+ * createHttp2Transport(...) })` - and gains what gRPC needs and `fetch` cannot
+ * give: HTTP/2 trailers for the status, and a request body that stays open, so
+ * client and bidirectional streaming work.
+ */
+const HTTP2_TRANSPORT = `import http2 from "node:http2";
+import {
+  GrpcError,
+  grpcFrames,
+  parseGrpcStatus,
+  type GrpcTransport,
+  type GrpcTransportCall,
+  type GrpcTransportResponse,
+} from "./api.ts";
+
+const GRPC_MIME = "application/grpc+proto";
+
+export interface Http2TransportOptions {
+  /** \`https://host:port\` for TLS, \`http://host:port\` for cleartext h2c. */
+  baseUrl: string;
+  /** Passed to \`http2.connect\`, for a CA bundle or a client certificate. */
+  session?: http2.SecureClientSessionOptions;
+}
+
+export interface Http2Transport extends GrpcTransport {
+  /** Closes the pooled session. A process that exits does not need this. */
+  close(): void;
+}
+
+/**
+ * One session per transport, reopened when it goes away.
+ *
+ * HTTP/2 multiplexes every call over one connection, which is the whole reason
+ * gRPC uses it: a stream is cheap, a connection is not.
+ */
+export function createHttp2Transport(
+  options: Http2TransportOptions
+): Http2Transport {
+  const origin = new URL(options.baseUrl).origin;
+  let session: http2.ClientHttp2Session | undefined;
+
+  const connected = (): http2.ClientHttp2Session => {
+    if (session && !session.closed && !session.destroyed) return session;
+    session = http2.connect(origin, options.session);
+    // Without this an idle session's error takes the process down.
+    session.on("error", () => {
+      session = undefined;
+    });
+    return session;
+  };
+
+  return {
+    duplex: true,
+
+    close() {
+      session?.close();
+      session = undefined;
+    },
+
+    call(call: GrpcTransportCall): GrpcTransportResponse {
+      const stream = connected().request({
+        ":method": "POST",
+        ":path": call.path,
+        "content-type": GRPC_MIME,
+        // \`te: trailers\` is how a gRPC client announces it will read them.
+        te: "trailers",
+        ...call.headers,
+      });
+
+      // Assigned inside the executor, which runs before anything can read them;
+      // the assertion is what tells the compiler that.
+      let resolveHeaders!: (value: { status: number; headers: Record<string, string> }) => void;
+      let rejectHeaders!: (reason: unknown) => void;
+      const headers = new Promise<{ status: number; headers: Record<string, string> }>(
+        (resolve, reject) => {
+          resolveHeaders = resolve;
+          rejectHeaders = reject;
+        }
+      );
+      // A caller only awaits the headers when it has an \`afterCall\` hook. The
+      // real failure travels through \`messages\`; without this, rejecting an
+      // unobserved promise would surface as an unhandled rejection instead.
+      headers.catch(() => {});
+
+      const flatten = (raw: http2.IncomingHttpHeaders): Record<string, string> => {
+        const flat: Record<string, string> = {};
+        for (const [key, value] of Object.entries(raw)) {
+          if (value === undefined) continue;
+          flat[key.toLowerCase()] = Array.isArray(value) ? value.join(", ") : String(value);
+        }
+        return flat;
+      };
+
+      let status: { code: number; details: string } | undefined;
+      let httpStatus = 200;
+
+      // Reading state lives here rather than inside the generator below: the
+      // listeners have to be attached before the stream can emit anything, and
+      // \`cancel\` has to be able to wake the reader even when the stream never
+      // got far enough to emit an event of its own.
+      const queue: Uint8Array[] = [];
+      let finished = false;
+      let failure: unknown;
+      let wake: (() => void) | undefined;
+      const nudge = () => {
+        wake?.();
+        wake = undefined;
+      };
+
+      stream.on("response", (raw) => {
+        const flat = flatten(raw);
+        httpStatus = Number(flat[":status"] ?? 200);
+        // A trailers-only reply carries the status here, and ends.
+        if (flat["grpc-status"] !== undefined) {
+          status = {
+            code: Number(flat["grpc-status"]),
+            details: decodeURIComponent(flat["grpc-message"] ?? ""),
+          };
+        }
+        resolveHeaders({ status: httpStatus, headers: flat });
+      });
+      stream.on("trailers", (raw) => {
+        const flat = flatten(raw);
+        if (flat["grpc-status"] !== undefined) {
+          status = {
+            code: Number(flat["grpc-status"]),
+            details: decodeURIComponent(flat["grpc-message"] ?? ""),
+          };
+        }
+      });
+      stream.on("data", (chunk: Uint8Array) => {
+        queue.push(chunk);
+        nudge();
+      });
+      stream.on("end", () => {
+        finished = true;
+        nudge();
+      });
+      stream.on("error", (error: unknown) => {
+        // A cancel closes the stream, which errors; the reason we cancelled for
+        // is the better one to report.
+        if (status === undefined) failure = error;
+        finished = true;
+        nudge();
+      });
+      stream.on("close", () => {
+        finished = true;
+        nudge();
+      });
+
+      const cancel = (code: number, details: string) => {
+        status = { code, details };
+        finished = true;
+        nudge();
+        if (!stream.closed) stream.close(http2.constants.NGHTTP2_CANCEL);
+      };
+
+      // A deadline is sent as a header so the server can stop early, and kept
+      // locally too: a server that ignores it must not hang the caller.
+      const deadline =
+        call.timeoutMs === undefined
+          ? undefined
+          : setTimeout(() => cancel(4, "deadline exceeded"), call.timeoutMs);
+      const onAbort = () => cancel(1, "cancelled");
+      call.signal?.addEventListener("abort", onAbort, { once: true });
+      // A caller can abort before this line runs, in which case the listener
+      // would never fire; the signal is read as well as listened to.
+      if (call.signal?.aborted) onAbort();
+
+      // Writing runs alongside reading, which is what makes a duplex call one
+      // call: a bidirectional stream reads replies while it is still sending.
+      const writing = (async () => {
+        try {
+          for await (const message of call.messages) {
+            if (finished) break;
+            const framed = new Uint8Array(message.length + 5);
+            const view = new DataView(framed.buffer);
+            view.setUint8(0, 0);
+            view.setUint32(1, message.length, false);
+            framed.set(message, 5);
+            if (!stream.write(framed)) {
+              await new Promise<void>((resolve) => stream.once("drain", resolve));
+            }
+          }
+          if (!stream.closed) stream.end();
+        } catch (error) {
+          cancel(2, error instanceof Error ? error.message : String(error));
+          throw error;
+        }
+      })();
+      // The reader reports the failure; this keeps an early write error from
+      // surfacing as an unhandled rejection first.
+      writing.catch(() => {});
+
+      const chunks = (async function* (): AsyncGenerator<Uint8Array> {
+        while (true) {
+          while (queue.length > 0) yield queue.shift()!;
+          if (finished) break;
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+          });
+        }
+
+        if (failure) throw failure;
+      })();
+
+      const messages = (async function* (): AsyncGenerator<Uint8Array> {
+        try {
+          for await (const frame of grpcFrames(chunks)) {
+            // Over HTTP/2 the status is in the trailers, so a trailer frame is
+            // gRPC-Web's device and does not belong here; it is read anyway
+            // rather than handed to the codec.
+            if (frame.trailer) {
+              status = parseGrpcStatus(new TextDecoder().decode(frame.payload));
+              continue;
+            }
+            yield frame.payload;
+          }
+
+          await writing;
+
+          if (httpStatus !== 200 && status === undefined) {
+            throw new GrpcError(2, \`the server answered HTTP \${httpStatus}\`);
+          }
+          if (status && status.code !== 0) {
+            throw new GrpcError(status.code, status.details);
+          }
+          if (status === undefined) {
+            throw new GrpcError(2, "the response carried no gRPC status");
+          }
+        } catch (error) {
+          rejectHeaders(error);
+          throw error;
+        } finally {
+          clearTimeout(deadline);
+          call.signal?.removeEventListener("abort", onAbort);
+        }
+      })();
+
+      return { headers, messages };
+    },
+  };
+}`;
+
+/**
  * The gRPC half of the runtime, emitted only when the document declares rpcs.
  *
- * The transport is gRPC-Web, not gRPC: gRPC proper needs HTTP/2 trailers and a
- * duplex body, neither of which `fetch` exposes, so a fetch client that claimed
- * to speak gRPC would be lying. gRPC-Web is the framing designed for exactly
- * this constraint, and it is what a proxy in front of a gRPC server speaks.
+ * Everything goes through one seam: a transport takes a path, headers and a
+ * stream of encoded messages, and returns the response headers plus a stream of
+ * encoded messages. All four streaming directions are that same call, which is
+ * why the generated methods do not care which transport is underneath.
+ *
+ * The default transport is gRPC-Web over `fetch`, because that is what runs
+ * everywhere including a browser. It cannot do client or bidirectional
+ * streaming - `fetch` sends one complete body - so it reports `duplex: false`,
+ * and the HTTP/2 transport in the companion file reports `true`.
  */
-const GRPC_PRELUDE = `const GRPC_MIME = "application/grpc-web+proto";
+const GRPC_PRELUDE = `const GRPC_WEB_MIME = "application/grpc-web+proto";
 
 /** A gRPC status other than OK. \`code\` is the canonical numeric status. */
 export class GrpcError extends Error {
@@ -641,6 +912,40 @@ export class GrpcError extends Error {
   }
 }
 
+export interface GrpcCallOptions {
+  /** Cancels the call. Over HTTP/2 this resets the stream. */
+  signal?: AbortSignal;
+  /** A deadline, sent as \`grpc-timeout\` and enforced locally as well. */
+  timeoutMs?: number;
+  /** Extra metadata for this call only. */
+  headers?: Record<string, string>;
+}
+
+export interface GrpcTransportCall {
+  /** \`/package.Service/Method\`. */
+  path: string;
+  headers: Record<string, string>;
+  /** One message for a unary request, many for a client stream. */
+  messages: AsyncIterable<Uint8Array>;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+export interface GrpcTransportResponse {
+  /** Resolves when the server's headers arrive, before any message. */
+  headers: Promise<{ status: number; headers: Record<string, string> }>;
+  messages: AsyncIterable<Uint8Array>;
+}
+
+export interface GrpcTransport {
+  /**
+   * Whether the request body can stay open while the response is read. Client
+   * and bidirectional streaming need it; gRPC-Web over fetch cannot offer it.
+   */
+  readonly duplex: boolean;
+  call(call: GrpcTransportCall): GrpcTransportResponse;
+}
+
 /** One length-prefixed frame: a flag byte, a big-endian length, the message. */
 function frameMessage(payload: Uint8Array): Uint8Array {
   const framed = new Uint8Array(payload.length + 5);
@@ -651,11 +956,62 @@ function frameMessage(payload: Uint8Array): Uint8Array {
   return framed;
 }
 
-/** Trailers arrive as a frame, as HTTP/1 has nowhere else to put them. */
-function trailerStatus(payload: Uint8Array): { code: number; details: string } {
+/** The one-message stream a unary or server-streaming request sends. */
+async function* grpcOnce(message: Uint8Array): AsyncGenerator<Uint8Array> {
+  yield message;
+}
+
+/** Encodes a caller's stream on the way out, one message at a time. */
+async function* grpcEncoded<TMessage>(
+  requests: AsyncIterable<TMessage>,
+  encode: (message: TMessage) => Uint8Array
+): AsyncGenerator<Uint8Array> {
+  for await (const request of requests) yield encode(request);
+}
+
+/**
+ * Splits a byte stream into gRPC frames.
+ *
+ * A frame is only readable once its header and its whole payload have arrived,
+ * so the leftovers are carried between chunks rather than assumed to align.
+ */
+export function grpcFrames(
+  chunks: AsyncIterable<Uint8Array>
+): AsyncGenerator<{ trailer: boolean; payload: Uint8Array }> {
+  return (async function* () {
+    let buffer = new Uint8Array(0);
+
+    for await (const chunk of chunks) {
+      if (chunk.length > 0) {
+        const merged = new Uint8Array(buffer.length + chunk.length);
+        merged.set(buffer, 0);
+        merged.set(chunk, buffer.length);
+        buffer = merged;
+      }
+
+      while (buffer.length >= 5) {
+        const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+        const length = view.getUint32(1, false);
+        if (buffer.length < 5 + length) break;
+        const flags = buffer[0]!;
+        const payload = buffer.subarray(5, 5 + length);
+        buffer = buffer.subarray(5 + length);
+        // Bit 0 marks a compressed payload. Reading it as-is would hand the
+        // codec deflated bytes, so it is refused with UNIMPLEMENTED.
+        if ((flags & 0x01) !== 0) {
+          throw new GrpcError(12, "compressed frames are not supported");
+        }
+        yield { trailer: (flags & 0x80) !== 0, payload };
+      }
+    }
+  })();
+}
+
+/** Trailers arrive as text, whether in a frame or in an HTTP/2 trailer block. */
+export function parseGrpcStatus(text: string): { code: number; details: string } {
   let code = 0;
   let details = "";
-  for (const line of new TextDecoder().decode(payload).split(/\\r?\\n/)) {
+  for (const line of text.split(/\\r?\\n/)) {
     const separator = line.indexOf(":");
     if (separator < 0) continue;
     const name = line.slice(0, separator).trim().toLowerCase();
@@ -666,142 +1022,199 @@ function trailerStatus(payload: Uint8Array): { code: number; details: string } {
   return { code, details };
 }
 
-/**
- * Status can arrive in the headers - a "trailers-only" reply, which is how a
- * server reports a failure before producing anything - or in a trailer frame.
- */
-function headerStatus(response: Response): { code: number; details: string } | undefined {
-  const raw = response.headers.get("grpc-status");
-  if (raw === null) return undefined;
+function statusFromHeaders(
+  headers: Record<string, string>
+): { code: number; details: string } | undefined {
+  const raw = headers["grpc-status"];
+  if (raw === undefined) return undefined;
   return {
     code: Number(raw),
-    details: decodeURIComponent(response.headers.get("grpc-message") ?? ""),
+    details: decodeURIComponent(headers["grpc-message"] ?? ""),
   };
 }
 
-async function grpcSend(
+/**
+ * gRPC-Web over \`fetch\`: one request body, framed; the status rides in a
+ * trailer frame at the end of the response body, or in the headers when the
+ * server failed before producing anything.
+ */
+function fetchTransport(config: ClientConfig): GrpcTransport {
+  return {
+    duplex: false,
+
+    call(call: GrpcTransportCall): GrpcTransportResponse {
+      let resolveHeaders!: (value: { status: number; headers: Record<string, string> }) => void;
+      let rejectHeaders!: (reason: unknown) => void;
+      const headers = new Promise<{ status: number; headers: Record<string, string> }>(
+        (resolve, reject) => {
+          resolveHeaders = resolve;
+          rejectHeaders = reject;
+        }
+      );
+      headers.catch(() => {});
+
+      const messages = (async function* () {
+        try {
+          const collected: Uint8Array[] = [];
+          for await (const message of call.messages) collected.push(message);
+          if (collected.length !== 1) {
+            throw new GrpcError(
+              12,
+              "this transport sends one request message; client streaming needs the HTTP/2 transport"
+            );
+          }
+
+          const response = await config.fetch(\`\${config.baseUrl}\${call.path}\`, {
+            method: "POST",
+            headers: { ...call.headers, "content-type": GRPC_WEB_MIME, accept: GRPC_WEB_MIME, "x-grpc-web": "1" },
+            body: frameMessage(collected[0]!),
+          });
+
+          const received: Record<string, string> = {};
+          response.headers.forEach((value, key) => {
+            received[key.toLowerCase()] = value;
+          });
+          resolveHeaders({ status: response.status, headers: received });
+
+          const early = statusFromHeaders(received);
+          if (!response.ok && !early) {
+            throw new ApiError(response.status, await response.text(), response);
+          }
+          if (early && early.code !== 0) throw new GrpcError(early.code, early.details);
+
+          let status = early ?? { code: 0, details: "" };
+          const body = response.body;
+          if (body) {
+            // A \`ReadableStream\` is async-iterable at runtime everywhere this
+            // client runs, but the DOM types do not say so; the reader does.
+            const reader = body.getReader();
+            const chunks = (async function* (): AsyncGenerator<Uint8Array> {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (value) yield value;
+                if (done) break;
+              }
+            })();
+
+            for await (const frame of grpcFrames(chunks)) {
+              if (frame.trailer) {
+                status = parseGrpcStatus(new TextDecoder().decode(frame.payload));
+                continue;
+              }
+              yield frame.payload;
+            }
+          }
+
+          if (status.code !== 0) throw new GrpcError(status.code, status.details);
+        } catch (error) {
+          // A failure before the headers arrived has to reach whoever awaited
+          // them, or that promise never settles.
+          rejectHeaders(error);
+          throw error;
+        }
+      })();
+
+      return { headers, messages };
+    },
+  };
+}
+
+function grpcTransport(config: ClientConfig): GrpcTransport {
+  return config.transport ?? fetchTransport(config);
+}
+
+/** \`grpc-timeout\` is a number plus a unit; milliseconds is \`m\`. */
+function callHeaders(
+  options: GrpcCallOptions | undefined,
+  config: ClientConfig
+): Record<string, string> {
+  const headers: Record<string, string> = { te: "trailers", ...options?.headers };
+  const timeout = options?.timeoutMs ?? config.timeoutMs;
+  if (timeout !== undefined) headers["grpc-timeout"] = \`\${Math.ceil(timeout)}m\`;
+  return headers;
+}
+
+/**
+ * Runs one call: hooks, then the transport, then the response messages.
+ *
+ * The hooks are the same two an HTTP call runs, so a token injected for one is
+ * injected for the other. \`afterCall\` sees a \`Response\` synthesised from the
+ * response headers when the transport has no \`Response\` of its own.
+ */
+async function* grpcCall(
   config: ClientConfig,
   path: string,
-  request: Uint8Array
-): Promise<{ call: Call; response: Response }> {
+  requests: AsyncIterable<Uint8Array>,
+  options: GrpcCallOptions | undefined,
+  needsDuplex: boolean
+): AsyncGenerator<Uint8Array> {
+  const transport = grpcTransport(config);
+  if (needsDuplex && !transport.duplex) {
+    throw new GrpcError(
+      12,
+      "the configured transport cannot stream requests; use createHttp2Transport()"
+    );
+  }
+
   const call: Call = {
     method: "POST",
     url: \`\${config.baseUrl}\${path}\`,
-    // \`x-grpc-web\` is what marks this as the framed dialect rather than proto
-    // over plain HTTP; a proxy keys off it.
-    headers: { "content-type": GRPC_MIME, accept: GRPC_MIME, "x-grpc-web": "1" },
-    body: frameMessage(request),
+    headers: callHeaders(options, config),
   };
-
   const prepared = config.beforeCall ? await config.beforeCall(call) : call;
-  const response = await config.fetch(prepared.url, {
-    method: prepared.method,
+
+  const response = transport.call({
+    path,
     headers: prepared.headers,
-    body: prepared.body,
+    messages: requests,
+    signal: options?.signal,
+    timeoutMs: options?.timeoutMs ?? config.timeoutMs,
   });
-  return config.afterCall
-    ? await config.afterCall({ call: prepared, response })
-    : { call: prepared, response };
+
+  if (config.afterCall) {
+    const received = await response.headers;
+    await config.afterCall({
+      call: prepared,
+      response: new Response(null, {
+        status: received.status,
+        headers: received.headers,
+      }),
+    });
+  }
+
+  yield* response.messages;
 }
 
+/** A unary call: exactly one message out, exactly one back. */
 async function grpcUnary(
   config: ClientConfig,
   path: string,
-  request: Uint8Array
+  request: Uint8Array,
+  options?: GrpcCallOptions
 ): Promise<Uint8Array> {
-  const { response } = await grpcSend(config, path, request);
-
-  // A transport failure has no gRPC status at all, so it stays an ApiError:
-  // the caller is looking at a proxy or a network, not at an rpc.
-  const early = headerStatus(response);
-  if (!response.ok && !early) {
-    throw new ApiError(response.status, await response.text(), response);
-  }
-  if (early && early.code !== 0) throw new GrpcError(early.code, early.details);
-
-  const bytes = new Uint8Array(await response.arrayBuffer());
   let message: Uint8Array | undefined;
-  let status = early ?? { code: 0, details: "" };
-
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let offset = 0;
-  while (offset + 5 <= bytes.length) {
-    const flags = bytes[offset]!;
-    const length = view.getUint32(offset + 1, false);
-    const start = offset + 5;
-    const payload = bytes.subarray(start, start + length);
-    if ((flags & 0x80) !== 0) status = trailerStatus(payload);
-    // Bit 0 marks a compressed frame. Reading it as-is would hand the codec
-    // deflated bytes, so it is refused with UNIMPLEMENTED instead.
-    else if ((flags & 0x01) !== 0) throw new GrpcError(12, "compressed frames are not supported");
-    else message ??= payload;
-    offset = start + length;
+  for await (const received of grpcCall(config, path, grpcOnce(request), options, false)) {
+    message ??= received;
   }
 
-  if (status.code !== 0) throw new GrpcError(status.code, status.details);
   if (!message) throw new GrpcError(13, "the response carried no message");
   return message;
 }
 
-/**
- * A server stream, yielded frame by frame.
- *
- * The body is read incrementally rather than buffered: a stream that only
- * arrives once the server is finished is not a stream.
- */
-async function* grpcStream(
+/** A client stream: many messages out, one back. */
+async function grpcClientStream(
   config: ClientConfig,
   path: string,
-  request: Uint8Array
-): AsyncGenerator<Uint8Array> {
-  const { response } = await grpcSend(config, path, request);
-
-  const early = headerStatus(response);
-  if (!response.ok && !early) {
-    throw new ApiError(response.status, await response.text(), response);
-  }
-  if (early && early.code !== 0) throw new GrpcError(early.code, early.details);
-
-  const reader = response.body?.getReader();
-  if (!reader) throw new GrpcError(13, "the response had no body to stream");
-
-  let buffer = new Uint8Array(0);
-  let status = early ?? { code: 0, details: "" };
-
-  const take = (length: number): Uint8Array => {
-    const taken = buffer.subarray(0, length);
-    buffer = buffer.subarray(length);
-    return taken;
-  };
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (value && value.length > 0) {
-      const merged = new Uint8Array(buffer.length + value.length);
-      merged.set(buffer, 0);
-      merged.set(value, buffer.length);
-      buffer = merged;
-    }
-
-    // A frame is only readable once its header and its whole payload arrived.
-    while (buffer.length >= 5) {
-      const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-      const length = view.getUint32(1, false);
-      if (buffer.length < 5 + length) break;
-      const flags = buffer[0]!;
-      take(5);
-      const payload = take(length);
-      if ((flags & 0x80) !== 0) status = trailerStatus(payload);
-      else if ((flags & 0x01) !== 0) {
-        throw new GrpcError(12, "compressed frames are not supported");
-      }
-      else yield payload;
-    }
-
-    if (done) break;
+  requests: AsyncIterable<Uint8Array>,
+  options?: GrpcCallOptions
+): Promise<Uint8Array> {
+  let message: Uint8Array | undefined;
+  for await (const received of grpcCall(config, path, requests, options, true)) {
+    message ??= received;
   }
 
-  if (status.code !== 0) throw new GrpcError(status.code, status.details);
+  if (!message) throw new GrpcError(13, "the response carried no message");
+  return message;
 }`;
 
 /**
@@ -952,15 +1365,16 @@ function emitFiles(
       .map((operation) => {
         // Typed from `Client`, so a delegate cannot drift from the method it
         // forwards to, and reads `client` per call so `configure` still applies.
-        const argument =
-          operation.parameter === ""
-            ? ""
-            : operation.parameter.startsWith("request")
-              ? "request"
-              : "options";
+        // The names have to match the emitted signature, since the parameters
+        // are what the delegate forwards.
+        const parameters = operation.parameter
+          .split(",")
+          .map((part) => part.trim().split(/[?:]/)[0]!.trim())
+          .filter((name) => name.length > 0)
+          .join(", ");
         return `${operation.doc}export const ${operation.name}: Client[${JSON.stringify(
           operation.name
-        )}] = (${argument}) => client.${operation.name}(${argument});`;
+        )}] = (${parameters}) => client.${operation.name}(${parameters});`;
       })
       .join("\n\n"),
   ].join("\n");
@@ -987,6 +1401,23 @@ function emitFiles(
     .filter((fn) => new RegExp(`\\b${fn}\\b`).test(declarations))
     .sort();
 
+  // The gRPC fields only exist on a client that has rpcs to make, so the shared
+  // configuration carries them conditionally rather than always.
+  const grpcConfig =
+    grpcMethods.length > 0
+      ? [
+          "  /**",
+          "   * How gRPC calls travel. Defaults to gRPC-Web over `fetch`, which runs",
+          "   * anywhere; `createHttp2Transport()` from ./transport.ts speaks gRPC",
+          "   * proper and is the only one that can stream requests.",
+          "   */",
+          "  transport?: GrpcTransport;",
+          "  /** A deadline for every gRPC call, unless the call overrides it. */",
+          "  timeoutMs?: number;",
+          "",
+        ].join("\n")
+      : "";
+
   const api = [
     banner("Every operation the document declares."),
     imported.length > 0
@@ -995,7 +1426,7 @@ function emitFiles(
     codecImports.length > 0
       ? `import { ${codecImports.join(", ")} } from "./${CODEC_FILE}";\n`
       : "",
-    `\n${PRELUDE}\n`,
+    `\n${PRELUDE.replace("__GRPC_CONFIG__", grpcConfig)}\n`,
     grpcMethods.length > 0 ? `\n${GRPC_PRELUDE}\n` : "",
     operations.length > 0 ? `\n${declarations}\n` : "",
   ].join("");
@@ -1006,6 +1437,9 @@ function emitFiles(
       codecTypes,
       { modelModule: `./${MODEL_FILE}`, identifiers }
     )}\n`;
+    files[TRANSPORT_FILE] = `${banner(
+      "The HTTP/2 transport, for a server that speaks gRPC proper."
+    )}\n${HTTP2_TRANSPORT}\n`;
   }
   return files;
 }

@@ -351,31 +351,54 @@ reported as a diagnostic rather than dropped quietly.
 wiz generate -g wiz/generators/tsClient.ts pets.proto --outdir src/api
 ```
 
-That emits a third file, `codec.ts`, with a reader and a writer per message,
-generated from the same protobuf codec the `encodeProto` helper uses. `api.ts`
-calls into it, so a method takes and returns messages, not bytes:
+That emits two more files. `codec.ts` holds a reader and a writer per message,
+generated from the same protobuf codec `encodeProto` uses. `transport.ts` holds
+the HTTP/2 transport. `api.ts` calls into both, so a method takes and returns
+messages, not bytes — in all four directions:
 
 ```ts
-const pet = await getPet({ id: "p1" });          // unary
-for await (const pet of watchPets({ id: "*" })) { /* server stream */ }
+import { configure, unary, down, up, both } from "./api.ts";
+import { createHttp2Transport } from "./transport.ts";
+
+configure({
+  baseUrl: "http://127.0.0.1:50051",
+  transport: createHttp2Transport({ baseUrl: "http://127.0.0.1:50051" }),
+});
+
+await unary({ text: "hi" });                                  // one to one
+for await (const pong of down({ text: "tick" })) { /* … */ }   // one to many
+await up(pings());                                             // many to one
+for await (const pong of both(pings())) { /* … */ }            // many to many
 ```
 
-**The transport is gRPC-Web, not gRPC.** gRPC proper needs HTTP/2 trailers and a
-duplex request body, and `fetch` exposes neither, so the emitted client speaks
-the framing designed for that constraint — which is what a proxy in front of a
-gRPC server (Envoy, `grpcwebproxy`, Connect) accepts. What follows from that,
-and what a client built on `@grpc/grpc-js` would give you instead:
+Calls take a second argument for a deadline and cancellation:
+`unary(request, { timeoutMs: 250, signal })`. A deadline is sent as
+`grpc-timeout` and enforced locally too, so a server that ignores it cannot hang
+the caller.
+
+**Two transports, because two environments.** `transport.ts` speaks gRPC proper
+over `node:http2` — real HTTP/2, real trailers, a request body that stays open —
+and is the only one that can stream requests. It is a separate file so a browser
+bundle never imports `node:http2`. Without it, calls fall back to gRPC-Web over
+`fetch`, which runs anywhere and needs a proxy (Envoy, `grpcwebproxy`, Connect)
+in front of a gRPC server; a call that streams requests over that transport
+fails with `UNIMPLEMENTED` naming the fix rather than hanging.
+
+The HTTP/2 path is tested against a real `@grpc/grpc-js` server: all four
+directions, server status codes, deadlines, cancellation and connection reuse.
+What a client built on `@grpc/grpc-js` still gives you that this does not:
 
 | | wiz | notes |
 |---|---|---|
-| Unary, server streaming | yes | verified against protobufjs's own wire format |
-| Client and bidirectional streaming | no | needs a duplex body; the method is emitted and throws, so it is not silently missing |
-| Deadlines, cancellation | no | no `AbortSignal` or `grpc-timeout` yet |
-| Metadata | via `beforeCall`/`afterCall` | headers, not a typed metadata object; trailing metadata beyond `grpc-status`/`grpc-message` is not surfaced |
-| Retries, load balancing, channel state | no | one `baseUrl`, one `fetch` |
-| TLS and credentials | the runtime's | whatever `fetch` does |
-| Compression | no | frames are always sent uncompressed, and a compressed reply is refused rather than mis-read |
-| Interceptors | `beforeCall`/`afterCall` | one hook each way, not a chain |
+| Unary and all three streaming directions | yes, over HTTP/2 | gRPC-Web carries unary and server streaming only |
+| Deadlines, cancellation | yes | `timeoutMs` and `AbortSignal` per call, or a default on the client |
+| Wire format | verified | checked byte for byte against protobufjs, both directions |
+| Metadata | headers, via `beforeCall`/`afterCall` | not a typed `Metadata` object; trailing metadata beyond `grpc-status`/`grpc-message` is not surfaced |
+| Retries, hedging | no | a failed call is a failed call |
+| Load balancing, name resolution, channel state | no | one origin per transport, one pooled session |
+| TLS and credentials | the runtime's | `http2.connect` options are passed through; no per-call credentials |
+| Compression | no | frames are sent uncompressed, and a compressed reply is refused rather than mis-read |
+| Interceptors | one hook each way | `beforeCall`/`afterCall`, not a chain |
 | Reflection, health checking, `Any`, `Struct` | no | unmapped well-known types become diagnostics |
 
 ## Design
