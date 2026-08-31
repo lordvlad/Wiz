@@ -420,14 +420,45 @@ Because they meet at one IR and share the `@format` reader, a type cannot be
 described one way and encoded another — a class of bug this codebase has had
 repeatedly.
 
+
+```mermaid
+flowchart LR
+  subgraph front[front ends: extractors]
+    TS["TypeScript types<br><code>extractors/typescript.ts</code>"]
+    OA["OpenAPI document<br><code>extractors/openapi.ts</code>"]
+    PR[".proto file<br><code>extractors/proto.ts</code>"]
+  end
+
+  IR(("IR<br>types · service · api"))
+
+  subgraph back[back ends: generators]
+    SC["schema · validator<br>· keys"]
+    OP["OpenAPI<br>document"]
+    PB["protobuf · avro<br>· arrow codecs"]
+    TC["TS client<br>model · api · codec<br>· transport"]
+  end
+
+  VU["virtual modules<br>on the wire"]
+  FS["files on disk<br><code>wiz generate</code>"]
+
+  TS --> IR
+  OA --> IR
+  PR --> IR
+  IR --> SC
+  IR --> OP
+  IR --> PB
+  IR --> TC
+  SC --> VU
+  OP --> VU
+  PB --> VU
+  TC --> FS
 ```
-src/extractors/         front ends producing IR; typescript.ts is the first
-src/ir/types.ts         IR shape, structural hashing
-src/generators/         keys, schema, validator, openapi, protobuf, avro
-src/plugin.ts           call-site rewriting, route harvesting
-src/registry.ts         virtual modules, keyed by structural hash
-src/cli.ts              the wiz binary
-```
+
+Three front ends in, one IR, and every generator reads that and nothing else —
+there is no path from an input format straight to an output format. The two
+ways out differ only in destination: the plugin registers generated modules by
+structural hash and rewrites call sites to import them, while `wiz generate`
+writes a generator's files to disk for anything that wants post-processing.
 
 ### Verification
 
