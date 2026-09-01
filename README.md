@@ -358,11 +358,12 @@ overwriting silently; without one, the whole `{ filename: contents }` record is
 printed as JSON so it can be post-processed.
 
 ```bash
-wiz generate -g wiz/generators/tsClient.ts openapi.json --outdir src/api
+wiz generate -g tsClient openapi.json --outdir src/api
+wiz generate -g reactQuery openapi.json --outdir src/api
 cat openapi.yaml | wiz generate -g ./myGenerator.ts | jq -r '."model.ts"'
 ```
 
-The bundled TypeScript client generator emits `model.ts` with the document's
+The bundled TypeScript client generators (`tsClient` and `reactQuery`) emit `model.ts` with the document's
 types and `api.ts` with its operations. Every operation takes exactly the
 parameters it declares — `path`, `query`, `headers`, `cookie`, `body` — and is
 reachable two ways: as a module-level function driven by `configure()`, or

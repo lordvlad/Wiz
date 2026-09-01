@@ -74,7 +74,14 @@ function parseJSDocValue(kind: ConstraintKind, text: string): unknown {
       if (trimmed === "false") return false;
       return true;
     }
-    case "pattern":
+    case "pattern": {
+      const match = trimmed.match(/^\/(.*)\/([gimsuyv]*)$/);
+      if (match) {
+        const body = match[1]!;
+        return body.replace(/\\(?=\/)/g, "");
+      }
+      return trimmed;
+    }
     case "format":
     default:
       return trimmed;

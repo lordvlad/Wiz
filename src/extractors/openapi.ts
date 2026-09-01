@@ -4,6 +4,7 @@ import {
   type ApiDiagnostic,
   type ApiIR,
 } from "../ir/api.ts";
+import { extractOpenRpcIR } from "./openrpc.ts";
 import type {
   Annotated,
   EnumMemberIR,
@@ -965,6 +966,10 @@ export function extractApiIR(
   if (!isObject(parsed)) {
     throw new Error("[wiz] OpenAPI document must be an object");
   }
+  if (typeof parsed.openrpc === "string" || parsed.openrpc !== undefined) {
+    return extractOpenRpcIR(text, options);
+  }
+
 
   const ctx: Ctx = {
     version: detectVersion(parsed),

@@ -29,6 +29,7 @@ const HELPER_FUNCTIONS = new Set([
   "validate",
   "is",
   "openapiSchema",
+  "openRPCSchema",
   "encodeProto",
   "decodeProto",
   "protobufSchema",
@@ -120,6 +121,7 @@ export const VIRTUAL_EXPORTS: Record<string, string> = {
   validate: "__wiz_validate",
   is: "__wiz_is",
   openapiSchema: "__wiz_openapiSchema",
+  openRPCSchema: "__wiz_openRPCSchema",
   encodeProto: "__wiz_encodeProto",
   decodeProto: "__wiz_decodeProto",
   protobufSchema: "__wiz_protobufSchema",
@@ -266,7 +268,10 @@ export function transformSource(options: TransformOptions): TransformResult {
         if (ts.isIdentifier(expression)) {
           fnName = expression.text;
         } else if (ts.isPropertyAccessExpression(expression)) {
-          fnName = expression.name.text;
+          const targetObj = expression.expression;
+          if (ts.isIdentifier(targetObj) && targetObj.text === "openapiSchema") {
+            fnName = expression.name.text;
+          }
         }
 
         // `openapiDocument()` is answered here, from the whole program,
@@ -511,6 +516,35 @@ export function transformSource(options: TransformOptions): TransformResult {
                   : undefined;
                 return context.factory.createCallExpression(
                   context.factory.createIdentifier(`__wiz_openapiSchema_${key}`),
+                  undefined,
+                  baseArg ? [baseArg] : []
+                );
+              }
+              case "openRPCSchema": {
+                const openRpcTypes: Array<{ name: string; ir: TypeIR }> = [];
+                let typeArgs: readonly ts.Type[] = [];
+                if (checker.isTupleType(tsType)) {
+                  typeArgs = checker.getTypeArguments(tsType as ts.TypeReference);
+                } else if (tsType) {
+                  typeArgs = [tsType];
+                }
+
+                for (const elemType of typeArgs) {
+                  const elemIR = extractTypeIR(elemType, checker);
+                  const sym = elemType.aliasSymbol ?? elemType.symbol;
+                  const name = sym && !sym.name.startsWith("__") ? sym.name : (elemIR.name ?? `Schema_${openRpcTypes.length + 1}`);
+                  openRpcTypes.push({ name, ir: elemIR });
+                }
+
+                const key = registerPayload("openRPCSchema", {
+                  openRpcTypes,
+                });
+
+                const baseArg = node.arguments[0]
+                  ? (ts.visitNode(node.arguments[0], visitor) as ts.Expression)
+                  : undefined;
+                return context.factory.createCallExpression(
+                  context.factory.createIdentifier(`__wiz_openRPCSchema_${key}`),
                   undefined,
                   baseArg ? [baseArg] : []
                 );

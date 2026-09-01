@@ -13,6 +13,11 @@ that produced it. This page covers the HTTP half.
 ```bash
 wiz generate -g wiz/generators/tsClient.ts openapi.json --outdir src/api
 ```
+```bash
+# Using generator shortcut names
+wiz generate -g tsClient openapi.json --outdir src/api
+wiz generate -g reactQuery openapi.json --outdir src/api
+```
 
 `-g`/`--generator` is a **filesystem path resolved from the current directory**,
 not a package specifier — `loadGenerator` does `pathToFileURL(resolve(module))`
@@ -514,3 +519,49 @@ only on the [gRPC](./grpc.md) side.
 **Cookies do not round-trip.** Cookie *parameters* are sent; nothing reads
 `set-cookie` back. That is `fetch`'s credentials handling, which the
 `FetchLike` surface does not expose.
+## React Query Client Generator (`reactQuery`)
+
+To generate React Query hooks and options getters on top of the base HTTP client, run `wiz generate` with `-g reactQuery`:
+
+```bash
+wiz generate -g reactQuery openapi.json --outdir src/api
+```
+
+This emits five files: `model.ts`, `api.ts`, `codec.ts`, `queries.ts`, and `mutations.ts`.
+
+### Query Operations (`queries.ts`)
+
+For operations using `GET`, `HEAD`, or `OPTIONS`, `queries.ts` emits:
+- Standalone options getters: `get<OperationName>QueryOptions(options, queryOptions, client)` returning `{ queryKey: [pathTemplate, options], queryFn, ...queryOptions }`.
+- React Query hooks: `use<OperationName>(options, queryOptions, client)`.
+- Factory function `createQueries(client)` pre-binding options getters and hooks to a tenant `Client` instance.
+- Multi-tenancy factory `createHooks(client)` combining `createQueries(client)` and `createMutations(client)`.
+
+```ts
+import { useGetPetByPetId, createHooks } from "./queries.ts";
+
+// Direct hook usage with default client
+const { data, isLoading } = useGetPetByPetId({ path: { petId: "123" } }, { enabled: true });
+
+// Multi-tenant bound hooks
+const tenantClient = createClient({ baseUrl: "https://tenant-api.example.com" });
+const hooks = createHooks(tenantClient);
+const tenantPet = hooks.useGetPetByPetId({ path: { petId: "123" } });
+```
+
+### Mutation Operations (`mutations.ts`)
+
+For operations using `POST`, `PUT`, `PATCH`, or `DELETE`, `mutations.ts` emits:
+- Standalone mutation options getters: `get<OperationName>MutationOptions(mutationOptions, client)` returning `{ mutationKey: [pathTemplate, method], mutationFn, ...mutationOptions }`.
+- Mutation hooks: `use<OperationName>(mutationOptions, client)`.
+- Factory function `createMutations(client)` pre-binding mutation getters and hooks to a tenant `Client` instance.
+
+```ts
+import { useCreatePet } from "./mutations.ts";
+
+const createPetMutation = useCreatePet({
+  onSuccess: (newPet) => console.log("Created", newPet),
+});
+
+createPetMutation.mutate({ body: { name: "Fido" } });
+```

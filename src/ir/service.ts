@@ -5,7 +5,7 @@ import { normalizeTypeIR, type TypeIR } from "./types.ts";
  * so those pieces stay self-describing when passed around on their own, and
  * `ServiceMethodIR` repeats it so a whole method narrows in one check.
  */
-export type Protocol = "http" | "grpc";
+export type Protocol = "http" | "grpc" | "openrpc";
 
 export type HttpMethodName =
   | "GET"
@@ -39,8 +39,16 @@ export interface GrpcAddressIR {
   /** The rpc's own name, as written. */
   method: string;
 }
+export interface OpenRpcAddressIR {
+  protocol: "openrpc";
+  service?: string;
+  method: string;
+}
 
-export type ServiceMethodAddressIR = HttpAddressIR | GrpcAddressIR;
+export type ServiceMethodAddressIR =
+  | HttpAddressIR
+  | GrpcAddressIR
+  | OpenRpcAddressIR;
 
 /**
  * One representation of a payload. A request or response holds a list of these
@@ -54,7 +62,7 @@ export interface ServiceMethodBodyIR {
 /** One parameter or response header, with the component name it came from. */
 export interface ParameterIR {
   name: string;
-  in: "path" | "query" | "header" | "cookie";
+  in: "path" | "query" | "header" | "cookie" | "rpc";
   /** Path parameters are always required, per the OpenAPI spec. */
   required: boolean;
   type: TypeIR;
@@ -85,8 +93,16 @@ export interface GrpcRequestIR {
   message: TypeIR;
   streaming: boolean;
 }
+export interface OpenRpcRequestIR {
+  protocol: "openrpc";
+  params: ParameterIR[];
+  paramsByName?: boolean;
+}
 
-export type ServiceMethodRequestIR = HttpRequestIR | GrpcRequestIR;
+export type ServiceMethodRequestIR =
+  | HttpRequestIR
+  | GrpcRequestIR
+  | OpenRpcRequestIR;
 
 export interface HttpResponseIR {
   protocol: "http";
@@ -109,8 +125,16 @@ export interface GrpcResponseIR {
   message: TypeIR;
   streaming: boolean;
 }
+export interface OpenRpcResponseIR {
+  protocol: "openrpc";
+  result: TypeIR;
+  error?: TypeIR;
+}
 
-export type ServiceMethodResponseIR = HttpResponseIR | GrpcResponseIR;
+export type ServiceMethodResponseIR =
+  | HttpResponseIR
+  | GrpcResponseIR
+  | OpenRpcResponseIR;
 
 /**
  * A single callable endpoint. Responses are a list rather than a TypeScript
@@ -157,6 +181,13 @@ export interface GrpcServiceMethodIR extends ServiceMethodIR {
   request: GrpcRequestIR;
   responses: GrpcResponseIR[];
 }
+export interface OpenRpcServiceMethodIR extends ServiceMethodIR {
+  protocol: "openrpc";
+  address: OpenRpcAddressIR;
+  request: OpenRpcRequestIR;
+  responses: OpenRpcResponseIR[];
+}
+
 
 export function isHttpMethod(
   method: ServiceMethodIR
@@ -169,6 +200,12 @@ export function isGrpcMethod(
 ): method is GrpcServiceMethodIR {
   return method.protocol === "grpc";
 }
+export function isOpenRpcMethod(
+  method: ServiceMethodIR
+): method is OpenRpcServiceMethodIR {
+  return method.protocol === "openrpc";
+}
+
 
 /**
  * A collection of methods plus the identity shared by all of them.
@@ -242,6 +279,34 @@ export function normalizeServiceMethod(method: ServiceMethodIR): unknown {
         : null,
     };
   }
+  if (method.request.protocol === "openrpc") {
+    const openRpcResp = method.responses.find(
+      (candidate): candidate is OpenRpcResponseIR =>
+        candidate.protocol === "openrpc"
+    );
+    return {
+      a: method.address,
+      oi: method.operationId ?? null,
+      su: method.summary ?? null,
+      de: method.description ?? null,
+      tg: method.tags ?? null,
+      dp: method.deprecated ?? null,
+      o: method.overrides ?? null,
+      rq: {
+        p: method.request.params.map(parameterKey),
+        pbn: method.request.paramsByName ?? null,
+      },
+      rs: openRpcResp
+        ? {
+            res: normalizeTypeIR(openRpcResp.result, true),
+            err: openRpcResp.error
+              ? normalizeTypeIR(openRpcResp.error, true)
+              : null,
+          }
+        : null,
+    };
+  }
+
 
   const request = method.request;
   return {

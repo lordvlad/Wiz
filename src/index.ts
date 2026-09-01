@@ -1,4 +1,19 @@
 import type { ValidationError } from "./types.ts";
+export { openRPCHandler, type OpenRpcHandlerOptions, type OpenRpcHandler } from "./server/openrpc.ts";
+export {
+  openRpcClient,
+  httpTransport,
+  webSocketTransport,
+  tcpTransport,
+  type OpenRpcCall,
+  type OpenRpcResult,
+  type OpenRpcTransport,
+  type OpenRpcClientOptions,
+  type HttpTransportOptions,
+  type WebSocketTransportOptions,
+  type TcpTransportOptions,
+} from "./transports/openrpc.ts";
+
 
 export class PluginInactiveError extends Error {
   constructor(fnName: string) {
@@ -208,6 +223,13 @@ export const openapiSchema: OpenApiSchemaBuilder = Object.assign(
     },
   }
 );
+export function openRPCSchema<TTypes extends unknown[] = unknown[]>(
+  _baseSchema?: Record<string, unknown>,
+  _options?: Record<string, unknown>
+): Record<string, unknown> {
+  throw new PluginInactiveError("openRPCSchema");
+}
+
 
 /**
  * Per-operation type carrier. The generics are the whole point; at runtime this
@@ -333,3 +355,7 @@ export {
   type WizLogger,
 } from "./logger.ts";
 export * from "./types.ts";
+export {
+  reactQueryGenerator,
+  type ReactQueryOptions,
+} from "./generators/reactQuery.ts";

@@ -75,11 +75,17 @@ wiz generate -g wiz/generators/tsClient.ts openapi.yaml --outdir src/api
 
 | Flag | Short | Description |
 |---|---|---|
-| `--generator <path>` | `-g` | Path to generator file (e.g., `wiz/generators/tsClient.ts`). Required. |
+| `--generator <name|path>` | `-g` | Generator shortcut (`reactQuery`, `tsClient`, `openrpc`) or path to a generator file. Required. |
 | `--outdir <dir>` | `-o` | Output directory. If omitted, JSON record is printed to stdout. |
 | `--format <fmt>` | `-f` | Override input format inference (`openapi`, `proto`, `jsonschema`). |
 | `--lenient` | | Widen parameter shapes in client generators. |
 
+### Built-in Emitter Shortcuts
+
+Passing a shortcut name to `-g` resolves directly to the bundled generator module:
+- `-g reactQuery`: React Query client generator (`model.ts`, `api.ts`, `codec.ts`, `queries.ts`, `mutations.ts`).
+- `-g tsClient`: Standard TypeScript HTTP client generator (`model.ts`, `api.ts`, `codec.ts`).
+- `-g openrpc`: OpenRPC schema and handler generator.
 ### Input Inference
 
 Input format is inferred automatically from file extension:

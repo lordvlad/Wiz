@@ -49,6 +49,7 @@ const compilerOptions: ts.CompilerOptions = {
 const libFileCache = new Map<string, ts.SourceFile | undefined>();
 const programCache = new Map<string, ts.Program>();
 let lastProgram: ts.Program | undefined;
+let lastSourceText: string | undefined;
 
 function programFor(sourceText: string): ts.Program {
   const cached = programCache.get(sourceText);
@@ -79,14 +80,7 @@ function programFor(sourceText: string): ts.Program {
     }
     return libFileCache.get(fileName);
   };
-
-  const program = ts.createProgram(
-    [VIRTUAL_ENTRY],
-    compilerOptions,
-    host,
-    lastProgram
-  );
-  lastProgram = program;
+  const program = ts.createProgram([VIRTUAL_ENTRY], compilerOptions, host);
   programCache.set(sourceText, program);
   return program;
 }
@@ -171,7 +165,7 @@ export function evalModule<T>(code: string): T {
     .join(", ");
 
   return new Function(
-    `${code.replace(/export /g, "")}\nreturn { ${collected} };`
+    `"use strict";\n${code.replace(/export /g, "")}\nreturn { ${collected} };`
   )() as T;
 }
 /**

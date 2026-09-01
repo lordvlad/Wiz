@@ -50,7 +50,7 @@ export interface ApiIR {
    * for a `.proto` file: one field, because every consumer that cares asks the
    * same question - what shape was this before it became IR.
    */
-  version: "3.0" | "3.1" | "proto3";
+  version: "3.0" | "3.1" | "proto3" | "openrpc-1.3";
   /** `components.schemas`, or a proto file's messages and enums, by name. */
   types: Map<string, TypeIR>;
   /** The other four component sections, by name. Empty for a proto file. */

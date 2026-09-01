@@ -144,6 +144,15 @@ function usable(value: unknown): value is Generator<GenerateOptions> {
   );
 }
 
+const GENERATOR_SHORTCUTS: Record<string, string> = {
+  reactQuery: "../generators/reactQuery.ts",
+  "reactQuery.ts": "../generators/reactQuery.ts",
+  tsClient: "../generators/tsClient.ts",
+  "tsClient.ts": "../generators/tsClient.ts",
+  openrpc: "../generators/openrpc.ts",
+  "openrpc.ts": "../generators/openrpc.ts",
+};
+
 async function loadGenerator(
   module: string
 ): Promise<Generator<GenerateOptions>> {
@@ -152,7 +161,10 @@ async function loadGenerator(
   // `resolve` pins it to the cwd rather than to this file, which is what makes
   // `--generator ./gen.ts` mean what the caller typed, and `pathToFileURL`
   // keeps an absolute path a legal specifier on Windows too.
-  const url = pathToFileURL(resolve(module)).href;
+  const shortcut = GENERATOR_SHORTCUTS[module];
+  const url = shortcut
+    ? new URL(shortcut, import.meta.url).href
+    : pathToFileURL(resolve(module)).href;
 
   let loaded: Record<string, unknown>;
   try {

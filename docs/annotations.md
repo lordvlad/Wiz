@@ -196,6 +196,10 @@ field. The format changes the Avro logical type and the JSON Schema `format`
 keyword; a downstream JSON Schema validator with format assertions enabled will
 check it, and wiz will not.
 
+To enforce date-time validation in wiz:
+- **Use native `Date`**: Declare the property as TypeScript `Date` (`createdAt: Date`). Wiz treats `Date` as a native date primitive, enforcing valid `Date` instances in the validator and emitting `format: "date-time"` in schemas.
+- **Use `@pattern`**: If the property must remain a string, combine `@format date-time` with `@pattern ^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$` to reject invalid date strings at runtime.
+
 ### Integer widths
 
 `INTEGER_FORMATS` in `src/ir/types.ts` is the single table that decides what a

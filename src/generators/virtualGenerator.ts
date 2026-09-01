@@ -3,6 +3,7 @@ import { generateKeysCode } from "./keys.ts";
 import { generateSchemaCode } from "./schema.ts";
 import { generateValidatorCode } from "./validator.ts";
 import { generateOpenApiSchemaCode } from "./openapi.ts";
+import { generateOpenRpcSchemaCode } from "./openrpc.ts";
 import type { ServiceIR } from "../ir/service.ts";
 import {
   generateProtobufCode,
@@ -16,6 +17,7 @@ import type { Generator } from "./generator.ts";
 
 export interface VirtualModuleOptions {
   openApiTypes?: Array<{ name: string; ir: TypeIR }>;
+  openRpcTypes?: Array<{ name: string; ir: TypeIR }>;
   openApiVersion?: "3.0" | "3.1";
   /** Methods harvested from route maps or the path builder. */
   service?: ServiceIR;
@@ -56,6 +58,7 @@ const SECTION_EXPORTS = {
   arrowSchema: ["arrowSchema"],
   zod: ["zodSchema"],
   json: ["encodeJson", "decodeJson"],
+  openrpc: ["openRPCSchema"],
 } as const;
 
 export function generateVirtualModuleCode(
@@ -87,6 +90,15 @@ export function generateVirtualModuleCode(
       )
     );
   }
+  if ((options?.openRpcTypes || options?.service) && include("openrpc")) {
+    parts.push(
+      generateOpenRpcSchemaCode(
+        options.openRpcTypes ?? [],
+        options.service
+      )
+    );
+  }
+
 
   if (options?.protobufSchemaTypes?.length && include("protobufSchema")) {
     parts.push(generateProtobufSchemaCode(options.protobufSchemaTypes));
