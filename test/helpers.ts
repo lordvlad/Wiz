@@ -161,6 +161,7 @@ export function evalModule<T>(code: string): T {
     "encodeArrow",
     "decodeArrow",
     "arrowSchema",
+    "zodSchema",
   ];
 
   const collected = exportNames

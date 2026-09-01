@@ -10,6 +10,7 @@ import {
 } from "./protobuf.ts";
 import { generateAvroCode, generateAvroSchemaCode } from "./avro.ts";
 import { generateArrowCode, generateArrowSchemaCode } from "./arrow.ts";
+import { generateZodSchemaCode } from "./zod.ts";
 import type { Generator } from "./generator.ts";
 
 export interface VirtualModuleOptions {
@@ -20,6 +21,7 @@ export interface VirtualModuleOptions {
   protobufSchemaTypes?: Array<{ name: string; ir: TypeIR }>;
   avroSchemaTypes?: Array<{ name: string; ir: TypeIR }>;
   arrowSchemaTypes?: Array<{ name: string; ir: TypeIR }>;
+  zod?: boolean;
   /**
    * Whether to emit the Arrow codec.
    *
@@ -51,6 +53,7 @@ const SECTION_EXPORTS = {
   avroSchema: ["avroSchema"],
   arrow: ["encodeArrow", "decodeArrow"],
   arrowSchema: ["arrowSchema"],
+  zod: ["zodSchema"],
 } as const;
 
 export function generateVirtualModuleCode(
@@ -97,23 +100,32 @@ export function generateVirtualModuleCode(
   if (options?.arrowSchemaTypes?.length && include("arrowSchema")) {
     parts.push(generateArrowSchemaCode(options.arrowSchemaTypes));
   }
-
+  if (options?.zod && include("zod")) parts.push(generateZodSchemaCode(ir));
   return parts.join("\n\n");
 }
+
+/**
+ * The entry file every virtual module map provides.
+ *
+ * A generator's contract is a file map, but the plugin's rewriter has to name
+ * one file of it in an import specifier, so the entry is a convention instead
+ * of a manifest: whatever else a virtual generator emits, `index.js` is the
+ * file whose exports the rewritten callsites bind.
+ */
+export const VIRTUAL_ENTRY = "index.js";
 
 /**
  * The plugin's emitter, addressed through the pluggable generator interface.
  *
  * Only `type` is implemented: a virtual module is what one type compiles to,
- * and the service and document roots are somebody else's output. The file name
- * is the bare specifier the plugin resolves, without the content hash the
- * plugin appends: outside the plugin there is no registry to key, so a hash
- * here would only make the written file harder to import.
+ * and the service and document roots are somebody else's output. The map's one
+ * file is the entry; the mount directory around it - `wiz-virtual/<key>/` - is
+ * the plugin's to add, since outside the plugin there is no registry to key.
  */
 export const virtualGenerator: Generator<VirtualModuleOptions> = {
   name: "wiz virtual module",
   type(ir, context) {
-    return { "wiz-virtual.js": generateVirtualModuleCode(ir, context.options) };
+    return { [VIRTUAL_ENTRY]: generateVirtualModuleCode(ir, context.options) };
   },
 };
 

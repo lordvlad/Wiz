@@ -1,6 +1,7 @@
 // @wiz-ignore
 import { beforeEach, describe, expect, test } from "bun:test";
-import { transformSource, type TransformResult } from "../src/plugin.ts";
+import { transformSource, type TransformResult, type GeneratedModule } from "../src/plugin.ts";
+import { VIRTUAL_ENTRY } from "../src/generators/virtualGenerator.ts";
 import { clearTypeRegistry } from "../src/registry.ts";
 import { silentLogger } from "../src/logger.ts";
 
@@ -22,9 +23,11 @@ beforeEach(() => {
 });
 
 const moduleCode = (result: TransformResult, marker: string): string => {
-  const found = [...result.modules.values()].find((m) => m.code.includes(marker));
+  const found = [...result.modules.values()].find((m) =>
+    m.files[VIRTUAL_ENTRY]?.includes(marker)
+  );
   if (!found) throw new Error(`no generated module contains ${marker}`);
-  return found.code;
+  return found.files[VIRTUAL_ENTRY]!;
 };
 
 const USER = `
@@ -44,12 +47,12 @@ describe("virtual module identity", () => {
     `);
 
     const documents = [...result.modules.values()].filter((m) =>
-      m.code.includes("openapiSchema")
+      m.files[VIRTUAL_ENTRY]?.includes("openapiSchema")
     );
     expect(documents).toHaveLength(2);
 
     const versions = documents
-      .map((m) => m.code.match(/openapi:\s*"(3\.[01]\.\d)"/)?.[1])
+      .map((m) => m.files[VIRTUAL_ENTRY]?.match(/openapi:\s*\"(3\.[01]\.\d)\"/)?.[1])
       .sort();
     expect(versions).toEqual(["3.0.3", "3.1.0"]);
   });
@@ -67,8 +70,8 @@ describe("virtual module identity", () => {
     `);
 
     const paths = [...result.modules.values()]
-      .filter((m) => m.code.includes("openapiSchema"))
-      .map((m) => (m.code.includes('"/users"') ? "/users" : "/people"))
+      .filter((m) => m.files[VIRTUAL_ENTRY]?.includes("openapiSchema"))
+      .map((m) => (m.files[VIRTUAL_ENTRY]?.includes('\"/users\"') ? "/users" : "/people"))
       .sort();
     expect(paths).toEqual(["/people", "/users"]);
   });
@@ -84,7 +87,7 @@ describe("virtual module identity", () => {
     // The schema payload earns its own module; the codec keeps the bare type
     // key. Both must exist, and only one may carry the .proto text.
     const withSchema = [...result.modules.values()].filter((m) =>
-      m.code.includes("export function protobufSchema")
+      m.files[VIRTUAL_ENTRY]?.includes("export function protobufSchema")
     );
     expect(withSchema).toHaveLength(1);
     expect(result.modules.size).toBe(2);

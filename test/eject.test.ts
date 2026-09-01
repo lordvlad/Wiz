@@ -193,7 +193,7 @@ export { routes };
       .filter((path) => path.includes("wiz-"));
 
     expect(generated).toHaveLength(1);
-    expect(generated[0]).toMatch(/^src\/wiz-User-[0-9a-f]+\.js$/);
+    expect(generated[0]).toMatch(/^src\/wiz-User-[0-9a-f]+\/index\.js$/);
   });
 
   test("route declarations collapse to the value they always stood for", async () => {

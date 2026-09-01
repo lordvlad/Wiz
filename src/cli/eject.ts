@@ -5,6 +5,8 @@ import {
   transformSource,
   type GeneratedModule,
 } from "../plugin.ts";
+import { VIRTUAL_ENTRY } from "../generators/virtualGenerator.ts";
+import { type GeneratedFiles } from "../generators/generator.ts";
 import { silentLogger, type WizLogger } from "../logger.ts";
 
 /**
@@ -21,9 +23,27 @@ export interface EjectedFile {
   contents: string;
 }
 
-/** Generated modules are siblings, so the specifier is already the file name. */
-function moduleFileName(specifier: string): string {
-  return specifier.replace(/^\.\//, "");
+/**
+ * A readable directory name for a generated module's mount.
+ *
+ * The type key is `<digest>_<sanitised declaring path>_<TypeName>`, which is a
+ * good cache key and a terrible directory name - it embeds the absolute path of
+ * whoever ran the build. The digest already carries the uniqueness, so the name
+ * only needs to be legible; a collision falls back to the full key.
+ */
+function shortModuleName(hash: string, taken: Map<string, string>): string {
+  const existing = taken.get(hash);
+  if (existing) return existing;
+
+  const parts = hash.split("_").filter(Boolean);
+  const digest = parts[0] ?? hash;
+  const typeName = parts.length > 1 ? parts[parts.length - 1]! : "type";
+  const candidate = `wiz-${typeName}-${digest}`;
+
+  const claimed = new Set(taken.values());
+  const name = claimed.has(candidate) ? `wiz-virtual-${hash}` : candidate;
+  taken.set(hash, name);
+  return name;
 }
 
 /**
@@ -43,28 +63,6 @@ function marked(code: string): string {
   return `${EJECTED_HEADER}\n${code}`;
 }
 
-/**
- * A readable file name for a generated module.
- *
- * The type key is `<digest>_<sanitised declaring path>_<TypeName>`, which is a
- * good cache key and a terrible file name - it embeds the absolute path of
- * whoever ran the build. The digest already carries the uniqueness, so the
- * name only needs to be legible; a collision falls back to the full key.
- */
-function shortModuleName(hash: string, taken: Map<string, string>): string {
-  const existing = taken.get(hash);
-  if (existing) return existing;
-
-  const parts = hash.split("_").filter(Boolean);
-  const digest = parts[0] ?? hash;
-  const typeName = parts.length > 1 ? parts[parts.length - 1]! : "type";
-  const candidate = `wiz-${typeName}-${digest}.js`;
-
-  const claimed = new Set(taken.values());
-  const name = claimed.has(candidate) ? `wiz-virtual-${hash}.js` : candidate;
-  taken.set(hash, name);
-  return name;
-}
 
 function basenameOf(path: string): string {
   return path.replace(/\\/g, "/").split("/").pop()!;
@@ -88,7 +86,7 @@ function inlineModule(module: GeneratedModule): string {
     `const {`,
     bindings,
     `} = (() => {`,
-    module.code
+    module.files[VIRTUAL_ENTRY]!
       .split("\n")
       .map((line) => `  ${line.replace(/^export /, "")}`)
       .join("\n"),
@@ -223,18 +221,23 @@ export function ejectProject(
     let code = result.code;
     const emitted: EjectedFile[] = [];
 
-    for (const [specifier, module] of result.modules) {
+    for (const [root, module] of result.modules) {
       const short = shortModuleName(module.hash, shortNames);
-      // The type key carries the declaring file's absolute path, which makes a
-      // usable cache key and an unusable file name.
-      code = code.replaceAll(specifier, `./${short}`);
+      // The root is the directory the import starts with, so swapping it keeps
+      // the file name inside - `./wiz-virtual/<key>/index.js` becomes
+      // `./wiz-User-<digest>/index.js`, still relative, still named for the type.
+      code = code.replaceAll(root, `./${short}`);
 
-      const modulePath = dir === "." ? short : `${dir}/${short}`;
-      // One generated module is often imported from several files.
-      if (written.has(modulePath)) continue;
-      written.add(modulePath);
-      emitted.push({ path: modulePath, contents: marked(module.code) });
+      const moduleDir = dir === "." ? short : `${dir}/${short}`;
+      for (const [file, contents] of Object.entries(module.files)) {
+        // One generated module is often imported from several files.
+        const target = `${moduleDir}/${file}`;
+        if (written.has(target)) continue;
+        written.add(target);
+        emitted.push({ path: target, contents: marked(contents) });
+      }
     }
+    void VIRTUAL_ENTRY;
 
     // Untouched files are copied byte for byte, so the tree still runs; only
     // what wiz rewrote carries the marker.

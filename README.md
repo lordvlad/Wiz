@@ -81,9 +81,28 @@ are exported for tests.
 | `openapiSchema<[A, B]>(base?, ops?)` | an OpenAPI 3.0 or 3.1 document |
 | `protobufSchema<[A, B]>()` / `encodeProto` / `decodeProto` | `.proto` text and a binary codec |
 | `avroSchema<[A, B]>()` / `encodeAvro` / `decodeAvro` | `.avsc` text and a binary codec |
+| `zodSchema<T>()` | a `Promise` of a zod schema, built from the same IR |
 
 Identical types share one generated module, so `is<User>(a)` in two files
 imports the same function.
+
+`zodSchema` is the one call that reaches for a package: zod is an **optional
+peer dependency**, so the generated module never names it. The plugin writes
+`() => import("zod")` at the callsite instead, where the package resolves, and
+the import runs on first use — a program that asks for no zod schema neither
+loads zod nor needs it installed. The promise is memoised per type, so every
+callsite shares one schema:
+
+```ts
+const userSchema = await zodSchema<User>();
+userSchema.parse(input); // a real zod schema, from your own copy of zod
+```
+
+`@minLength`, `@min`, `@pattern`, `@format email` and the rest reach the schema
+as `.min()`, `.regex()` and `.email()`, and the emitted schema is tested to
+return the same verdict as the generated validator on a shared corpus. What zod
+cannot say — a tuple with a rest element, a symbol — throws when the schema is
+built, rather than validating loosely.
 
 `is` is a type predicate, so it narrows:
 
@@ -465,7 +484,7 @@ flowchart LR
   IR(("IR<br>types · service · api"))
 
   subgraph back[back ends: generators]
-    SC["schema · validator<br>· keys"]
+    SC["schema · validator<br>· keys · zod"]
     OP["OpenAPI<br>document"]
     PB["protobuf · avro<br>· arrow codecs"]
     TC["TS client<br>model · api · codec<br>· transport"]

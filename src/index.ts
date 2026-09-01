@@ -280,6 +280,34 @@ export function arrowSchema<TTypes extends unknown[]>(
   throw new PluginInactiveError("arrowSchema");
 }
 
+/**
+ * The part of a zod schema a caller reaches for first.
+ *
+ * Declared structurally so wiz never imports zod itself: zod is an optional
+ * peer dependency, and a type-only import here would make it a required one
+ * for everybody who typechecks against this package. The object that arrives
+ * at runtime is a real zod schema built by the caller's own copy, so anything
+ * else zod offers is reachable by widening this type at the callsite.
+ */
+export interface ZodSchemaLike<T> {
+  parse(data: unknown): T;
+  safeParse(
+    data: unknown
+  ): { success: true; data: T } | { success: false; error: unknown };
+}
+
+/**
+ * A zod schema for `T`, built from the same IR the validator and JSON Schema
+ * come from.
+ *
+ * It is a promise because zod is loaded lazily: the generated module imports
+ * zod the first time this is awaited, so a program that never asks for a zod
+ * schema never loads zod - and never needs it installed.
+ */
+export function zodSchema<T>(): Promise<ZodSchemaLike<T>> {
+  throw new PluginInactiveError("zodSchema");
+}
+
 // `wizPlugin` is deliberately NOT re-exported here: it pulls in the TypeScript
 // compiler, and importing the runtime must never drag that into an app bundle.
 // Build tooling imports it from "wiz/plugin". The logger contract is dependency

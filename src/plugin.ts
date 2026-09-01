@@ -12,9 +12,11 @@ import {
 import { defaultLogger, type WizLogger } from "./logger.ts";
 import { getRegisteredType, registerType } from "./registry.ts";
 import {
-  generateVirtualModuleCode,
+  VIRTUAL_ENTRY,
+  virtualGenerator,
   type VirtualModuleOptions,
 } from "./generators/virtualGenerator.ts";
+import { generate, type GeneratedFiles } from "./generators/generator.ts";
 import { setupVirtualModuleLifecycle } from "./virtualPlugin.ts";
 import { getTypeKey, type TypeIR } from "./types.ts";
 
@@ -36,6 +38,7 @@ const HELPER_FUNCTIONS = new Set([
   "encodeArrow",
   "decodeArrow",
   "arrowSchema",
+  "zodSchema",
 ]);
 
 /**
@@ -124,6 +127,7 @@ export const VIRTUAL_EXPORTS: Record<string, string> = {
   encodeArrow: "__wiz_encodeArrow",
   decodeArrow: "__wiz_decodeArrow",
   arrowSchema: "__wiz_arrowSchema",
+  zodSchema: "__wiz_zodSchema",
 };
 
 export function localAlias(exportName: string, hash: string): string {
@@ -131,7 +135,12 @@ export function localAlias(exportName: string, hash: string): string {
 }
 /** One generated module, and the names the rewritten code takes from it. */
 export interface GeneratedModule {
-  code: string;
+  /**
+   * The generator's file map, keyed by mount root - the directory prefix the
+   * rewritten import lives under. `index.js` is the entry whose exports the
+   * callsites bind; any other file is the generator's own to import from it.
+   */
+  files: GeneratedFiles;
   /**
    * Export names actually used, in the order they were requested. An inlining
    * caller needs these: the module defines far more than any one file uses.
@@ -144,7 +153,7 @@ export interface GeneratedModule {
 export interface TransformResult {
   /** The rewritten source. */
   code: string;
-  /** Generated modules by import specifier, exactly as `code` refers to them. */
+  /** Generated modules by mount root, the prefix `code`'s imports start with. */
   modules: Map<string, GeneratedModule>;
   /** False when the file had nothing for wiz to do. */
   changed: boolean;
@@ -392,6 +401,35 @@ export function transformSource(options: TransformOptions): TransformResult {
                 wantExport("optionalKeys");
                 return context.factory.createIdentifier(`__wiz_optKeys_${hash}`);
               }
+              case "zodSchema": {
+                // A payload, not a bare export: the module's content depends
+                // on wanting zod at all, so the key must too.
+                const key = registerPayload("zodSchema", { zod: true });
+                // The loader is written here, in the consumer's own file,
+                // because that is where `zod` resolves: a virtual module has
+                // no place on disk to resolve a package from. It stays a
+                // dynamic import, so zod loads on first use and never if the
+                // schema goes unused.
+                const loader = context.factory.createArrowFunction(
+                  undefined,
+                  undefined,
+                  [],
+                  undefined,
+                  context.factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+                  context.factory.createCallExpression(
+                    context.factory.createToken(
+                      ts.SyntaxKind.ImportKeyword
+                    ) as unknown as ts.Expression,
+                    undefined,
+                    [context.factory.createStringLiteral("zod")]
+                  )
+                );
+                return context.factory.createCallExpression(
+                  context.factory.createIdentifier(`__wiz_zodSchema_${key}`),
+                  undefined,
+                  [loader]
+                );
+              }
               case "schema": {
                 // Check version parameter (type arg or value arg)
                 let isDraft07 = false;
@@ -588,7 +626,7 @@ export function transformSource(options: TransformOptions): TransformResult {
           undefined,
           ts.factory.createNamedImports(specifiers)
         ),
-        ts.factory.createStringLiteral(`./wiz-virtual-${hash}.js`)
+        ts.factory.createStringLiteral(`./wiz-virtual/${hash}/${VIRTUAL_ENTRY}`)
       );
       importStatements.push(importDecl);
     }
@@ -614,12 +652,13 @@ export function transformSource(options: TransformOptions): TransformResult {
 
     // A module handed to a bundler carries every generator, since other files
     // share it by type key and the bundler drops the rest. Inlined code is read
-    // by a person, so it is regenerated with only what this file uses.
-    const code = inline
-      ? generateVirtualModuleCode(entry.ir, { ...entry.options, only: exports })
-      : entry.generatedCode;
+    // by a person, so it is regenerated with only what this file uses - through
+    // the same generator the registry ran, not a second emission path.
+    const files = inline
+      ? generate(entry.ir, virtualGenerator, { ...entry.options, only: exports })
+      : entry.files;
 
-    modules.set(`./wiz-virtual-${hash}.js`, { code, exports, hash });
+    modules.set(`./wiz-virtual/${hash}`, { files, exports, hash });
   }
 
   return { code: transformedCode, modules, changed: true };

@@ -1,5 +1,9 @@
 import {
-  generateVirtualModuleCode,
+  generate,
+  type GeneratedFiles,
+} from "./generators/generator.ts";
+import {
+  virtualGenerator,
   type VirtualModuleOptions,
 } from "./generators/virtualGenerator.ts";
 import { normalizeServiceMethod } from "./ir/service.ts";
@@ -12,7 +16,8 @@ export interface RegisteredType {
    */
   key: string;
   ir: TypeIR;
-  generatedCode: string;
+  /** The generated file map, mounted by the plugin under `wiz-virtual/<key>/`. */
+  files: GeneratedFiles;
   /** Kept so a caller wanting a different subset can regenerate faithfully. */
   options?: VirtualModuleOptions;
 }
@@ -46,6 +51,7 @@ function payloadKey(options: VirtualModuleOptions): string {
       a: namedTypesKey(options.avroSchemaTypes),
       w: namedTypesKey(options.arrowSchemaTypes),
       r: options.arrow ?? false,
+      z: options.zod ?? false,
       // `only` is deliberately absent: it is applied when the module is
       // emitted (`generateVirtualModuleCode(..., { only })`), never at
       // registration, so it cannot distinguish two registered modules.
@@ -72,15 +78,15 @@ export function registerType(
   const registered: RegisteredType = {
     key,
     ir,
-    generatedCode: generateVirtualModuleCode(ir, options),
+    files: generate(ir, virtualGenerator, options ?? {}),
     options,
   };
   TypeRegistry.set(key, registered);
   return registered;
 }
 
-export function getTypeModule(key: string): string | undefined {
-  return TypeRegistry.get(key)?.generatedCode;
+export function getTypeModuleFiles(key: string): GeneratedFiles | undefined {
+  return TypeRegistry.get(key)?.files;
 }
 
 /** The whole entry, for a caller that needs to regenerate a subset. */

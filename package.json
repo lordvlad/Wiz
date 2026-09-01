@@ -26,9 +26,16 @@
     "avsc": "^5.7.9",
     "hono": "^4.13.1",
     "protobufjs": "^8.7.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "zod": "^3.24.0"
   },
   "peerDependencies": {
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "zod": "^3.24.0"
+  },
+  "peerDependenciesMeta": {
+    "zod": {
+      "optional": true
+    }
   }
 }
