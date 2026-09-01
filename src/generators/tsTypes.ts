@@ -208,8 +208,17 @@ export function typeBodyText(
       return literalText(ir.value);
     case "object":
       return objectText(ir, identifiers, indent);
-    case "array":
-      return `${parenthesized(typeText(ir.element, identifiers, indent))}[]`;
+    case "array": {
+      const elemText = typeText(ir.element, identifiers, indent);
+      if (
+        ir.element.kind === "union" ||
+        ir.element.kind === "intersection" ||
+        ir.element.kind === "object"
+      ) {
+        return `Array<${elemText}>`;
+      }
+      return `${parenthesized(elemText)}[]`;
+    }
     case "tuple": {
       const elements = ir.elements.map(
         (element) => `${typeText(element.type, identifiers, indent)}${element.optional ? " | undefined" : ""}`

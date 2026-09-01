@@ -80,22 +80,35 @@ function encodeExpr(ir: TypeIR, expr: string): string {
         "_item"
       )}) : ${expr})`;
 
-    case "record":
-      return `(${expr} && typeof ${expr} === "object" ? Object.fromEntries(Object.entries(${expr}).map(([_k, _v]) => [_k, ${encodeExpr(
-        ir.valueType,
-        "_v"
-      )}])) : ${expr})`;
-
     case "union":
-    case "intersection":
+    case "intersection": {
+      const branches: string[] = [];
+      for (const t of ir.types) {
+        if (needsTransform(t)) {
+          if (t.kind === "object") {
+            const propsToTransform = t.properties.filter((p) => needsTransform(p.type));
+            for (const p of propsToTransform) {
+              branches.push(
+                `if (_v[${JSON.stringify(p.name)}] !== undefined) _out[${JSON.stringify(p.name)}] = ${encodeExpr(p.type, `_v[${JSON.stringify(p.name)}]`)};`
+              );
+            }
+          }
+        }
+      }
       return `(() => {
         const _v = ${expr};
+        if (_v === null || _v === undefined) return _v;
         if (typeof _v === "bigint") return String(_v);
         if (_v instanceof Date) return _v.toISOString();
         if (_v instanceof Uint8Array) return typeof Buffer !== "undefined" ? Buffer.from(_v).toString("base64") : btoa(Array.from(_v, (x) => String.fromCharCode(x)).join(""));
+        if (typeof _v === "object") {
+          const _out = Array.isArray(_v) ? [..._v] : { ..._v };
+          ${branches.join("\n          ")}
+          return _out;
+        }
         return _v;
       })()`;
-
+    }
     default:
       return expr;
   }
@@ -171,6 +184,22 @@ function decodeStatements(ir: TypeIR, target: string): string[] {
         ];
       }
       return [];
+    }
+    case "union":
+    case "intersection": {
+      const stmts: string[] = [
+        `if (typeof ${target} === "string") {`,
+        `  if (/^-?\\d+$/.test(${target})) { try { ${target} = BigInt(${target}); } catch {} }`,
+        `  else if (!Number.isNaN(Date.parse(${target}))) { ${target} = new Date(${target}); }`,
+        `}`,
+      ];
+      for (const t of ir.types) {
+        if (needsTransform(t)) {
+          const subStmts = decodeStatements(t, target);
+          if (subStmts.length > 0) stmts.push(...subStmts);
+        }
+      }
+      return stmts;
     }
     default:
       return [];

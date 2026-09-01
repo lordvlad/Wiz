@@ -23,7 +23,7 @@ export function generateTypeCheckExpression(ir: TypeIR, varName: string): string
         case "bytes":
           return `${varName} instanceof Uint8Array || ${varName} instanceof ArrayBuffer`;
         case "date":
-          return `${varName} instanceof Date && !Number.isNaN(${varName}.getTime())`;
+          return `((${varName} instanceof Date || (typeof ${varName} === "object" && ${varName} !== null && typeof ${varName}.getTime === "function")) && !Number.isNaN(${varName}.getTime()))`;
         case "unknown":
         case "any":
           return `true`;

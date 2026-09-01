@@ -92,7 +92,7 @@ describe("TypeIR as TypeScript", () => {
     expect(typeText(union, NONE)).toBe("string | number");
 
     const array: TypeIR = { id: "a", kind: "array", element: union };
-    expect(typeText(array, NONE)).toBe("(string | number)[]");
+    expect(typeText(array, NONE)).toBe("Array<string | number>");
 
     const tuple: TypeIR = {
       id: "t",
