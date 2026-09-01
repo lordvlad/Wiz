@@ -367,10 +367,11 @@ types and `api.ts` with its operations. Every operation takes exactly the
 parameters it declares — `path`, `query`, `headers`, `cookie`, `body` — and is
 reachable two ways: as a module-level function driven by `configure()`, or
 through `createClient()` when one process talks to several deployments. Both run
-the same interceptor chain. `--lenient` widens the parameter objects, letting
-headers carry any string entry and query any string or boolean one, for the
-gateway the document forgot to mention.
-
+the same interceptor chain, and both accept a custom `fetch` function or a
+`transport` (`HttpTransport` or `FetchLike`), symmetrical to gRPC clients.
+`--lenient` widens the parameter objects, letting headers carry any string
+entry and query any string or boolean one, for the gateway the document forgot to
+mention.
 Every call also takes a second argument — `getPetById({ path: { petId } }, {
 signal, timeoutMs: 250 })` — the same cancellation and deadline a gRPC call
 takes. `signal` reaches `fetch` untouched, and the timeout is enforced locally:

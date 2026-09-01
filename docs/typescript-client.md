@@ -188,6 +188,28 @@ const tenantA = createClient({ baseUrl: "https://a.test" });
 const tenantB = createClient({ baseUrl: "https://b.test" });
 ```
 
+### Custom Transports (`transport`)
+
+Symmetrical to gRPC clients, HTTP clients allow overriding how requests travel via the `transport` configuration option:
+
+```ts
+import { createClient, type HttpTransport, type Call } from "./api.ts";
+
+const customTransport: HttpTransport = {
+  async call(call: Call): Promise<Response> {
+    // Custom transport logic, mock handlers, or alternative fetch wrappers
+    return new Response(JSON.stringify({ id: "1", name: "Mock" }), { status: 200 });
+  },
+};
+
+const client = createClient({
+  baseUrl: "https://api.example.com",
+  transport: customTransport, // Accepts an HttpTransport object or a FetchLike function
+});
+```
+
+If `transport` is omitted, the client falls back to `fetch` (`globalThis.fetch` or whatever function was passed to `fetch`).
+
 `ClientConfig` carries `baseUrl`, `fetch`, `interceptors` and `timeoutMs` (plus
 `transport` and `compression` when the document speaks gRPC). `baseUrl` is not
 taken from the document: OpenAPI `servers` describes environments, which is a

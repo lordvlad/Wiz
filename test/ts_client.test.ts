@@ -262,6 +262,7 @@ describe("emitted code compiles and runs", () => {
         signal?: AbortSignal;
       }
     ) => Promise<Response>;
+    transport?: { call(call: Sent): Promise<Response> } | ((url: string, init: unknown) => Promise<Response>);
     interceptors?: { http?: InterceptorLike[] };
   }
 
@@ -489,6 +490,30 @@ describe("emitted code compiles and runs", () => {
     });
     expect(attempts).toBe(2);
     expect(order).toEqual(["outer in", "inner in", "inner out", "outer out"]);
+  });
+
+  /**
+   * Symmetrical to gRPC, an HTTP client accepts a `transport` option that
+   * overrides `fetch`. It can be an `HttpTransport` object (`{ call(call) }`) or
+   * a custom fetch function.
+   */
+  test("custom HttpTransport overrides fetch symmetrically to gRPC", async () => {
+    const client = await load(() => json({}), []);
+    const calls: Sent[] = [];
+
+    const customClient = client.createClient({
+      baseUrl: "https://t.test",
+      transport: {
+        async call(c: Sent) {
+          calls.push(c);
+          return json({ id: "t1", name: "TransportPet" });
+        },
+      },
+    });
+
+    const pet = await customClient.getPetById({ path: { petId: "t1" } });
+    expect(pet).toEqual({ id: "t1", name: "TransportPet" });
+    expect(calls[0]!.url).toBe("https://t.test/pets/t1");
   });
 
   /**

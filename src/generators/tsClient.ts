@@ -514,6 +514,8 @@ export interface Call {
   headers: Record<string, string>;
   /** JSON text for an HTTP call, a framed protobuf message for a gRPC one. */
   body?: string | Uint8Array;
+  /** Signal for cancellation or local timeout. */
+  signal?: AbortSignal;
 }
 
 /** A call and what came back, before the status is judged. */
@@ -604,6 +606,50 @@ export type FetchLike = (
   }
 ) => Promise<Response>;
 
+
+/**
+ * An HTTP transport that executes an outgoing call.
+ *
+ * Symmetrical to \`GrpcTransport\`: a custom transport receives the \`Call\` and
+ * returns a \`Response\`.
+ */
+export interface HttpTransport {
+  call(call: Call): Promise<Response>;
+}
+
+function httpTransport(config: ClientConfig): HttpTransport {
+  if (config.transport) {
+    if (typeof config.transport === "function") {
+      const fn = config.transport;
+      return {
+        call: (c) =>
+          fn(c.url, {
+            method: c.method,
+            headers: c.headers,
+            body: c.body,
+            signal: c.signal,
+          }),
+      };
+    }
+    if (
+      typeof config.transport === "object" &&
+      "call" in config.transport &&
+      !("duplex" in config.transport)
+    ) {
+      return config.transport;
+    }
+  }
+  return {
+    call: (c) =>
+      config.fetch(c.url, {
+        method: c.method,
+        headers: c.headers,
+        body: c.body,
+        signal: c.signal,
+      }),
+  };
+}
+
 export interface ClientConfig {
   /**
    * Prefix for every path. The document does not carry it: OpenAPI \`servers\`
@@ -617,6 +663,7 @@ export interface ClientConfig {
    * requiring those would make every stub implement them.
    */
   fetch: FetchLike;
+__TRANSPORT_CONFIG__
   /**
    * Wrappers around every call, outermost first. This is where an
    * Authorization header comes from, and where a retry or a log belongs.
@@ -722,22 +769,24 @@ async function send(
   call: Call,
   options: HttpCallOptions | undefined
 ): Promise<unknown> {
+  const http = httpTransport(config);
+
   // The signal is built inside the attempt, not once per call, so an
   // interceptor that calls \`next\` again gets a fresh deadline rather than one
   // that has already fired. The caller's own signal spans every attempt.
-  const invoke = async (outgoing: Call): Promise<CallResult> => ({
-    call: outgoing,
-    response: await config.fetch(outgoing.url, {
-      method: outgoing.method,
-      headers: outgoing.headers,
-      body: outgoing.body,
+  const invoke = async (outgoing: Call): Promise<CallResult> => {
+    const activeCall: Call = {
+      ...outgoing,
       signal: effectiveSignal(
         options?.signal,
         options?.timeoutMs ?? config.timeoutMs
       ),
-    }),
-  });
-
+    };
+    return {
+      call: activeCall,
+      response: await http.call(activeCall),
+    };
+  };
   // The status is judged after the chain, so an interceptor sees the response
   // that a retry or a token refresh has to look at, not an exception.
   const settled = await __HTTP_CHAIN__(call);
@@ -1298,10 +1347,13 @@ function fetchTransport(config: ClientConfig): GrpcTransport {
 
           const requestEncoding = (call.headers["grpc-encoding"] ??
             "identity") as GrpcCompression;
-          const response = await config.fetch(call.url, {
+          const http = httpTransport(config);
+          const response = await http.call({
             method: "POST",
+            url: call.url,
             headers: { ...call.headers, "content-type": GRPC_WEB_MIME, accept: GRPC_WEB_MIME, "x-grpc-web": "1" },
             body: await frameMessage(collected[0]!, requestEncoding),
+            signal: call.signal,
           });
 
           const received: Record<string, string> = {};
@@ -1362,7 +1414,10 @@ function fetchTransport(config: ClientConfig): GrpcTransport {
 }
 
 function grpcTransport(config: ClientConfig): GrpcTransport {
-  return config.transport ?? fetchTransport(config);
+  if (config.transport && typeof config.transport === "object" && "duplex" in config.transport) {
+    return config.transport;
+  }
+  return fetchTransport(config);
 }
 
 /**
@@ -1653,21 +1708,29 @@ function emitFiles(
   // The gRPC fields only exist on a client that has rpcs to make, so the shared
   // configuration carries them conditionally rather than always.
   const speaksGrpc = grpcMethods.length > 0;
-  const grpcConfig = speaksGrpc
+  const transportConfig = speaksGrpc
     ? [
         "  /**",
-        "   * How gRPC calls travel. Defaults to gRPC-Web over `fetch`, which runs",
-        "   * anywhere; `createHttp2Transport()` from ./transport.ts speaks gRPC",
-        "   * proper and is the only one that can stream requests.",
+        "   * Custom transport. Defaults to `fetch` for HTTP or gRPC-Web over `fetch`",
+        "   * for gRPC; `createHttp2Transport()` speaks gRPC proper over HTTP/2.",
         "   */",
-        "  transport?: GrpcTransport;",
+        "  transport?: GrpcTransport | HttpTransport | FetchLike;",
+      ].join("\n")
+    : [
+        "  /**",
+        "   * Custom HTTP transport. Overrides `fetch` when provided.",
+        "   */",
+        "  transport?: HttpTransport | FetchLike;",
+      ].join("\n");
+
+  const grpcConfig = speaksGrpc
+    ? [
         "  /**",
         "   * Compresses outgoing messages. A client always advertises that it",
         "   * accepts `gzip` and `deflate`, so a server may compress its replies",
         "   * whatever this is set to.",
         "   */",
         "  compression?: GrpcCompression;",
-        // `timeoutMs` is shared with HTTP, so it lives on ClientConfig proper.
         "",
       ].join("\n")
     : "";
@@ -1702,6 +1765,7 @@ function emitFiles(
       ? `import { ${codecImports.join(", ")} } from "./${CODEC_FILE}";\n`
       : "",
     `\n${PRELUDE.replace("__GRPC_CONFIG__", grpcConfig)
+      .replace("__TRANSPORT_CONFIG__", transportConfig)
       .replace("__INTERCEPTOR_KEYS__", interceptorKeys)
       .replace(
         "__HTTP_CHAIN__",
@@ -1710,7 +1774,6 @@ function emitFiles(
     grpcMethods.length > 0 ? `\n${GRPC_PRELUDE}\n` : "",
     operations.length > 0 ? `\n${declarations}\n` : "",
   ].join("");
-
   const files: GeneratedFiles = { [MODEL_FILE]: model, [API_FILE]: api };
   if (codecTypes.length > 0) {
     const parts: string[] = [];
