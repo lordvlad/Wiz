@@ -15,6 +15,7 @@ import {
   type GeneratedFiles,
   type Generator,
 } from "../generators/generator.ts";
+import type { ValidateTarget } from "../generators/tsClient.ts";
 import type { ApiIR } from "../ir/api.ts";
 import { consoleLogger } from "../logger.ts";
 
@@ -32,6 +33,7 @@ import { consoleLogger } from "../logger.ts";
 interface GenerateOptions {
   /** Passed through, not interpreted: a generator decides what it relaxes. */
   lenient: boolean;
+  validate?: boolean | ValidateTarget[];
 }
 
 /**
@@ -52,7 +54,27 @@ interface Invocation {
   /** Undefined means stdout; a literal `-` is normalized to it. */
   outdir: string | undefined;
   lenient: boolean;
+  validate?: boolean | ValidateTarget[];
   format: ExtractApiOptions["format"];
+}
+
+/** The parts of a call `--validate` can name, in the order they are checked. */
+const VALIDATE_TARGETS = ["path", "query", "headers", "body", "response"] as const;
+
+function isValidateTarget(value: string): value is ValidateTarget {
+  return (VALIDATE_TARGETS as readonly string[]).includes(value);
+}
+
+function parseValidateTargets(raw: string): ValidateTarget[] {
+  const parts = raw.split(",").map((part) => part.trim());
+  for (const part of parts) {
+    if (!isValidateTarget(part)) {
+      throw new Error(
+        `unknown validate target '${part}'; expected ${VALIDATE_TARGETS.join(", ")}`
+      );
+    }
+  }
+  return parts as ValidateTarget[];
 }
 
 /**
@@ -60,11 +82,13 @@ interface Invocation {
  * command reports the same way, so one catch in {@link runGenerate} covers the
  * argument errors, the load errors and the extractor's own.
  */
+
 function parse(argv: string[]): Invocation {
   let generator: string | undefined;
   let input: string | undefined;
   let outdir: string | undefined;
   let lenient = false;
+  let validate: boolean | ValidateTarget[] | undefined;
   let format: ExtractApiOptions["format"];
 
   /**
@@ -103,6 +127,32 @@ function parse(argv: string[]): Invocation {
       lenient = true;
       continue;
     }
+    // The one flag whose value is optional: bare it means "everything", and a
+    // comma-separated list narrows it. The value is only claimed when it can
+    // be one - otherwise `--validate document.json` would eat the input - but
+    // a comma is unambiguous enough to be worth a precise error on a typo,
+    // since no input filename this command accepts contains one.
+    if (arg === "--validate" || arg.startsWith("--validate=")) {
+      if (arg.startsWith("--validate=")) {
+        const raw = arg.slice("--validate=".length);
+        validate = raw.length > 0 ? parseValidateTargets(raw) : true;
+        continue;
+      }
+
+      const next = argv[i + 1];
+      const claimable =
+        next !== undefined &&
+        (!next.startsWith("-") || next === "-") &&
+        (next.includes(",") || isValidateTarget(next));
+
+      if (claimable) {
+        validate = parseValidateTargets(next);
+        i++;
+      } else {
+        validate = true;
+      }
+      continue;
+    }
     // A bare `-` is the stdin positional, so only longer dashed words are flags.
     if (arg.startsWith("-") && arg !== "-") {
       throw new Error(`unknown option '${arg}'`);
@@ -124,6 +174,7 @@ function parse(argv: string[]): Invocation {
     input: input === "-" ? undefined : input,
     outdir: outdir === "-" ? undefined : outdir,
     lenient,
+    validate,
     format,
   };
 }
@@ -253,7 +304,7 @@ export async function runGenerate(argv: string[]): Promise<number> {
     const files = generate(
       ir,
       generator,
-      { lenient: invocation.lenient },
+      { lenient: invocation.lenient, validate: invocation.validate },
       consoleLogger
     );
 

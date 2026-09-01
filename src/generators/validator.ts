@@ -179,7 +179,7 @@ function generateConstraintCheckStatements(
   return statements;
 }
 
-function generateValidationBlock(
+export function generateValidationBlock(
   ir: TypeIR,
   varName: string,
   pathVar: string,
@@ -468,8 +468,14 @@ const RUNTIME_HELPERS: Record<string, string> = {
   ].join("\n"),
 };
 
-/** The helpers this type's constraints actually reach for. */
-function helpersFor(ir: TypeIR): string[] {
+/**
+ * Which helpers this type's constraints reach for, by key.
+ *
+ * Separate from the source so a second emitter can supply its own spelling of
+ * the same helper: {@link RUNTIME_HELPERS} is plain JS for a virtual module,
+ * and a generator writing a `.ts` file needs the annotated version instead.
+ */
+export function helperKeysFor(ir: TypeIR): string[] {
   const needed = new Set<string>();
 
   const scan = (constraints: Constraint[] | undefined): void => {
@@ -487,7 +493,12 @@ function helpersFor(ir: TypeIR): string[] {
     }
   });
 
-  return [...needed].map((key) => RUNTIME_HELPERS[key]!);
+  return [...needed];
+}
+
+/** The helpers this type's constraints actually reach for, as JS source. */
+export function helpersFor(ir: TypeIR): string[] {
+  return helperKeysFor(ir).map((key) => RUNTIME_HELPERS[key]!);
 }
 
 export function generateValidatorCode(ir: TypeIR): string {

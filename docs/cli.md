@@ -75,10 +75,11 @@ wiz generate -g wiz/generators/tsClient.ts openapi.yaml --outdir src/api
 
 | Flag | Short | Description |
 |---|---|---|
-| `--generator <name|path>` | `-g` | Generator shortcut (`reactQuery`, `tsClient`, `openrpc`) or path to a generator file. Required. |
+| `--generator <name\|path>` | `-g` | Generator shortcut (`reactQuery`, `tsClient`, `openrpc`) or path to a generator file. Required. |
 | `--outdir <dir>` | `-o` | Output directory. If omitted, JSON record is printed to stdout. |
 | `--format <fmt>` | `-f` | Override input format inference (`openapi`, `proto`, `jsonschema`). |
 | `--lenient` | | Widen parameter shapes in client generators. |
+| `--validate [parts]` | | Emit runtime checks in client generators. Bare = every part; otherwise a comma-separated list of `path`, `query`, `headers`, `body`, `response`. |
 
 ### Built-in Emitter Shortcuts
 
@@ -86,6 +87,34 @@ Passing a shortcut name to `-g` resolves directly to the bundled generator modul
 - `-g reactQuery`: React Query client generator (`model.ts`, `api.ts`, `codec.ts`, `queries.ts`, `mutations.ts`).
 - `-g tsClient`: Standard TypeScript HTTP client generator (`model.ts`, `api.ts`, `codec.ts`).
 - `-g openrpc`: OpenRPC schema and handler generator.
+
+### `--validate`
+
+The only flag whose value is optional. Bare, it validates every part of a call;
+with a comma-separated list, only the parts named:
+
+```bash
+wiz generate -g tsClient openapi.json -o src/api --validate
+wiz generate -g tsClient openapi.json -o src/api --validate path,body
+wiz generate -g tsClient openapi.json -o src/api --validate=response
+```
+
+Because the value is optional, it is only claimed from the next argument when it
+could be one, so the bare form never swallows the input path:
+
+```bash
+wiz generate -g tsClient --validate openapi.json -o src/api   # validates everything
+```
+
+A misspelled target in a list is an error rather than a silent fallback:
+
+```
+wiz generate: unknown validate target 'respones'; expected path, query, headers, body, response
+```
+
+See [typescript-client](./typescript-client.md#runtime-validation---validate) for
+what the checks cover and what they cost.
+
 ### Input Inference
 
 Input format is inferred automatically from file extension:

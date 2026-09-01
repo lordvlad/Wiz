@@ -475,9 +475,125 @@ instead of pointing at a declaration that does not exist.
 
 Annotations become doc comments: `description`, `@deprecated`, `@example`,
 `@default`. Constraints deliberately do not. `@minLength` in a comment reads as
-if it were enforced, and here nothing enforces it — for constraints that are
-actually checked, generate [JSON Schema](./json-schema.md) or a
-[zod](./zod.md) schema instead.
+if it were enforced, and by default nothing here enforces it — pass
+[`--validate`](#runtime-validation---validate) to have the client check them, or
+generate [JSON Schema](./json-schema.md) or a [zod](./zod.md) schema instead.
+
+## Runtime validation (`--validate`)
+
+By default the client trusts both ends: a request is sent as typed and a
+response is cast, not checked. `--validate` emits real checks, generated from
+the same IR the [validator](./type-introspection.md) and
+[JSON Schema](./json-schema.md) back ends read, so what is enforced is the
+document's own schema — types *and* constraints, not just shapes.
+
+```bash
+wiz generate -g tsClient openapi.json --outdir src/api --validate
+wiz generate -g tsClient openapi.json --outdir src/api --validate path,body
+```
+
+Programmatically it is the generator's own option, taking the same two forms:
+
+```ts
+generate(ir, tsClientGenerator, { validate: true });
+generate(ir, tsClientGenerator, { validate: ["response"] });
+```
+
+### What each part covers
+
+| Target | Checked | When |
+|---|---|---|
+| `path` | the `path` slot, and that it is present | before the request is built |
+| `query` | the `query` slot | before the request is built |
+| `headers` | the `headers` slot | before the request is built |
+| `body` | the request body | before the request is built |
+| `response` | the decoded success payload | after decoding, before returning |
+
+A request part is checked before the call goes out, so a request the document
+forbids never reaches the network. A required slot that is missing is itself a
+failure — which is what stops a URL going out with `undefined` in it. An
+optional slot is only checked when it is actually there.
+
+The response is checked *after* decoding, so the value that failed is the same
+value the caller would have been handed, not a second reading of the body.
+
+### The error
+
+A failed check throws `ClientValidationError`, which names the part that failed
+and carries every error rather than only the first:
+
+```ts
+import { ClientValidationError, getPet } from "./api.ts";
+
+try {
+  await getPet({ path: { petId: "abc" }, headers: { "x-token": "t" } });
+} catch (error) {
+  if (error instanceof ClientValidationError) {
+    error.target; // "path"
+    error.errors; // [{ path: "path.petId", message: "Expected length >= 5", … }]
+  }
+}
+```
+
+`ClientValidationError` is only exported by a client that validates something.
+Without the flag the type is absent, and the emitted file is **byte-identical**
+to what it was before the option existed — the feature costs nothing at all
+until it is asked for.
+
+`ApiError` is unchanged and unrelated: that is a non-2xx response, which is the
+server refusing, not the payload failing its own schema.
+
+### Performance impact
+
+This is not free, and it is worth choosing targets deliberately.
+
+**The checks are inline, monomorphic code — not a schema interpreter.** There is
+no schema object walked at runtime, no reflection and no dependency: an object
+becomes a `typeof` test per property and a comparison per constraint, which is
+what a hand-written guard would cost. Regexes are compiled once and cached
+(`__wizPattern`), and string lengths count code points rather than UTF-16 units,
+so `minLength` on a long string is a scan rather than a property read.
+
+**Request validation is O(size of the parameters)** and runs once per call,
+against objects that are almost always small. Next to a network round trip it is
+noise. Leaving `path`, `query`, `headers` and `body` on is the cheap default.
+
+**`response` is the one to think about.** It walks the whole decoded payload on
+every call, so its cost scales with response size: a 10,000-element array is
+10,000 element checks, on top of the `JSON.parse` that already happened. For a
+large-list or high-throughput endpoint that is a real cost on the hot path.
+
+Practical guidance:
+
+- **Both, in development** — this is where a server that quietly drifts from its
+  document gets caught.
+- **Requests in production, responses off** — the common production choice:
+  `--validate path,query,headers,body`. Requests are cheap to check and a bad
+  one is your bug; responses are the expensive half.
+- **Responses on for small or critical payloads** — an auth or payment response
+  is worth a full walk; a paginated list of 10,000 rows usually is not.
+- **Bundle size** grows with the number of operations and the depth of their
+  schemas, since each operation carries its own inlined checks. The three shared
+  helpers are emitted once, and only when a constraint reaches for them.
+
+Because the option is per-generation, a project that wants different answers in
+different builds runs the generator twice into different directories rather than
+branching at runtime.
+
+### Limits
+
+**Only success payloads are validated.** `response` checks the 2xx body the
+method resolves to. An error body is thrown as `ApiError.body`, unchecked.
+
+**Recursive schemas stop at the cycle.** A `$ref` back into a type already being
+checked is left alone, exactly as the other back ends leave it, so a cyclic
+document cannot generate an infinite check. Non-cyclic `$ref`s are resolved and
+fully enforced.
+
+**Only `application/json`.** The same limit as the rest of the client.
+
+**gRPC and OpenRPC operations are unaffected.** The flag reaches HTTP methods
+only; a protobuf message is validated by the wire format itself.
 
 ## Limitations
 
@@ -488,9 +604,11 @@ still emit — with the JSON schema if there is one, otherwise the first body
 listed — but nothing encodes those media types. A file upload needs a
 hand-written call.
 
-**No validation.** The response is cast, not checked: `(await send(…)) as Pet`.
-A server that returns something else produces a value that lies about its type.
-Generate a [zod](./zod.md) schema alongside if you need the check.
+**No validation by default.** The response is cast, not checked:
+`(await send(…)) as Pet`, so a server that returns something else produces a
+value that lies about its type. Pass
+[`--validate`](#runtime-validation---validate) to check requests, responses or
+both, or generate a [zod](./zod.md) schema alongside.
 
 **`servers` is ignored.** `baseUrl` is yours to set, and defaults to `""` —
 which produces relative URLs, fine in a browser talking to its own origin and

@@ -360,6 +360,7 @@ printed as JSON so it can be post-processed.
 ```bash
 wiz generate -g tsClient openapi.json --outdir src/api
 wiz generate -g reactQuery openapi.json --outdir src/api
+wiz generate -g tsClient openapi.json --outdir src/api --validate path,body
 cat openapi.yaml | wiz generate -g ./myGenerator.ts | jq -r '."model.ts"'
 ```
 
@@ -378,6 +379,24 @@ takes. `signal` reaches `fetch` untouched, and the timeout is enforced locally:
 the call aborts with a `TimeoutError` when it passes, whatever the server is
 doing. A retried attempt (an interceptor calling `next` again) gets a fresh
 deadline; `timeoutMs` can also be a default on the client or `configure()`.
+
+`--validate` emits runtime checks from the document's own schema — constraints
+included, not just types. Bare it checks everything; a comma-separated list of
+`path`, `query`, `headers`, `body`, `response` narrows it. A failure throws
+`ClientValidationError`, naming the part that failed and carrying every error.
+
+```bash
+wiz generate -g tsClient openapi.json -o src/api --validate
+wiz generate -g tsClient openapi.json -o src/api --validate path,query,headers,body
+```
+
+The checks are inlined `typeof` tests and comparisons rather than a schema
+interpreted at runtime, so request validation is negligible against a network
+round trip. `response` is the one with a real cost: it walks the whole decoded
+payload on every call, so it scales with response size — worth it for small or
+critical payloads, usually not for large lists on a hot path. Without the flag
+the emitted client is byte-identical to before, so it costs nothing until asked
+for. See [docs/typescript-client.md](./docs/typescript-client.md#runtime-validation---validate).
 
 ### Interceptors
 

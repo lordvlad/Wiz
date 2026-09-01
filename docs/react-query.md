@@ -26,6 +26,17 @@ Running `-g reactQuery` emits five files in your target output directory:
 - `queries.ts`: Options getters and hooks for `GET`, `HEAD`, and `OPTIONS` operations.
 - `mutations.ts`: Options getters and hooks for `POST`, `PUT`, `PATCH`, and `DELETE` operations.
 
+`reactQuery` builds on `tsClient`, so its flags apply here too — including
+[`--validate`](./typescript-client.md#runtime-validation---validate), which adds
+runtime checks to the `api.ts` the hooks call through. A failed check surfaces
+as the hook's `error`, so `ClientValidationError` reaches the component the same
+way an `ApiError` does. Note the performance tradeoff before enabling
+`response`: it walks every payload on every fetch, which is the expensive half.
+
+```bash
+wiz generate -g reactQuery openapi.json --outdir src/api --validate path,query,headers,body
+```
+
 ---
 
 ## Query Operations (`queries.ts`)

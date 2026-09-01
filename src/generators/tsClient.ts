@@ -12,11 +12,12 @@ import {
   type ServiceMethodBodyIR,
   type ServiceMethodIR,
 } from "../ir/service.ts";
-import { collectNamedTypes, type TypeIR } from "../types.ts";
+import { collectNamedTypes, type PropertyIR, type TypeIR } from "../types.ts";
 import type { GeneratedFiles, Generator, GeneratorContext } from "./generator.ts";
 import { generateProtobufCodecCode } from "./protobuf.ts";
 import { generateJsonCodecCode } from "./json.ts";
 import { docComment, tsDeclarations, typeIdentifiers, typeText } from "./tsTypes.ts";
+import { generateValidationBlock, helperKeysFor } from "./validator.ts";
 
 /**
  * A TypeScript HTTP client, emitted as two files a consumer can drop into a
@@ -33,6 +34,8 @@ import { docComment, tsDeclarations, typeIdentifiers, typeText } from "./tsTypes
  * one. Neither is a wrapper around a second implementation.
  */
 
+export type ValidateTarget = "path" | "query" | "body" | "headers" | "response";
+
 export interface TsClientOptions {
   /**
    * Widens the parameter objects: headers accept any string entry and query
@@ -42,6 +45,201 @@ export interface TsClientOptions {
    * gateway requires, so the escape hatch is opt-in rather than absent.
    */
   lenient?: boolean;
+  /**
+   * Validates request parameters and/or response payloads at runtime.
+   * Pass `true` to validate all parts (`path`, `query`, `body`, `headers`, `response`),
+   * or an array of specific parts to validate.
+   */
+  validate?: boolean | ValidateTarget[];
+}
+
+function isValidationEnabled(
+  options: TsClientOptions,
+  target: ValidateTarget
+): boolean {
+  if (options.validate === true) return true;
+  if (Array.isArray(options.validate)) {
+    return options.validate.includes(target);
+  }
+  return false;
+}
+
+/**
+ * The `{ petId: string }` object a parameter group is passed as, expressed as
+ * IR so the validator emitter can read it. `slotMembers` builds the same shape
+ * as TypeScript text; this builds it as a type the checks are generated from.
+ *
+ * The node is synthetic - it never enters an extracted graph - so its `id` only
+ * has to be stable and distinct within this file.
+ */
+function parameterGroupTypeIR(
+  parameters: ParameterIR[],
+  group: ParameterIR["in"]
+): TypeIR | undefined {
+  const usable = parameters.filter((parameter) => !isAbsent(parameter.type));
+  if (usable.length === 0) return undefined;
+
+  return {
+    id: `wiz:parameters:${group}`,
+    kind: "object",
+    properties: usable.map((parameter) => ({
+      name: parameter.name,
+      type: parameter.type,
+      optional: !parameter.required,
+      readonly: false,
+      description: parameter.description,
+    })),
+  };
+}
+
+/**
+ * Resolves `$ref` nodes against the document's named types.
+ *
+ * The validator emitter has no `ref` case - a ref is where it stops, which is
+ * what keeps a cyclic type from generating an infinite check. An OpenAPI
+ * document names every reused schema, though, so leaving the refs in place
+ * would emit a client that validates nothing but inline schemas. Inlining them
+ * here keeps the emitter's contract and still checks what the document said,
+ * and `seen` preserves the stopping behaviour exactly where it matters: a type
+ * already being inlined is a cycle, and stays a ref.
+ */
+function inlineRefs(
+  ir: TypeIR,
+  declared: ReadonlyMap<string, TypeIR>,
+  seen: ReadonlySet<string> = new Set()
+): TypeIR {
+  if (ir.kind === "ref") {
+    if (seen.has(ir.targetId)) return ir;
+    const target = declared.get(ir.targetId);
+    if (!target) return ir;
+    return inlineRefs(target, declared, new Set([...seen, ir.targetId]));
+  }
+
+  const next = ir.name !== undefined ? new Set([...seen, ir.name]) : seen;
+
+  switch (ir.kind) {
+    case "object":
+      return {
+        ...ir,
+        properties: ir.properties.map((property) => ({
+          ...property,
+          type: inlineRefs(property.type, declared, next),
+        })),
+        additionalProperties:
+          typeof ir.additionalProperties === "object"
+            ? inlineRefs(ir.additionalProperties, declared, next)
+            : ir.additionalProperties,
+      };
+    case "array":
+      return { ...ir, element: inlineRefs(ir.element, declared, next) };
+    case "tuple":
+      return {
+        ...ir,
+        elements: ir.elements.map((element) => ({
+          ...element,
+          type: inlineRefs(element.type, declared, next),
+        })),
+        rest: ir.rest ? inlineRefs(ir.rest, declared, next) : ir.rest,
+      };
+    case "union":
+    case "intersection":
+      return {
+        ...ir,
+        types: ir.types.map((member) => inlineRefs(member, declared, next)),
+      };
+    case "record":
+      return {
+        ...ir,
+        keyType: inlineRefs(ir.keyType, declared, next),
+        valueType: inlineRefs(ir.valueType, declared, next),
+      };
+    default:
+      return ir;
+  }
+}
+/**
+ * The validator's runtime helpers, annotated.
+ *
+ * `validator.ts` emits these as plain JS because its output is a virtual
+ * module that is never typechecked. This file writes a `.ts` a consumer
+ * compiles under their own `strict`, where an unannotated parameter is an
+ * error, so the same three helpers are restated with types. Behaviour is
+ * identical by construction: only the annotations differ.
+ */
+const TYPED_VALIDATION_HELPERS: Record<string, string> = {
+  length: [
+    `function __wizLength(str: string): number {`,
+    `  // JSON Schema counts characters, so an astral character such as an emoji`,
+    `  // is one, where String.length would call it two.`,
+    `  let length = 0;`,
+    `  let pos = 0;`,
+    `  while (pos < str.length) {`,
+    `    length++;`,
+    `    const value = str.charCodeAt(pos++);`,
+    `    if (value >= 0xd800 && value <= 0xdbff && pos < str.length) {`,
+    `      if ((str.charCodeAt(pos) & 0xfc00) === 0xdc00) pos++;`,
+    `    }`,
+    `  }`,
+    `  return length;`,
+    `}`,
+  ].join("\n"),
+
+  unique: [
+    `function __wizEqual(a: unknown, b: unknown): boolean {`,
+    `  if (a === b) return true;`,
+    `  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;`,
+    `  if (Array.isArray(a) !== Array.isArray(b)) return false;`,
+    `  if (Array.isArray(a)) {`,
+    `    const other = b as unknown[];`,
+    `    if (a.length !== other.length) return false;`,
+    `    return a.every((item, i) => __wizEqual(item, other[i]));`,
+    `  }`,
+    `  const left = a as Record<string, unknown>;`,
+    `  const right = b as Record<string, unknown>;`,
+    `  const keys = Object.keys(left);`,
+    `  if (keys.length !== Object.keys(right).length) return false;`,
+    `  // Key order carries no meaning in JSON, so it carries none here.`,
+    `  return keys.every((k) => Object.hasOwn(right, k) && __wizEqual(left[k], right[k]));`,
+    `}`,
+    ``,
+    `function __wizUnique(items: unknown[]): boolean {`,
+    `  for (let i = 1; i < items.length; i++) {`,
+    `    for (let j = 0; j < i; j++) {`,
+    `      if (__wizEqual(items[i], items[j])) return false;`,
+    `    }`,
+    `  }`,
+    `  return true;`,
+    `}`,
+  ].join("\n"),
+
+  pattern: [
+    `const __wizPatterns = new Map<string, RegExp>();`,
+    `function __wizPattern(src: string): RegExp {`,
+    `  // A pattern is a constant, so compiling it per call is pure waste; a Map`,
+    `  // rather than an object so a pattern of "__proto__" cannot reach one.`,
+    `  let re = __wizPatterns.get(src);`,
+    `  if (re === undefined) {`,
+    `    re = new RegExp(src);`,
+    `    __wizPatterns.set(src, re);`,
+    `  }`,
+    `  return re;`,
+    `}`,
+  ].join("\n"),
+};
+
+/**
+ * The checks report where a failure was, and the emitter builds that path by
+ * concatenating onto a root it is handed. Handing it a string *literal* makes
+ * every `root ? root + "." + key : key` a constant-truthy test, which is a
+ * `strict` error in the file this generator writes. A widened local is the
+ * same value without the literal type.
+ */
+function validationRoot(target: ValidateTarget): { declaration: string; expression: string } {
+  const name = `__wizPath${target.charAt(0).toUpperCase()}${target.slice(1)}`;
+  return {
+    declaration: `const ${name}: string = ${JSON.stringify(target)};`,
+    expression: name,
+  };
 }
 
 const CODEC_FILE = "codec.ts";
@@ -304,6 +502,7 @@ function httpOperation(
   method: HttpServiceMethodIR,
   name: string,
   identifiers: ReadonlyMap<string, string>,
+  declared: ReadonlyMap<string, TypeIR>,
   options: TsClientOptions,
   onSkipped: (mimetype: string) => void
 ): Operation {
@@ -361,12 +560,129 @@ function httpOperation(
   ].join("\n");
 
   const send = `send(config, {\n${call}\n      }, callOptions)`;
-  const body =
-    returns === "void"
-      ? `      await ${send};`
-      : decode
-        ? `      return ${decode}(await ${send} as string) as ${returns};`
-        : `      return (await ${send}) as ${returns};`;
+
+  const parameters = method.request.parameters ?? [];
+  const grouped = (location: ParameterIR["in"]) =>
+    parameters.filter((parameter) => parameter.in === location);
+
+  const resolved = (ir: TypeIR | undefined): TypeIR | undefined =>
+    ir ? inlineRefs(ir, declared) : undefined;
+
+  const pathTypeIR = resolved(parameterGroupTypeIR(grouped("path"), "path"));
+  const queryTypeIR = resolved(parameterGroupTypeIR(grouped("query"), "query"));
+  const headerTypeIR = resolved(parameterGroupTypeIR(grouped("header"), "header"));
+  const bodyTypeIR = resolved(jsonBody(method.request.body, onSkipped));
+  const responseTypeIR = resolved(jsonBody(chosen[0]?.body, onSkipped));
+
+  /**
+   * One slot's checks, as a guarded block.
+   *
+   * A slot the caller may legitimately omit is only checked when it is there;
+   * a required one that is missing is itself a failure, and saying so here is
+   * what stops the request going out with a URL that has `undefined` in it.
+   */
+  const slotCheck = (
+    target: ValidateTarget,
+    ir: TypeIR,
+    expression: string,
+    required: boolean,
+    missing: string
+  ): string => {
+    const root = validationRoot(target);
+    const lines = [
+      `      if (${expression} !== undefined) {`,
+      `        const errors: ValidationError[] = [];`,
+      `        ${root.declaration}`,
+      generateValidationBlock(ir, expression, root.expression)
+        .split("\n")
+        .map((line) => `        ${line}`)
+        .join("\n"),
+      `        if (errors.length > 0) throw new ClientValidationError(${JSON.stringify(target)}, errors);`,
+    ];
+    if (required) {
+      lines.push(`      } else {`);
+      lines.push(
+        `        throw new ClientValidationError(${JSON.stringify(target)}, [{ path: ${JSON.stringify(target)}, message: ${JSON.stringify(missing)} }]);`
+      );
+    }
+    lines.push(`      }`);
+    return lines.join("\n");
+  };
+
+  const requestChecks: string[] = [];
+
+  if (pathTypeIR && isValidationEnabled(options, "path")) {
+    // A path parameter is always required: it is part of the URL.
+    requestChecks.push(
+      slotCheck("path", pathTypeIR, `${access}.path`, true, "Missing required path parameters")
+    );
+  }
+  if (queryTypeIR && isValidationEnabled(options, "query")) {
+    requestChecks.push(
+      slotCheck(
+        "query",
+        queryTypeIR,
+        `${access}.query`,
+        grouped("query").some((parameter) => parameter.required),
+        "Missing required query parameters"
+      )
+    );
+  }
+  if (headerTypeIR && isValidationEnabled(options, "headers")) {
+    requestChecks.push(
+      slotCheck(
+        "headers",
+        headerTypeIR,
+        `${access}.headers`,
+        grouped("header").some((parameter) => parameter.required),
+        "Missing required header parameters"
+      )
+    );
+  }
+  if (bodyTypeIR && isValidationEnabled(options, "body")) {
+    requestChecks.push(
+      slotCheck(
+        "body",
+        bodyTypeIR,
+        `${access}.body`,
+        method.request.bodyRequired !== false,
+        "Missing required request body"
+      )
+    );
+  }
+
+  const valPrefix = requestChecks.length > 0 ? `${requestChecks.join("\n")}\n` : "";
+
+  const validatesResponse =
+    responseTypeIR !== undefined && isValidationEnabled(options, "response");
+
+  // The response is checked after decoding, so what the caller is handed and
+  // what was checked are the same value rather than two readings of one body.
+  const responseCheck = (): string => {
+    const root = validationRoot("response");
+    return [
+      `      const errors: ValidationError[] = [];`,
+      `      ${root.declaration}`,
+      generateValidationBlock(responseTypeIR!, "result", root.expression)
+        .split("\n")
+        .map((line) => `      ${line}`)
+        .join("\n"),
+      `      if (errors.length > 0) throw new ClientValidationError("response", errors);`,
+    ].join("\n");
+  };
+
+  let body: string;
+  if (returns === "void") {
+    body = `${valPrefix}      await ${send};`;
+  } else if (decode) {
+    body = validatesResponse
+      ? `${valPrefix}      const result = ${decode}(await ${send} as string) as ${returns};\n${responseCheck()}\n      return result;`
+      : `${valPrefix}      return ${decode}(await ${send} as string) as ${returns};`;
+  } else {
+    body = validatesResponse
+      ? `${valPrefix}      const result = (await ${send}) as ${returns};\n${responseCheck()}\n      return result;`
+      : `${valPrefix}      return (await ${send}) as ${returns};`;
+  }
   return {
     name,
     doc: docComment(
@@ -1641,6 +1957,7 @@ function emitFiles(
       method as HttpServiceMethodIR,
       names.get(method)!,
       identifiers,
+      declared,
       context.options,
       onSkipped
     );
@@ -1803,6 +2120,89 @@ function emitFiles(
     "",
   ].join("\n");
 
+  // The checks are emitted per operation, but the helpers they call and the
+  // error they throw are shared, so the set is collected once over the whole
+  // service. Refs are inlined first for the same reason they are at the
+  // callsite: a ref carries no constraints, and the type it names carries them.
+  const valHelpers = new Set<string>();
+  const validatedIRs: TypeIR[] = [];
+  for (const method of service.methods) {
+    if (!isHttpMethod(method)) continue;
+    const http = method as HttpServiceMethodIR;
+    const params = http.request.parameters ?? [];
+    const grouped = (location: ParameterIR["in"]) =>
+      params.filter((parameter) => parameter.in === location);
+
+    const isSuccess = (response: HttpResponseIR) =>
+      typeof response.status === "number" &&
+      response.status >= 200 &&
+      response.status < 300;
+    const successes = http.responses.filter(isSuccess);
+    const chosen =
+      successes.length > 0
+        ? successes
+        : http.responses.filter((response) => response.status === "default");
+
+    const candidates: Array<[ValidateTarget, TypeIR | undefined]> = [
+      ["path", parameterGroupTypeIR(grouped("path"), "path")],
+      ["query", parameterGroupTypeIR(grouped("query"), "query")],
+      ["headers", parameterGroupTypeIR(grouped("header"), "header")],
+      ["body", jsonBody(http.request.body, onSkipped)],
+      ["response", jsonBody(chosen[0]?.body, onSkipped)],
+    ];
+
+    for (const [target, ir] of candidates) {
+      if (!ir || !isValidationEnabled(context.options, target)) continue;
+      validatedIRs.push(inlineRefs(ir, declared));
+    }
+  }
+  for (const ir of validatedIRs) {
+    for (const key of helperKeysFor(ir)) valHelpers.add(TYPED_VALIDATION_HELPERS[key]!);
+  }
+
+  // Only a client that validates carries the error type: an unused exported
+  // class in every other client is noise a consumer has to read past.
+  const validates = validatedIRs.length > 0;
+
+  const validationPrelude = validates
+    ? `
+/** One failed check, in the shape \`wiz\`'s own validators report. */
+export interface ValidationError {
+  path: string;
+  message: string;
+  constraint?: string;
+  expected?: string;
+  actual?: unknown;
+}
+
+/**
+ * A request the document's own schema rejects, or a response that does not
+ * match what it promised. Thrown before the call goes out for a request, and
+ * after the body is decoded for a response, so \`errors\` always names the part
+ * that failed rather than the whole payload.
+ */
+export class ClientValidationError extends Error {
+  readonly target: "path" | "query" | "body" | "headers" | "response";
+  readonly errors: ValidationError[];
+
+  constructor(
+    target: "path" | "query" | "body" | "headers" | "response",
+    errors: ValidationError[]
+  ) {
+    super(
+      \`Validation failed for \${target}: \${errors
+        .map((error) => (error.path ? \`\${error.path}: \${error.message}\` : error.message))
+        .join("; ")}\`
+    );
+    this.name = "ClientValidationError";
+    this.target = target;
+    this.errors = errors;
+  }
+}
+
+${valHelpers.size > 0 ? `${[...valHelpers].join("\n\n")}\n` : ""}`
+    : "";
+
   const api = [
     banner("Every operation the document declares."),
     imported.length > 0
@@ -1811,7 +2211,7 @@ function emitFiles(
     codecImports.length > 0
       ? `import { ${codecImports.join(", ")} } from "./${CODEC_FILE}";\n`
       : "",
-    `\n${PRELUDE.replace("__GRPC_CONFIG__", grpcConfig)
+    `\n${validationPrelude}${PRELUDE.replace("__GRPC_CONFIG__", grpcConfig)
       .replace("__TRANSPORT_CONFIG__", transportConfig)
       .replace("__INTERCEPTOR_KEYS__", interceptorKeys)
       .replace(

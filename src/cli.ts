@@ -27,7 +27,9 @@ generate loads the module named by --generator and hands it the document's IR.
 The input is a file path, or stdin when it is '-' or absent; --outdir writes
 every generated file there and overwrites what is in the way, and without one
 the whole set is printed to stdout as JSON keyed by file name. --format
-overrides the sniffed document format and --lenient is passed to the generator.
+overrides the sniffed document format, and --lenient and --validate are passed
+to the generator. --validate takes no value to check every part of a call, or a
+comma-separated list of path, query, headers, body, response to narrow it.
 `;
 
 /** A single file ejects to one self-contained file, so stdout always works. */
