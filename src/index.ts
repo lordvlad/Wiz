@@ -281,6 +281,20 @@ export function arrowSchema<TTypes extends unknown[]>(
 }
 
 /**
+ * Encodes an object to a JSON string with spec-aligned handling for bigint and date fields.
+ */
+export function encodeJson<T>(_val: T): string {
+  throw new PluginInactiveError("encodeJson");
+}
+
+/**
+ * Decodes a JSON string to an object with spec-aligned handling for bigint and date fields.
+ */
+export function decodeJson<T>(_raw: string): T {
+  throw new PluginInactiveError("decodeJson");
+}
+
+/**
  * The part of a zod schema a caller reaches for first.
  *
  * Declared structurally so wiz never imports zod itself: zod is an optional

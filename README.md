@@ -81,8 +81,11 @@ are exported for tests.
 | `openapiSchema<[A, B]>(base?, ops?)` | an OpenAPI 3.0 or 3.1 document |
 | `protobufSchema<[A, B]>()` / `encodeProto` / `decodeProto` | `.proto` text and a binary codec |
 | `avroSchema<[A, B]>()` / `encodeAvro` / `decodeAvro` | `.avsc` text and a binary codec |
+| `arrowSchema<[A, B]>()` / `encodeArrow` / `decodeArrow` | Arrow IPC stream binary codec |
+| `encodeJson<T>(val)` / `decodeJson<T>(raw)` | JSON string codec with `bigint`, `Date`, `bytes` handling |
 | `zodSchema<T>()` | a `Promise` of a zod schema, built from the same IR |
 
+Detailed guides for every feature, extractor, and generator live in [docs/](./docs/README.md).
 Identical types share one generated module, so `is<User>(a)` in two files
 imports the same function.
 

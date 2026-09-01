@@ -13,6 +13,7 @@ import {
 import { collectNamedTypes, type TypeIR } from "../types.ts";
 import type { GeneratedFiles, Generator, GeneratorContext } from "./generator.ts";
 import { generateProtobufCodecCode } from "./protobuf.ts";
+import { generateJsonCodecCode } from "./json.ts";
 import { docComment, tsDeclarations, typeIdentifiers, typeText } from "./tsTypes.ts";
 
 /**
@@ -318,6 +319,25 @@ function httpOperation(
           .map((slot) => `${slot.name}${slot.required ? "" : "?"}: ${slot.type}`)
           .join("; ")} }, callOptions?: HttpCallOptions`;
 
+  const requestType = jsonBody(method.request.body, onSkipped);
+  const requestName = requestType?.name;
+  const requestIdentifier = requestName ? identifiers.get(requestName) : undefined;
+  const encode = requestIdentifier ? codecName("encode", requestIdentifier) : undefined;
+
+  const isSuccess = (response: HttpResponseIR) =>
+    typeof response.status === "number" &&
+    response.status >= 200 &&
+    response.status < 300;
+  const responses = method.responses.filter(isSuccess);
+  const chosen =
+    responses.length > 0
+      ? responses
+      : method.responses.filter((response) => response.status === "default");
+  const responseType = jsonBody(chosen[0]?.body, onSkipped);
+  const responseName = responseType?.name;
+  const responseIdentifier = responseName ? identifiers.get(responseName) : undefined;
+  const decode = responseIdentifier ? codecName("decode", responseIdentifier) : undefined;
+
   const has = (name: string) => slots.some((slot) => slot.name === name);
   const call = [
     `        method: ${JSON.stringify(method.address.method)},`,
@@ -327,15 +347,24 @@ function httpOperation(
       has("cookie") ? `${access}.cookie` : "undefined",
       has("body") ? JSON.stringify(JSON_MIME) : "undefined",
     ].join(", ")}),`,
-    ...(has("body") ? [`        body: JSON.stringify(${access}.body),`] : []),
+    ...(has("body")
+      ? [
+          `        body: ${
+            encode
+              ? `${encode}(${access}.body)`
+              : `JSON.stringify(${access}.body)`
+          },`,
+        ]
+      : []),
   ].join("\n");
 
   const send = `send(config, {\n${call}\n      }, callOptions)`;
   const body =
     returns === "void"
       ? `      await ${send};`
-      : `      return (await ${send}) as ${returns};`;
-
+      : decode
+        ? `      return ${decode}(await ${send} as string) as ${returns};`
+        : `      return (await ${send}) as ${returns};`;
   return {
     name,
     doc: docComment(
@@ -1609,7 +1638,7 @@ function emitFiles(
   // The wire codec is a file of its own: it is the only generated code with no
   // types in it, it is large, and a caller may well want to frame a message
   // without going through a method.
-  const codecTypes = grpcMethods.length > 0 ? messageTypes(grpcMethods, declared) : [];
+  const codecTypes = service.methods.length > 0 ? messageTypes(service.methods, declared) : [];
   const codecImports = [...new Set(
     codecTypes.flatMap(({ name }) => {
       const identifier = identifiers.get(name);
@@ -1684,37 +1713,64 @@ function emitFiles(
 
   const files: GeneratedFiles = { [MODEL_FILE]: model, [API_FILE]: api };
   if (codecTypes.length > 0) {
-    files[CODEC_FILE] = `${banner("Protobuf readers and writers.")}\n${generateProtobufCodecCode(
-      codecTypes,
-      { modelModule: `./${MODEL_FILE}`, identifiers }
-    )}\n`;
-    files[TRANSPORT_FILE] = `${banner(
-      "The HTTP/2 transport, for a server that speaks gRPC proper."
-    )}\n${HTTP2_TRANSPORT}\n`;
+    const parts: string[] = [];
+    if (speaksGrpc) {
+      parts.push(generateProtobufCodecCode(codecTypes, { modelModule: `./${MODEL_FILE}`, identifiers }));
+    }
+    if (speaksHttp) {
+      parts.push(generateJsonCodecCode(codecTypes, { modelModule: `./${MODEL_FILE}`, identifiers }));
+    }
+    files[CODEC_FILE] = `${banner("Wire encoders and decoders.")}\n${parts.join("\n\n")}\n`;
+    if (speaksGrpc) {
+      files[TRANSPORT_FILE] = `${banner(
+        "The HTTP/2 transport, for a server that speaks gRPC proper."
+      )}\n${HTTP2_TRANSPORT}\n`;
+    }
   }
   return files;
 }
 
 /** Every message a gRPC method puts on the wire, in a stable order. */
+/** Every message or body a service method puts on the wire, in a stable order. */
 function messageTypes(
-  methods: GrpcServiceMethodIR[],
+  methods: ServiceMethodIR[],
   declared: ReadonlyMap<string, TypeIR>
 ): Array<{ name: string; ir: TypeIR }> {
   const wanted = new Map<string, TypeIR>();
 
   for (const method of methods) {
-    for (const message of [
-      method.request.message,
-      ...method.responses.map((response) => response.message),
-    ]) {
-      const name = message.name;
-      if (!name) continue;
-      // The declared copy is the definition; a method may hold a `ref` to it.
-      const ir = declared.get(name) ?? message;
-      if (ir.kind !== "ref") wanted.set(name, ir);
+    if (isGrpcMethod(method)) {
+      for (const message of [
+        method.request.message,
+        ...method.responses.map((response) => response.message),
+      ]) {
+        const name = message.name;
+        if (!name) continue;
+        const ir = declared.get(name) ?? message;
+        if (ir.kind !== "ref") wanted.set(name, ir);
+      }
+    } else {
+      const http = method as HttpServiceMethodIR;
+      const reqBody = jsonBody(http.request.body, () => {});
+      if (reqBody) {
+        const name = reqBody.name;
+        if (name) {
+          const ir = declared.get(name) ?? reqBody;
+          if (ir.kind !== "ref") wanted.set(name, ir);
+        }
+      }
+      for (const response of http.responses) {
+        const resBody = jsonBody(response.body, () => {});
+        if (resBody) {
+          const name = resBody.name;
+          if (name) {
+            const ir = declared.get(name) ?? resBody;
+            if (ir.kind !== "ref") wanted.set(name, ir);
+          }
+        }
+      }
     }
   }
-
   return [...wanted].map(([name, ir]) => ({ name, ir }));
 }
 

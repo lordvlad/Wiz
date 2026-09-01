@@ -116,7 +116,7 @@ beforeAll(() => {
 
 describe("emitted files", () => {
   test("the document becomes a model and an api file", () => {
-    expect(Object.keys(files).sort()).toEqual(["api.ts", "model.ts"]);
+    expect(Object.keys(files).sort()).toEqual(["api.ts", "codec.ts", "model.ts"]);
   });
 
   test("model.ts declares every schema, with unnameable ones sanitised", () => {
@@ -198,8 +198,9 @@ describe("emitted code compiles and runs", () => {
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "wiz-client-"));
     apiPath = join(directory, "api.ts");
-    await Bun.write(join(directory, "model.ts"), files["model.ts"]!);
-    await Bun.write(apiPath, files["api.ts"]!);
+    for (const [filename, contents] of Object.entries(files)) {
+      await Bun.write(join(directory, filename), contents);
+    }
   });
 
   afterAll(async () => {

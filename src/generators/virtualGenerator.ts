@@ -10,6 +10,7 @@ import {
 } from "./protobuf.ts";
 import { generateAvroCode, generateAvroSchemaCode } from "./avro.ts";
 import { generateArrowCode, generateArrowSchemaCode } from "./arrow.ts";
+import { generateJsonCode } from "./json.ts";
 import { generateZodSchemaCode } from "./zod.ts";
 import type { Generator } from "./generator.ts";
 
@@ -54,6 +55,7 @@ const SECTION_EXPORTS = {
   arrow: ["encodeArrow", "decodeArrow"],
   arrowSchema: ["arrowSchema"],
   zod: ["zodSchema"],
+  json: ["encodeJson", "decodeJson"],
 } as const;
 
 export function generateVirtualModuleCode(
@@ -72,6 +74,7 @@ export function generateVirtualModuleCode(
   if (include("validator")) parts.push(generateValidatorCode(ir));
   if (include("protobuf")) parts.push(generateProtobufCode(ir));
   if (include("avro")) parts.push(generateAvroCode(ir));
+  if (include("json")) parts.push(generateJsonCode(ir));
 
   // An empty `openApiTypes` array is still a request for an OpenAPI document:
   // `openapiSchema<[]>(base, [...ops])` carries all its content in methods.

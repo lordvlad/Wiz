@@ -39,6 +39,8 @@ const HELPER_FUNCTIONS = new Set([
   "decodeArrow",
   "arrowSchema",
   "zodSchema",
+  "encodeJson",
+  "decodeJson",
 ]);
 
 /**
@@ -128,6 +130,8 @@ export const VIRTUAL_EXPORTS: Record<string, string> = {
   decodeArrow: "__wiz_decodeArrow",
   arrowSchema: "__wiz_arrowSchema",
   zodSchema: "__wiz_zodSchema",
+  encodeJson: "__wiz_encodeJson",
+  decodeJson: "__wiz_decodeJson",
 };
 
 export function localAlias(exportName: string, hash: string): string {
@@ -554,6 +558,24 @@ export function transformSource(options: TransformOptions): TransformResult {
                 const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
                 return context.factory.createCallExpression(
                   context.factory.createIdentifier(`__wiz_decodeAvro_${hash}`),
+                  undefined,
+                  visitedArgs
+                );
+              }
+              case "encodeJson": {
+                wantExport("encodeJson");
+                const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
+                return context.factory.createCallExpression(
+                  context.factory.createIdentifier(`__wiz_encodeJson_${hash}`),
+                  undefined,
+                  visitedArgs
+                );
+              }
+              case "decodeJson": {
+                wantExport("decodeJson");
+                const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
+                return context.factory.createCallExpression(
+                  context.factory.createIdentifier(`__wiz_decodeJson_${hash}`),
                   undefined,
                   visitedArgs
                 );
