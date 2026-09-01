@@ -18,6 +18,7 @@
 - **[JSON Schema](./json-schema.md)** — `schema<T>()`, Draft 2020-12 and Draft 07 support, keyword mapping, and draft selection.
 - **[OpenAPI & Routes](./openapi.md)** — `openapiSchema`, `op` operation definitions, route harvesting for Bun (`Bun.serve`) and Hono, and `openapiDocument()`.
 - **[TypeScript Client](./typescript-client.md)** — `wiz generate -g tsClient.ts`, HTTP client operations, custom JSON codecs, interceptor chains, deadlines, and `createClient`.
+- **[React Query Client](./react-query.md)** — `wiz generate -g reactQuery`, TanStack React Query hooks (`useQuery`, `useMutation`), options getters, and multi-tenant factories (`createHooks`).
 
 ### Binary Codecs & Protocols
 - **[Protocol Buffers](./protobuf.md)** — `protobufSchema`, `encodeProto`, `decodeProto`, `@fieldNumber`, scalar widths, `oneof`, and `NumberedUnion`.
