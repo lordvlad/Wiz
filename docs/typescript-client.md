@@ -208,15 +208,9 @@ const client = createClient({
 });
 ```
 
-If `transport` is omitted, the client falls back to `fetch` (`globalThis.fetch` or whatever function was passed to `fetch`).
+If `transport` is omitted, the client falls back to `globalThis.fetch`.
 
-`ClientConfig` carries `baseUrl`, `fetch`, `interceptors` and `timeoutMs` (plus
-`transport` and `compression` when the document speaks gRPC). `baseUrl` is not
-taken from the document: OpenAPI `servers` describes environments, which is a
-runtime fact. `fetch` is typed as `FetchLike` — the part of `fetch` this client
-actually calls — rather than `typeof fetch`, because the global carries
-runtime-specific extras (Bun puts `preconnect` on it) and requiring those would
-make every test stub implement them. A real `fetch` is assignable to it.
+`ClientConfig` carries `baseUrl`, `transport`, `interceptors` and `timeoutMs` (plus `compression` when the document speaks gRPC). `baseUrl` is not taken from the document: OpenAPI `servers` describes environments, which is a runtime fact. `transport` is typed as `HttpTransport | FetchLike` — where `FetchLike` is the part of `fetch` this client actually calls — so a custom function or transport object is assignable to it without implementing runtime-specific extras. A real `fetch` function is assignable to it.
 
 ## Interceptors
 

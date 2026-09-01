@@ -236,7 +236,7 @@ describe("emitted gRPC client", () => {
 
   interface ConfigLike {
     baseUrl?: string;
-    fetch?: (
+    transport?: (
       url: string,
       init: { method: string; headers: Record<string, string>; body?: string | Uint8Array }
     ) => Promise<Response>;
@@ -290,7 +290,7 @@ describe("emitted gRPC client", () => {
     const client = (await import(apiPath)) as unknown as ClientModule;
     client.configure({
       baseUrl: "https://grpc.test",
-      fetch: async (url, init) => {
+      transport: async (url, init) => {
         const call = { url, method: init.method, headers: init.headers, body: init.body };
         sent.push(call);
         return respond(call);
@@ -378,7 +378,7 @@ describe("emitted gRPC client", () => {
     const sent: Sent[] = [];
     const retrying = client.createClient({
       baseUrl: "https://grpc.test",
-      fetch: async (url, init) => {
+      transport: async (url, init) => {
         sent.push({ url, method: init.method, headers: init.headers, body: init.body });
         return sent.length === 1
           ? new Response(trailer(14, "try again"), { status: 200, headers: webHeaders })

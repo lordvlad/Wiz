@@ -641,10 +641,10 @@ function httpTransport(config: ClientConfig): HttpTransport {
   }
   return {
     call: (c) =>
-      config.fetch(c.url, {
+      globalThis.fetch(c.url, {
         method: c.method,
         headers: c.headers,
-        body: c.body,
+        body: c.body as BodyInit | undefined,
         signal: c.signal,
       }),
   };
@@ -656,13 +656,6 @@ export interface ClientConfig {
    * describe environments, which is a runtime fact, not a compile-time one.
    */
   baseUrl: string;
-  /**
-   * Swappable, so a test can answer calls without a network. Typed as the part
-   * of \`fetch\` this client uses rather than \`typeof fetch\`, because the global
-   * carries runtime-specific extras - Bun puts \`preconnect\` on it - and
-   * requiring those would make every stub implement them.
-   */
-  fetch: FetchLike;
 __TRANSPORT_CONFIG__
   /**
    * Wrappers around every call, outermost first. This is where an
@@ -678,16 +671,6 @@ __GRPC_CONFIG__}
 
 const DEFAULTS: ClientConfig = {
   baseUrl: "",
-  fetch: (url, init) =>
-    globalThis.fetch(url, {
-      method: init.method,
-      headers: init.headers,
-      // A framed message is a \`Uint8Array\`, which is a body every runtime
-      // accepts; the DOM types spell it as an ArrayBuffer-backed view, and a
-      // plain \`Uint8Array\` is not that narrower type.
-      body: init.body as BodyInit | undefined,
-      signal: init.signal,
-    }),
 };
 
 /** A response outside 2xx. The parsed body is kept: that is where APIs explain. */
@@ -1718,7 +1701,7 @@ function emitFiles(
       ].join("\n")
     : [
         "  /**",
-        "   * Custom HTTP transport. Overrides `fetch` when provided.",
+        "   * Custom HTTP transport. Defaults to globalThis.fetch when omitted.",
         "   */",
         "  transport?: HttpTransport | FetchLike;",
       ].join("\n");

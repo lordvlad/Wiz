@@ -253,16 +253,17 @@ describe("emitted code compiles and runs", () => {
   interface ClientConfigLike {
     baseUrl?: string;
     timeoutMs?: number;
-    fetch?: (
-      url: string,
-      init: {
-        method: string;
-        headers: Record<string, string>;
-        body?: string;
-        signal?: AbortSignal;
-      }
-    ) => Promise<Response>;
-    transport?: { call(call: Sent): Promise<Response> } | ((url: string, init: unknown) => Promise<Response>);
+    transport?:
+      | { call(call: Sent): Promise<Response> }
+      | ((
+          url: string,
+          init: {
+            method: string;
+            headers: Record<string, string>;
+            body?: string;
+            signal?: AbortSignal;
+          }
+        ) => Promise<Response>);
     interceptors?: { http?: InterceptorLike[] };
   }
 
@@ -298,7 +299,7 @@ describe("emitted code compiles and runs", () => {
 
     client.configure({
       baseUrl: "https://api.test",
-      fetch: async (url, init) => {
+      transport: async (url, init) => {
         const call = { url, method: init.method, headers: init.headers, body: init.body };
         sent.push(call);
         return respond(call);
@@ -407,7 +408,7 @@ describe("emitted code compiles and runs", () => {
 
     const tenantA = client.createClient({
       baseUrl: "https://a.test",
-      fetch: async (url, init) => {
+      transport: async (url, init) => {
         first.push({ url, method: init.method, headers: init.headers, body: init.body });
         return json({ id: "a", name: "A" });
       },
@@ -421,7 +422,7 @@ describe("emitted code compiles and runs", () => {
 
     const tenantB = client.createClient({
       baseUrl: "https://b.test",
-      fetch: async (url, init) => {
+      transport: async (url, init) => {
         second.push({ url, method: init.method, headers: init.headers, body: init.body });
         return json({ id: "b", name: "B" });
       },
@@ -457,7 +458,7 @@ describe("emitted code compiles and runs", () => {
 
     const retrying = client.createClient({
       baseUrl: "https://r.test",
-      fetch: async () => {
+      transport: async () => {
         attempts += 1;
         return attempts === 1
           ? json({ error: "busy" }, 503)
@@ -547,7 +548,7 @@ describe("emitted code compiles and runs", () => {
 
     const controlled = client.createClient({
       baseUrl: "https://c.test",
-      fetch: (_url, init) => slow(init),
+      transport: (_url, init) => slow(init),
     });
 
     const controller = new AbortController();
@@ -572,7 +573,7 @@ describe("emitted code compiles and runs", () => {
     const byDefault = client.createClient({
       baseUrl: "https://c.test",
       timeoutMs: 25,
-      fetch: (_url, init) => slow(init),
+      transport: (_url, init) => slow(init),
     });
     const defaulted = await byDefault
       .deletePet({ path: { petId: "x" } })
@@ -592,7 +593,7 @@ describe("emitted code compiles and runs", () => {
 
     const retrying = client.createClient({
       baseUrl: "https://r.test",
-      fetch: (_url, init) => {
+      transport: (_url, init) => {
         const { promise, resolve, reject } = Promise.withResolvers<Response>();
         attempts += 1;
         if (attempts === 1) {
