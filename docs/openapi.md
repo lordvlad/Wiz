@@ -40,6 +40,22 @@ Select the dialect version in options:
 ```ts
 const doc30 = openapiSchema<[User]>(baseDoc, { version: "3.0" });
 const doc31 = openapiSchema<[User]>(baseDoc, { version: "3.1" });
+
+## Printing the OpenAPI Schema
+
+To print or export the generated OpenAPI document as YAML when executing the file directly:
+
+```ts
+import { openapiSchema } from "wiz";
+import type { User } from "./models.ts";
+
+export const openapi = openapiSchema<[User]>({
+  info: { title: "User API", version: "1.0.0" },
+}, { version: "3.0" });
+
+if (import.meta.main) {
+  console.log(Bun.YAML.stringify(openapi, null, 2));
+}
 ```
 
 ## Operation Specifications with `op`

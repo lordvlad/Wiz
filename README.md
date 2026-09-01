@@ -242,6 +242,17 @@ The routes object is handed back untouched, so it stays a working Bun router.
 A response's own doc comment becomes its description. `openapiSchema<[A, B]>()`
 generates a document from types alone when there are no routes to harvest.
 
+To print or export the generated schema as YAML when executing the file directly:
+
+```ts
+export const openapi = openapiSchema<[User]>({
+  info: { title: "User API", version: "1.0.0" },
+}, { version: "3.0" });
+
+if (import.meta.main) {
+  console.log(Bun.YAML.stringify(openapi, null, 2));
+}
+```
 Types reachable only through an error response are still hoisted into
 `components.schemas`. A route wiz cannot reach at compile time warns with a
 file:line rather than silently missing from the document.
