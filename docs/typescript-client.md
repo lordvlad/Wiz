@@ -482,10 +482,26 @@ generate [JSON Schema](./json-schema.md) or a [zod](./zod.md) schema instead.
 ## Runtime validation (`--validate`)
 
 By default the client trusts both ends: a request is sent as typed and a
-response is cast, not checked. `--validate` emits real checks, generated from
-the same IR the [validator](./type-introspection.md) and
-[JSON Schema](./json-schema.md) back ends read, so what is enforced is the
-document's own schema — types *and* constraints, not just shapes.
+response is cast, not checked. `--validate` emits real checks, so what is
+enforced is the document's own schema — types *and* constraints, not just
+shapes.
+
+**These are wiz's validators, not a second set.** The checks come from
+`generateValidationBlock` in `src/generators/validator.ts` — the same function
+`validate<T>` and `is<T>` are built from, called on the same IR the
+[JSON Schema](./json-schema.md) and [zod](./zod.md) back ends read. Every rule
+about types, constraints, unions, nesting and optionality is therefore shared
+by construction: a client cannot disagree with `validate<T>` about a value,
+because there is only one emitter. The three runtime helpers
+(`__wizLength`, `__wizEqual`/`__wizUnique`, `__wizPattern`) come from the same
+place, rendered with type annotations because this file is compiled rather than
+loaded as JS — `test/validator_helpers.test.ts` compiles them under `strict`
+and pins that annotating changes signatures and nothing else.
+
+The one deliberate difference is where a `$ref` leads. The validator stops at a
+ref, which is what keeps a cyclic type from generating an infinite check; an
+OpenAPI document names every reused schema, so refs are resolved here before
+the checks are generated, and only genuine cycles still stop.
 
 ```bash
 wiz generate -g tsClient openapi.json --outdir src/api --validate

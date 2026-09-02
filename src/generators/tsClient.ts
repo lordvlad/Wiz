@@ -17,7 +17,7 @@ import type { GeneratedFiles, Generator, GeneratorContext } from "./generator.ts
 import { generateProtobufCodecCode } from "./protobuf.ts";
 import { generateJsonCodecCode } from "./json.ts";
 import { docComment, tsDeclarations, typeIdentifiers, typeText } from "./tsTypes.ts";
-import { generateValidationBlock, helperKeysFor } from "./validator.ts";
+import { generateValidationBlock, helpersFor } from "./validator.ts";
 
 /**
  * A TypeScript HTTP client, emitted as two files a consumer can drop into a
@@ -157,75 +157,6 @@ function inlineRefs(
       return ir;
   }
 }
-/**
- * The validator's runtime helpers, annotated.
- *
- * `validator.ts` emits these as plain JS because its output is a virtual
- * module that is never typechecked. This file writes a `.ts` a consumer
- * compiles under their own `strict`, where an unannotated parameter is an
- * error, so the same three helpers are restated with types. Behaviour is
- * identical by construction: only the annotations differ.
- */
-const TYPED_VALIDATION_HELPERS: Record<string, string> = {
-  length: [
-    `function __wizLength(str: string): number {`,
-    `  // JSON Schema counts characters, so an astral character such as an emoji`,
-    `  // is one, where String.length would call it two.`,
-    `  let length = 0;`,
-    `  let pos = 0;`,
-    `  while (pos < str.length) {`,
-    `    length++;`,
-    `    const value = str.charCodeAt(pos++);`,
-    `    if (value >= 0xd800 && value <= 0xdbff && pos < str.length) {`,
-    `      if ((str.charCodeAt(pos) & 0xfc00) === 0xdc00) pos++;`,
-    `    }`,
-    `  }`,
-    `  return length;`,
-    `}`,
-  ].join("\n"),
-
-  unique: [
-    `function __wizEqual(a: unknown, b: unknown): boolean {`,
-    `  if (a === b) return true;`,
-    `  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;`,
-    `  if (Array.isArray(a) !== Array.isArray(b)) return false;`,
-    `  if (Array.isArray(a)) {`,
-    `    const other = b as unknown[];`,
-    `    if (a.length !== other.length) return false;`,
-    `    return a.every((item, i) => __wizEqual(item, other[i]));`,
-    `  }`,
-    `  const left = a as Record<string, unknown>;`,
-    `  const right = b as Record<string, unknown>;`,
-    `  const keys = Object.keys(left);`,
-    `  if (keys.length !== Object.keys(right).length) return false;`,
-    `  // Key order carries no meaning in JSON, so it carries none here.`,
-    `  return keys.every((k) => Object.hasOwn(right, k) && __wizEqual(left[k], right[k]));`,
-    `}`,
-    ``,
-    `function __wizUnique(items: unknown[]): boolean {`,
-    `  for (let i = 1; i < items.length; i++) {`,
-    `    for (let j = 0; j < i; j++) {`,
-    `      if (__wizEqual(items[i], items[j])) return false;`,
-    `    }`,
-    `  }`,
-    `  return true;`,
-    `}`,
-  ].join("\n"),
-
-  pattern: [
-    `const __wizPatterns = new Map<string, RegExp>();`,
-    `function __wizPattern(src: string): RegExp {`,
-    `  // A pattern is a constant, so compiling it per call is pure waste; a Map`,
-    `  // rather than an object so a pattern of "__proto__" cannot reach one.`,
-    `  let re = __wizPatterns.get(src);`,
-    `  if (re === undefined) {`,
-    `    re = new RegExp(src);`,
-    `    __wizPatterns.set(src, re);`,
-    `  }`,
-    `  return re;`,
-    `}`,
-  ].join("\n"),
-};
 
 /**
  * The checks report where a failure was, and the emitter builds that path by
@@ -2157,7 +2088,8 @@ function emitFiles(
     }
   }
   for (const ir of validatedIRs) {
-    for (const key of helperKeysFor(ir)) valHelpers.add(TYPED_VALIDATION_HELPERS[key]!);
+    // `annotate`: this file is compiled by the consumer, not loaded as JS.
+    for (const helper of helpersFor(ir, true)) valHelpers.add(helper);
   }
 
   // Only a client that validates carries the error type: an unused exported

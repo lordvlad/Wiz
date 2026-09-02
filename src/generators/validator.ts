@@ -409,73 +409,111 @@ export function generateValidationBlock(
  * reference. They are emitted only when something uses them - a bundler can
  * drop an unused function, but not a `const` whose initialiser it must assume
  * has side effects.
+ *
+ * There is one body per helper and it is shared, because there are two callers
+ * with different needs: this file emits a virtual module that is never
+ * typechecked, and `tsClient.ts` writes a `.ts` a consumer compiles under
+ * their own `strict`, where an unannotated parameter is an error. Annotating
+ * is therefore a rendering choice, not a second implementation - a deep
+ * equality written twice is a deep equality that will eventually disagree with
+ * itself. `any` keeps the body identical either way: narrower types would
+ * force casts into it, which is exactly the divergence being avoided.
  */
-const RUNTIME_HELPERS: Record<string, string> = {
-  length: [
-  `function __wizLength(str) {`,
-  `  // JSON Schema counts characters, so an astral character such as an emoji`,
-  `  // is one, where String.length would call it two.`,
-  `  let length = 0;`,
-  `  let pos = 0;`,
-  `  while (pos < str.length) {`,
-  `    length++;`,
-  `    const value = str.charCodeAt(pos++);`,
-  `    if (value >= 0xd800 && value <= 0xdbff && pos < str.length) {`,
-  `      if ((str.charCodeAt(pos) & 0xfc00) === 0xdc00) pos++;`,
-  `    }`,
-  `  }`,
-  `  return length;`,
-  `}`,
-  ].join("\n"),
+const HELPER_SIGNATURES: Record<
+  string,
+  { parameters: Record<string, string>; returns: string }
+> = {
+  __wizLength: { parameters: { str: "string" }, returns: "number" },
+  // `__wizEqual` recurses, and `strict` will not infer a return type for a
+  // function referenced from its own return expression - so this is required,
+  // not decoration.
+  __wizEqual: { parameters: { a: "any", b: "any" }, returns: "boolean" },
+  __wizUnique: { parameters: { items: "any[]" }, returns: "boolean" },
+  __wizPattern: { parameters: { src: "string" }, returns: "RegExp" },
+};
 
-  unique: [
-  `function __wizEqual(a, b) {`,
-  `  if (a === b) return true;`,
-  `  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;`,
-  `  if (Array.isArray(a) !== Array.isArray(b)) return false;`,
-  `  if (Array.isArray(a)) {`,
-  `    if (a.length !== b.length) return false;`,
-  `    return a.every((item, i) => __wizEqual(item, b[i]));`,
-  `  }`,
-  `  const keys = Object.keys(a);`,
-  `  if (keys.length !== Object.keys(b).length) return false;`,
-  `  // Key order carries no meaning in JSON, so it carries none here.`,
-  `  return keys.every((k) => Object.hasOwn(b, k) && __wizEqual(a[k], b[k]));`,
-  `}`,
-  ``,
-  `function __wizUnique(items) {`,
-  `  for (let i = 1; i < items.length; i++) {`,
-  `    for (let j = 0; j < i; j++) {`,
-  `      if (__wizEqual(items[i], items[j])) return false;`,
-  `    }`,
-  `  }`,
-  `  return true;`,
-  `}`,
-  ].join("\n"),
+/** `function __wizLength(str)`, or the same with types. */
+function helperDeclaration(name: string, annotate: boolean): string {
+  const { parameters, returns } = HELPER_SIGNATURES[name]!;
+  const list = Object.entries(parameters)
+    .map(([parameter, type]) => (annotate ? `${parameter}: ${type}` : parameter))
+    .join(", ");
 
-  pattern: [
-  `const __wizPatterns = new Map();`,
-  `function __wizPattern(src) {`,
-  `  // A pattern is a constant, so compiling it per call is pure waste; a Map`,
-  `  // rather than an object so a pattern of "__proto__" cannot reach one.`,
-  `  let re = __wizPatterns.get(src);`,
-  `  if (re === undefined) {`,
-  `    re = new RegExp(src);`,
-  `    __wizPatterns.set(src, re);`,
-  `  }`,
-  `  return re;`,
-  `}`,
-  ].join("\n"),
+  return `function ${name}(${list})${annotate ? `: ${returns}` : ""}`;
+}
+
+const HELPER_BODIES: Record<string, (annotate: boolean) => string> = {
+  length: (annotate) =>
+    [
+      `${helperDeclaration("__wizLength", annotate)} {`,
+      `  // JSON Schema counts characters, so an astral character such as an emoji`,
+      `  // is one, where String.length would call it two.`,
+      `  let length = 0;`,
+      `  let pos = 0;`,
+      `  while (pos < str.length) {`,
+      `    length++;`,
+      `    const value = str.charCodeAt(pos++);`,
+      `    if (value >= 0xd800 && value <= 0xdbff && pos < str.length) {`,
+      `      if ((str.charCodeAt(pos) & 0xfc00) === 0xdc00) pos++;`,
+      `    }`,
+      `  }`,
+      `  return length;`,
+      `}`,
+    ].join("\n"),
+
+  unique: (annotate) =>
+    [
+      `${helperDeclaration("__wizEqual", annotate)} {`,
+      `  if (a === b) return true;`,
+      `  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;`,
+      `  if (Array.isArray(a) !== Array.isArray(b)) return false;`,
+      `  if (Array.isArray(a)) {`,
+      `    if (a.length !== b.length) return false;`,
+      `    return a.every((item, i) => __wizEqual(item, b[i]));`,
+      `  }`,
+      `  const keys = Object.keys(a);`,
+      `  if (keys.length !== Object.keys(b).length) return false;`,
+      `  // Key order carries no meaning in JSON, so it carries none here.`,
+      `  return keys.every((k) => Object.hasOwn(b, k) && __wizEqual(a[k], b[k]));`,
+      `}`,
+      ``,
+      `${helperDeclaration("__wizUnique", annotate)} {`,
+      `  for (let i = 1; i < items.length; i++) {`,
+      `    for (let j = 0; j < i; j++) {`,
+      `      if (__wizEqual(items[i], items[j])) return false;`,
+      `    }`,
+      `  }`,
+      `  return true;`,
+      `}`,
+    ].join("\n"),
+
+  pattern: (annotate) =>
+    [
+      annotate
+        ? `const __wizPatterns = new Map<string, RegExp>();`
+        : `const __wizPatterns = new Map();`,
+      `${helperDeclaration("__wizPattern", annotate)} {`,
+      `  // A pattern is a constant, so compiling it per call is pure waste; a Map`,
+      `  // rather than an object so a pattern of "__proto__" cannot reach one.`,
+      `  let re = __wizPatterns.get(src);`,
+      `  if (re === undefined) {`,
+      `    re = new RegExp(src);`,
+      `    __wizPatterns.set(src, re);`,
+      `  }`,
+      `  return re;`,
+      `}`,
+    ].join("\n"),
 };
 
 /**
- * Which helpers this type's constraints reach for, by key.
+ * The helpers this type's constraints actually reach for, as source.
  *
- * Separate from the source so a second emitter can supply its own spelling of
- * the same helper: {@link RUNTIME_HELPERS} is plain JS for a virtual module,
- * and a generator writing a `.ts` file needs the annotated version instead.
+ * `annotate` is the only difference between what the two emitters get, and it
+ * reaches nothing but the parameter lists: this file emits a virtual module
+ * that is never typechecked, `tsClient.ts` emits a `.ts` compiled under a
+ * consumer's `strict`.
  */
-export function helperKeysFor(ir: TypeIR): string[] {
+export function helpersFor(ir: TypeIR, annotate = false): string[] {
   const needed = new Set<string>();
 
   const scan = (constraints: Constraint[] | undefined): void => {
@@ -493,12 +531,7 @@ export function helperKeysFor(ir: TypeIR): string[] {
     }
   });
 
-  return [...needed];
-}
-
-/** The helpers this type's constraints actually reach for, as JS source. */
-export function helpersFor(ir: TypeIR): string[] {
-  return helperKeysFor(ir).map((key) => RUNTIME_HELPERS[key]!);
+  return [...needed].map((key) => HELPER_BODIES[key]!(annotate));
 }
 
 export function generateValidatorCode(ir: TypeIR): string {

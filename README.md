@@ -385,6 +385,10 @@ included, not just types. Bare it checks everything; a comma-separated list of
 `path`, `query`, `headers`, `body`, `response` narrows it. A failure throws
 `ClientValidationError`, naming the part that failed and carrying every error.
 
+The checks are wiz's own validators, not a second set: the same emitter
+`validate<T>` and `is<T>` are built from, run over the same IR, so a client
+cannot disagree with `validate<T>` about a value.
+
 ```bash
 wiz generate -g tsClient openapi.json -o src/api --validate
 wiz generate -g tsClient openapi.json -o src/api --validate path,query,headers,body
