@@ -123,13 +123,17 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
   registerMethod("rpc.discover", () => openRpcDoc, null);
 
   async function executeSingleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse | null> {
-    const isNotification = req.id === undefined || req.id === null;
+    // JSON-RPC treats an absent and a null id alike: both make the call a
+    // notification, which is answered with nothing. Collapsing the two here
+    // means one value carries the id for every reply below.
+    const id = req.id ?? null;
+    const isNotification = id === null;
 
     if (!req || req.jsonrpc !== "2.0" || typeof req.method !== "string") {
       if (isNotification) return null;
       return {
         jsonrpc: "2.0",
-        id: req.id ?? null,
+        id,
         error: { code: -32600, message: "Invalid Request" },
       };
     }
@@ -139,7 +143,7 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
       if (isNotification) return null;
       return {
         jsonrpc: "2.0",
-        id: req.id,
+        id,
         error: { code: -32601, message: `Method not found: ${req.method}` },
       };
     }
@@ -159,14 +163,14 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
       if (isNotification) return null;
       return {
         jsonrpc: "2.0",
-        id: req.id,
+        id,
         result: result ?? null,
       };
     } catch (err: any) {
       if (isNotification) return null;
       return {
         jsonrpc: "2.0",
-        id: req.id,
+        id,
         error: {
           code: typeof err?.code === "number" ? err.code : -32603,
           message: err?.message ?? "Internal error",

@@ -97,6 +97,8 @@ function schemaToIR(raw: unknown, ctx: Ctx, pointer: string): TypeIR {
         name: propName,
         type: propType,
         optional: !isReq,
+        // Same source as the OpenAPI extractor reads it from.
+        readonly: isObject(propRaw) && propRaw.readOnly === true,
         description: isObject(propRaw) && typeof propRaw.description === "string" ? propRaw.description : undefined,
       };
     });

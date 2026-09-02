@@ -1,4 +1,4 @@
-import { collectNamedTypes, typesReferencedBy, type TypeIR } from "../ir/types.ts";
+import { collectNamedTypes, type TypeIR } from "../ir/types.ts";
 import {
   emptyService,
   isOpenRpcMethod,

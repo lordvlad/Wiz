@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { extractOpenRpcIR } from "../src/extractors/openrpc.ts";
 import { generateOpenRpcSchemaCode } from "../src/generators/openrpc.ts";
 import type { TypeIR } from "../src/ir/types.ts";
+import { isOpenRpcMethod } from "../src/ir/service.ts";
 
 describe("OpenRPC Extractor & Generator", () => {
   test("extractOpenRpcIR extracts ApiIR from OpenRPC document", () => {
@@ -53,6 +54,10 @@ describe("OpenRPC Extractor & Generator", () => {
 
     expect(apiIR.service.methods.length).toBe(1);
     const method = apiIR.service.methods[0]!;
+    // The guard is the seam the IR provides for this: address, request and
+    // responses all follow from `protocol`, so narrow once and read them.
+    if (!isOpenRpcMethod(method)) throw new Error("expected an OpenRPC method");
+
     expect(method.protocol).toBe("openrpc");
     expect(method.address.service).toBe("UserService");
     expect(method.address.method).toBe("getUser");
@@ -68,8 +73,8 @@ describe("OpenRPC Extractor & Generator", () => {
       kind: "object",
       name: "User",
       properties: [
-        { name: "id", type: { id: "p1", kind: "primitive", type: "string" } },
-        { name: "name", type: { id: "p2", kind: "primitive", type: "string" } },
+        { name: "id", type: { id: "p1", kind: "primitive", type: "string" }, optional: false, readonly: false },
+        { name: "name", type: { id: "p2", kind: "primitive", type: "string" }, optional: false, readonly: false },
       ],
     };
 
@@ -94,6 +99,6 @@ describe("OpenRPC Extractor & Generator", () => {
     expect(info.version).toBe("2.0.0");
 
     const components = result.components as Record<string, Record<string, unknown>>;
-    expect(components.schemas.User).toBeDefined();
+    expect(components.schemas?.User).toBeDefined();
   });
 });

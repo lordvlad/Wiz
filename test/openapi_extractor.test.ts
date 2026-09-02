@@ -26,7 +26,9 @@ async function expectValid(document: unknown) {
 /** Extracts, then runs the IR straight back through the forward generator. */
 function regenerate(document: unknown) {
   const ir = extractApiIR(JSON.stringify(document));
-  if (ir.version === "proto3") throw new Error("expected an OpenAPI document");
+  if (ir.version !== "3.0" && ir.version !== "3.1") {
+    throw new Error(`expected an OpenAPI document, got '${ir.version}'`);
+  }
   const types = [...ir.types].map(([name, typeIR]) => ({ name, ir: typeIR }));
   const code = generateOpenApiSchemaCode(types, ir.version, ir.service);
   const regenerated = evalModule<{

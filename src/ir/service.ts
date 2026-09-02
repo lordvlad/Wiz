@@ -257,7 +257,10 @@ export function normalizeServiceMethod(method: ServiceMethodIR): unknown {
   // A gRPC method has no slots to key, and two shapes that hash alike must not
   // become one module: the streaming flags change the emitted signature as much
   // as the message types do.
-  if (method.request.protocol === "grpc") {
+  // Narrowed on the method's own discriminant rather than its request's, so
+  // `responses` follows from it too: keying a response list against the wrong
+  // protocol's fields is how two different methods hash alike.
+  if (isGrpcMethod(method)) {
     const streamed = method.responses.find(
       (candidate): candidate is GrpcResponseIR => candidate.protocol === "grpc"
     );
@@ -279,7 +282,7 @@ export function normalizeServiceMethod(method: ServiceMethodIR): unknown {
         : null,
     };
   }
-  if (method.request.protocol === "openrpc") {
+  if (isOpenRpcMethod(method)) {
     const openRpcResp = method.responses.find(
       (candidate): candidate is OpenRpcResponseIR =>
         candidate.protocol === "openrpc"
@@ -307,6 +310,14 @@ export function normalizeServiceMethod(method: ServiceMethodIR): unknown {
     };
   }
 
+  // `Protocol` is closed and the other two returned above, so this is the HTTP
+  // case; the guard is what tells the compiler so, and it makes `responses` a
+  // list of HTTP responses rather than the whole union.
+  if (!isHttpMethod(method)) {
+    throw new Error(
+      `[wiz] cannot key a '${method.protocol}' service method: no normal form for it`
+    );
+  }
 
   const request = method.request;
   return {
@@ -321,16 +332,12 @@ export function normalizeServiceMethod(method: ServiceMethodIR): unknown {
     b: bodyKey(request.body),
     br: request.bodyRequired ?? null,
     bc: request.bodyComponent ?? null,
-    r: method.responses.map((response) =>
-      response.protocol === "grpc"
-        ? { c: normalizeTypeIR(response.message, true), s: response.streaming }
-        : {
-            s: response.status,
-            de: response.description ?? null,
-            cp: response.component ?? null,
-            b: bodyKey(response.body),
-            h: (response.headers ?? []).map(parameterKey),
-          }
-    ),
+    r: method.responses.map((response) => ({
+      s: response.status,
+      de: response.description ?? null,
+      cp: response.component ?? null,
+      b: bodyKey(response.body),
+      h: (response.headers ?? []).map(parameterKey),
+    })),
   };
 }

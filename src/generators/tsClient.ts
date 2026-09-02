@@ -703,6 +703,8 @@ function openRpcOperation(
     returns,
     doc,
     implementation,
+    // A JSON-RPC call resolves once; there is no server-stream form of it.
+    streaming: false,
   };
 }
 
