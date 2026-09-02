@@ -1,5 +1,11 @@
 import type { Constraint, ObjectTypeIR, PropertyIR, TypeIR } from "../types.ts";
-import { INTEGER_FORMATS, SAFE_INTEGER, walkTypeIR } from "../types.ts";
+import {
+  INTEGER_FORMATS,
+  SAFE_INTEGER,
+  STRING_FORMAT_REGEX,
+  STRING_FORMATS,
+  walkTypeIR,
+} from "../types.ts";
 
 /** A JS boolean expression testing whether `varName` matches `ir`. */
 export function generateTypeCheckExpression(ir: TypeIR, varName: string): string {
@@ -120,13 +126,22 @@ function generateConstraintCheckStatements(
         );
         break;
       case "format": {
-        if (val === "email") {
+        const stringFormat =
+          typeof val === "string" ? STRING_FORMATS[val] : undefined;
+
+        if (stringFormat) {
+          // Through `__wizPattern` so the source is compiled once and shared
+          // with every other check that names it, rather than a fresh literal
+          // per field.
+          const source = JSON.stringify(stringFormat.pattern);
           statements.push(
-            `if (typeof ${varName} === "string" && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(${varName})) errors.push({ path: ${pathVar}, message: "Invalid email format", constraint: "format", expected: "email", actual: ${varName} });`
+            `if (typeof ${varName} === "string" && !__wizPattern(${source}).test(${varName})) errors.push({ path: ${pathVar}, message: "Invalid ${stringFormat.label} format", constraint: "format", expected: ${JSON.stringify(stringFormat.label)}, actual: ${varName} });`
           );
-        } else if (val === "uuid") {
+        } else if (val === STRING_FORMAT_REGEX) {
+          // The one format that is not a pattern: whether a string *is* a
+          // regex can only be answered by compiling it.
           statements.push(
-            `if (typeof ${varName} === "string" && !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(${varName})) errors.push({ path: ${pathVar}, message: "Invalid UUID format", constraint: "format", expected: "uuid", actual: ${varName} });`
+            `if (typeof ${varName} === "string" && !__wizIsRegex(${varName})) errors.push({ path: ${pathVar}, message: "Invalid regex format", constraint: "format", expected: "regex", actual: ${varName} });`
           );
         } else if (typeof val === "string" && INTEGER_FORMATS[val]) {
           // A width that is declared and not checked is the worst of both: the
@@ -183,7 +198,8 @@ export function generateValidationBlock(
   ir: TypeIR,
   varName: string,
   pathVar: string,
-  depth = 0
+  depth = 0,
+  isTs = false
 ): string {
   const lines: string[] = [];
 
@@ -212,6 +228,31 @@ export function generateValidationBlock(
       );
       lines.push(`} else {`);
 
+      // Pruning is a call-time choice, so the branch is emitted once and the
+      // flag decides. `additionalProperties` is respected: a schema that says
+      // extra fields are allowed (and what type they are) has not left them
+      // undeclared, so removing them would be discarding declared data.
+      const closed =
+        ir.additionalProperties === undefined || ir.additionalProperties === false;
+      if (closed) {
+        const declared = ir.properties
+          .map((prop) => `k !== ${JSON.stringify(prop.name)}`)
+          .join(" && ");
+
+        lines.push(`  if (__prune) {`);
+        // A snapshot rather than `for...in`: deleting from the object being
+        // enumerated is what the snapshot exists to make well defined.
+        lines.push(`    for (const k of Object.keys(${varName})) {`);
+        const targetAccess = isTs ? `(${varName} as any)` : varName;
+        lines.push(
+          declared.length > 0
+            ? `      if (${declared}) delete ${targetAccess}[k];`
+            : `      delete ${targetAccess}[k];`
+        );
+        lines.push(`    }`);
+        lines.push(`  }`);
+      }
+
       const propConstraintChecks = generateConstraintCheckStatements(ir.constraints, varName, pathVar);
       for (const st of propConstraintChecks) {
         lines.push(`  ${st}`);
@@ -227,7 +268,7 @@ export function generateValidationBlock(
         if (prop.optional) {
           lines.push(`  if (${propVar} !== undefined) {`);
           lines.push(
-            generateValidationBlock(prop.type, propVar, propPathVar, depth + 1)
+            generateValidationBlock(prop.type, propVar, propPathVar, depth + 1, isTs)
               .split("\n")
               .map((l) => "    " + l)
               .join("\n")
@@ -244,7 +285,7 @@ export function generateValidationBlock(
           );
           lines.push(`  } else {`);
           lines.push(
-            generateValidationBlock(prop.type, propVar, propPathVar, depth + 1)
+            generateValidationBlock(prop.type, propVar, propPathVar, depth + 1, isTs)
               .split("\n")
               .map((l) => "    " + l)
               .join("\n")
@@ -281,7 +322,7 @@ export function generateValidationBlock(
       lines.push(`    const ${elemVar} = ${varName}[${idxVar}];`);
       lines.push(`    const ${elemPathVar} = (${pathVar} ? ${pathVar} : "") + "[" + ${idxVar} + "]";`);
       lines.push(
-        generateValidationBlock(ir.element, elemVar, elemPathVar, depth + 1)
+        generateValidationBlock(ir.element, elemVar, elemPathVar, depth + 1, isTs)
           .split("\n")
           .map((l) => "    " + l)
           .join("\n")
@@ -307,7 +348,7 @@ export function generateValidationBlock(
         if (elem.optional) {
           lines.push(`  if (${elemVar} !== undefined) {`);
           lines.push(
-            generateValidationBlock(elem.type, elemVar, elemPathVar, depth + 1)
+            generateValidationBlock(elem.type, elemVar, elemPathVar, depth + 1, isTs)
               .split("\n")
               .map((l) => "    " + l)
               .join("\n")
@@ -320,7 +361,7 @@ export function generateValidationBlock(
           );
           lines.push(`  } else {`);
           lines.push(
-            generateValidationBlock(elem.type, elemVar, elemPathVar, depth + 1)
+            generateValidationBlock(elem.type, elemVar, elemPathVar, depth + 1, isTs)
               .split("\n")
               .map((l) => "    " + l)
               .join("\n")
@@ -343,7 +384,7 @@ export function generateValidationBlock(
         lines.push(`if (!${branchValidVar}) {`);
         lines.push(`  const errors = [];`);
         lines.push(
-          generateValidationBlock(subType, varName, pathVar, depth + 1)
+          generateValidationBlock(subType, varName, pathVar, depth + 1, isTs)
             .split("\n")
             .map((l) => "  " + l)
             .join("\n")
@@ -364,7 +405,7 @@ export function generateValidationBlock(
 
     case "intersection": {
       for (const subType of ir.types) {
-        lines.push(generateValidationBlock(subType, varName, pathVar, depth + 1));
+        lines.push(generateValidationBlock(subType, varName, pathVar, depth + 1, isTs));
       }
       break;
     }
@@ -383,7 +424,7 @@ export function generateValidationBlock(
       lines.push(`  for (const [${keyVar}, ${valVar}] of Object.entries(${varName})) {`);
       lines.push(`    const ${entryPathVar} = ${pathVar} ? ${pathVar} + "." + ${keyVar} : ${keyVar};`);
       lines.push(
-        generateValidationBlock(ir.valueType, valVar, entryPathVar, depth + 1)
+        generateValidationBlock(ir.valueType, valVar, entryPathVar, depth + 1, isTs)
           .split("\n")
           .map((l) => "    " + l)
           .join("\n")
@@ -430,6 +471,7 @@ const HELPER_SIGNATURES: Record<
   __wizEqual: { parameters: { a: "any", b: "any" }, returns: "boolean" },
   __wizUnique: { parameters: { items: "any[]" }, returns: "boolean" },
   __wizPattern: { parameters: { src: "string" }, returns: "RegExp" },
+  __wizIsRegex: { parameters: { src: "string" }, returns: "boolean" },
 };
 
 /** `function __wizLength(str)`, or the same with types. */
@@ -503,6 +545,20 @@ const HELPER_BODIES: Record<string, (annotate: boolean) => string> = {
       `  return re;`,
       `}`,
     ].join("\n"),
+
+  isRegex: (annotate) =>
+    [
+      `${helperDeclaration("__wizIsRegex", annotate)} {`,
+      `  // "Is a regular expression" is not a pattern: the only way to answer`,
+      `  // it is to compile the string and see whether that throws.`,
+      `  try {`,
+      `    new RegExp(src);`,
+      `    return true;`,
+      `  } catch {`,
+      `    return false;`,
+      `  }`,
+      `}`,
+    ].join("\n"),
 };
 
 /**
@@ -521,6 +577,12 @@ export function helpersFor(ir: TypeIR, annotate = false): string[] {
       if (c.kind === "minLength" || c.kind === "maxLength") needed.add("length");
       if (c.kind === "uniqueItems" && c.value !== false) needed.add("unique");
       if (c.kind === "pattern") needed.add("pattern");
+      if (c.kind === "format" && typeof c.value === "string") {
+        // An enforced string format is checked through the same cached-regex
+        // helper a `@pattern` uses; `regex` is the exception that compiles.
+        if (STRING_FORMATS[c.value]) needed.add("pattern");
+        if (c.value === STRING_FORMAT_REGEX) needed.add("isRegex");
+      }
     }
   };
 
@@ -540,7 +602,19 @@ export function generateValidatorCode(ir: TypeIR): string {
   return [
     ...helpersFor(ir),
     ``,
-    `export function validate(arg, path = "") {`,
+    `/**`,
+    ` * Collects every way \`arg\` fails to match the type.`,
+    ` *`,
+    ` * \`options.prune\` removes properties the type does not declare, in place,`,
+    ` * the way Ajv's \`removeAdditional\` does - the object you pass is the object`,
+    ` * that gets pruned. Levels whose schema allows additional properties are`,
+    ` * left alone: those fields are declared, just not by name.`,
+    ` */`,
+    `export function validate(arg, options = {}) {`,
+    `  // A string second argument was the path before there were options, and`,
+    `  // costs one comparison to keep working.`,
+    `  const path = typeof options === "string" ? options : options.path ?? "";`,
+    `  const __prune = typeof options === "object" && options !== null && options.prune === true;`,
     `  const errors = [];`,
     validationBody
       .split("\n")
@@ -551,6 +625,25 @@ export function generateValidatorCode(ir: TypeIR): string {
     ``,
     `export function is(arg) {`,
     `  return validate(arg).length === 0;`,
+    `}`,
+    ``,
+    `/**`,
+    ` * Narrows \`arg\` to \`T\` when structural validation passes.`,
+    ` * Throws an error containing \`errors: ValidationError[]\` on failure.`,
+    ` */`,
+    `export function assert(arg, options = {}) {`,
+    `  const errors = validate(arg, options);`,
+    `  if (errors.length > 0) {`,
+    `    const msg =`,
+    `      "Assertion failed: " +`,
+    `      errors`,
+    `        .map((e) => (e.path ? e.path + ": " + e.message : e.message))`,
+    `        .join("; ");`,
+    `    const err = new Error(msg);`,
+    `    err.name = "AssertError";`,
+    `    err.errors = errors;`,
+    `    throw err;`,
+    `  }`,
     `}`,
   ].join("\n");
 }

@@ -25,9 +25,12 @@ const HELPER_FUNCTIONS = new Set([
   "keysOf",
   "requiredKeysOf",
   "optionalKeysOf",
+  "deepKeysOf",
   "schema",
   "validate",
+  "parseQuery",
   "is",
+  "assert",
   "openapiSchema",
   "openRPCSchema",
   "encodeProto",
@@ -116,10 +119,13 @@ export const VIRTUAL_EXPORTS: Record<string, string> = {
   keys: "__wiz_keys",
   requiredKeys: "__wiz_reqKeys",
   optionalKeys: "__wiz_optKeys",
+  deepKeys: "__wiz_deepKeys",
   schema_draft2020: "__wiz_schema",
   schema_draft07: "__wiz_schema07",
   validate: "__wiz_validate",
+  parseQuery: "__wiz_parseQuery",
   is: "__wiz_is",
+  assert: "__wiz_assert",
   openapiSchema: "__wiz_openapiSchema",
   openRPCSchema: "__wiz_openRPCSchema",
   encodeProto: "__wiz_encodeProto",
@@ -410,6 +416,15 @@ export function transformSource(options: TransformOptions): TransformResult {
                 wantExport("optionalKeys");
                 return context.factory.createIdentifier(`__wiz_optKeys_${hash}`);
               }
+              case "deepKeysOf": {
+                wantExport("deepKeys");
+                const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
+                return context.factory.createCallExpression(
+                  context.factory.createIdentifier(`__wiz_deepKeys_${hash}`),
+                  undefined,
+                  visitedArgs
+                );
+              }
               case "zodSchema": {
                 // A payload, not a bare export: the module's content depends
                 // on wanting zod at all, so the key must too.
@@ -470,11 +485,29 @@ export function transformSource(options: TransformOptions): TransformResult {
                   visitedArgs
                 );
               }
+              case "parseQuery": {
+                wantExport("parseQuery");
+                const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
+                return context.factory.createCallExpression(
+                  context.factory.createIdentifier(`__wiz_parseQuery_${hash}`),
+                  undefined,
+                  visitedArgs
+                );
+              }
               case "is": {
                 wantExport("is");
                 const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
                 return context.factory.createCallExpression(
                   context.factory.createIdentifier(`__wiz_is_${hash}`),
+                  undefined,
+                  visitedArgs
+                );
+              }
+              case "assert": {
+                wantExport("assert");
+                const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
+                return context.factory.createCallExpression(
+                  context.factory.createIdentifier(`__wiz_assert_${hash}`),
                   undefined,
                   visitedArgs
                 );

@@ -1,5 +1,10 @@
 import type { Annotated, Constraint, TypeIR } from "../types.ts";
-import { INTEGER_FORMATS, SAFE_INTEGER } from "../types.ts";
+import {
+  INTEGER_FORMATS,
+  SAFE_INTEGER,
+  STRING_FORMAT_REGEX,
+  STRING_FORMATS,
+} from "../types.ts";
 
 /**
  * zod schemas, from the same IR every other back end reads.
@@ -290,13 +295,35 @@ function constrain(
 /**
  * The formats the generated validator actually enforces, and no others: a
  * check nobody declared would reject data the type allows.
+ *
+ * Every string format past `email` and `uuid` is emitted as `.regex()` over
+ * the *same* source {@link STRING_FORMATS} gives the validator, so the two
+ * cannot disagree about a value. zod has natives for a few of them
+ * (`.url()`, `.ip()`), but they are its own definitions rather than this
+ * table's, and a schema that accepts what the validator rejects is worse than
+ * a less idiomatic chain.
  */
 function formatFor(value: unknown, family: Family): string {
   if (typeof value !== "string") return "";
 
   if (family === "string") {
+    // Kept native, and the one place the two back ends can differ: zod's
+    // `.email()` is its own definition, stricter than this table's
+    // deliberately loose pattern, so it rejects `mailto:a@b.co` where the
+    // validator accepts it. Left as it was rather than quietly loosening zod
+    // or tightening a pattern chosen to accept addresses that deliver;
+    // `test/formats.test.ts` pins the difference so it stays known.
     if (value === "email") return ".email()";
     if (value === "uuid") return ".uuid()";
+
+    const format = STRING_FORMATS[value];
+    if (format) {
+      return `.regex(new RegExp(${JSON.stringify(format.pattern)}))`;
+    }
+    if (value === STRING_FORMAT_REGEX) {
+      // Not a pattern: mirrors the validator's compile check.
+      return `.refine((v) => { try { new RegExp(v); return true; } catch { return false; } })`;
+    }
     return "";
   }
 

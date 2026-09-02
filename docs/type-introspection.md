@@ -18,12 +18,12 @@ optionalKeysOf<User>(); // → ["age"]
 
 ## Property Key Extraction
 
-The `keysOf`, `requiredKeysOf`, and `optionalKeysOf` functions extract string property names from object types.
+The `keysOf`, `requiredKeysOf`, `optionalKeysOf`, and `deepKeysOf` functions extract property names from object types.
 
 - **`keysOf<T>()`**: Returns an array containing all string property keys declared on `T`.
 - **`requiredKeysOf<T>()`**: Returns an array of keys for non-optional properties (`optional: false`).
 - **`optionalKeysOf<T>()`**: Returns an array of keys for optional properties (`optional: true` or `undefined` union).
-
+- **`deepKeysOf<T>(options?: { maxDepth?: number })`**: Returns an array of dot-separated deep property key paths (default `maxDepth: 5`, stopping recursion at nested limit or cycles).
 When transformed by the `wiz` plugin, these calls are rewritten directly into static array literals:
 
 ```js
@@ -69,13 +69,23 @@ Because `is` is a type predicate, TypeScript narrows `value` within conditional 
 
 ## Validation with `validate<T>`
 
-`validate<T>(value: unknown)` checks a value against `T` and returns a list of validation errors (`ValidationError[]`). If the value is valid, it returns an empty array `[]`.
+`validate<T>(value: unknown, options?: ValidateOptions)` checks a value against `T` and returns a list of validation errors (`ValidationError[]`). If the value is valid, it returns an empty array `[]`.
+
+### In-Place Pruning (`prune: true`)
+
+Pass `options: { prune: true }` to strip undeclared properties from `value` in place during validation (similar to Ajv's `removeAdditional`):
 
 ```ts
-import { validate, type ValidationError } from "wiz";
+import { validate } from "wiz";
 
-const errors = validate<User>({ id: 123 });
+const data = { id: "u1", name: "Alice", extraField: 123 };
+const errors = validate<User>(data, { prune: true });
+
+// `data.extraField` is deleted in place; `errors` is []
+console.log(data); // → { id: "u1", name: "Alice" }
 ```
+
+Levels whose schema explicitly allows additional properties (e.g., `Record<string, unknown>`) leave extra fields intact.
 
 ### ValidationError Structure
 
@@ -116,6 +126,45 @@ const errors = validate<Order>({
 // errors[0].actual === "two"
 ```
 
+## Query String Parsing with `parseQuery<T>`
+
+`parseQuery<T>(input: unknown, options?: ValidateOptions)` converts raw query string inputs into typed object `T`:
+
+- **Input Types**: Accepts a `string` (e.g. `"?page=1&active=true"`), a `URLSearchParams` instance, or a raw record.
+- **Type Coercion**: Automatically coerces string field values to declared numbers, bigints, booleans, dates, and arrays.
+- **Validation & Errors**: Runs `validate<T>` over the coerced result. Throws `QueryValidationError` containing `errors: ValidationError[]` on failure.
+
+```ts
+import { parseQuery, QueryValidationError } from "wiz";
+
+type SearchQuery = {
+  page?: number;
+  active?: boolean;
+  tags?: string[];
+};
+
+try {
+  const query = parseQuery<SearchQuery>("?page=2&active=true&tags=a&tags=b");
+  console.log(query); // → { page: 2, active: true, tags: ["a", "b"] }
+} catch (err) {
+  if (err instanceof QueryValidationError) {
+    console.error("Invalid query:", err.errors);
+  }
+}
+```
+## Type Assertion with `assert<T>`
+
+`assert<T>(value: unknown, options?: ValidateOptions): asserts value is T` validates `value` against `T`. If valid, it narrows `value` to `T` at the callsite. If invalid, it throws an `AssertError` carrying `errors: ValidationError[]`.
+
+```ts
+import { assert } from "wiz";
+
+function processUserData(input: unknown) {
+  assert<User>(input);
+  // `input` is now narrowed to `User`
+  console.log(input.name);
+}
+```
 ## Relationship Between `is` and `validate`
 
 `is` and `validate` share identical validation logic generated from the same TypeIR:

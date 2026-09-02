@@ -6,6 +6,21 @@ export interface ValidationError {
   actual?: unknown;
 }
 
+/** What {@link validate} can be asked to do beyond collecting errors. */
+export interface ValidateOptions {
+  /**
+   * Removes properties the type does not declare, in place: the object passed
+   * in is the object that ends up pruned, as with Ajv's `removeAdditional`.
+   *
+   * A level whose schema allows additional properties is left alone - those
+   * fields are declared, just not by name - so pruning never discards data the
+   * type said to expect.
+   */
+  prune?: boolean;
+  /** Prefix for every reported path, for validating a value in context. */
+  path?: string;
+}
+
 /**
  * Constraints *validate*. Every kind here is enforced by the generated
  * validator and maps onto a JSON Schema assertion keyword. Purely descriptive
@@ -516,6 +531,108 @@ export const INTEGER_FORMATS: Record<string, { min: bigint; max: bigint }> = {
   "sf-integer": { min: -999999999999999n, max: 999999999999999n },
   unixtime: { min: -(2n ** 63n), max: 2n ** 63n - 1n },
 };
+
+/**
+ * String `@format` values that are *enforced*, as one table.
+ *
+ * One source so the validator and the zod schema cannot disagree: both read
+ * `pattern` from here, so a value either back end rejects is rejected by the
+ * other for the same reason. `label` is what the error reports.
+ *
+ * `pattern` is a regex source rather than a `RegExp` because both consumers
+ * emit it into generated code as text.
+ *
+ * Deliberately absent: `date-time`, `date` and `binary` are *primitive*
+ * formats - see `PRIMITIVE_FORMATS` in `openapiDialect.ts` - which change the
+ * type a field carries rather than constraining a string. `regex` is here in
+ * name only: "compiles as a regex" is not a pattern, so the validator checks
+ * it by compiling, and {@link STRING_FORMAT_REGEX} marks it.
+ */
+export const STRING_FORMATS: Record<string, { pattern: string; label: string }> = {
+  email: {
+    // Deliberately loose, and unchanged from when it was the only format: a
+    // full RFC 5322 address is not expressible in a readable regex, and a
+    // stricter one rejects addresses that deliver.
+    pattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+    label: "email",
+  },
+  uuid: {
+    pattern:
+      "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+    label: "uuid",
+  },
+  // RFC 3986: a URI has a scheme, a reference need not.
+  uri: {
+    pattern: "^[A-Za-z][A-Za-z0-9+.-]*:[^\\s]*$",
+    label: "uri",
+  },
+  "uri-reference": {
+    pattern: "^(?:[A-Za-z][A-Za-z0-9+.-]*:)?[^\\s]*$",
+    label: "uri-reference",
+  },
+  // RFC 6570: a reference that may carry `{...}` expressions. Braces are only
+  // legal as balanced, non-nested pairs, which is what rules out `{a{b}`.
+  "uri-template": {
+    pattern: "^(?:[^\\s{}]|\\{[^{}\\s]*\\})*$",
+    label: "uri-template",
+  },
+  // RFC 1123: labels of alphanumerics and inner hyphens, 63 bytes each, and a
+  // 253-byte whole. Length is checked by the lookahead, not by counting twice.
+  hostname: {
+    pattern:
+      "^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\\.?$",
+    label: "hostname",
+  },
+  // Four octets, each 0-255: the alternation is what rejects `256` and `01`.
+  ipv4: {
+    pattern:
+      "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$",
+    label: "ipv4",
+  },
+  /**
+   * RFC 4291, including every legal `::` elision and the IPv4-mapped tail.
+   * Written as an alternation over how many groups precede the elision, which
+   * is the only way to keep "at most one `::`" expressible in one regex.
+   */
+  ipv6: {
+    pattern:
+      "^(?:" +
+      "(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}" +
+      "|(?:[0-9a-fA-F]{1,4}:){1,7}:" +
+      "|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}" +
+      "|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}" +
+      "|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}" +
+      "|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}" +
+      "|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}" +
+      "|[0-9a-fA-F]{1,4}:(?::[0-9a-fA-F]{1,4}){1,6}" +
+      "|:(?:(?::[0-9a-fA-F]{1,4}){1,7}|:)" +
+      "|fe80:(?::[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]+" +
+      "|::(?:ffff(?::0{1,4})?:)?(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])" +
+      "|(?:[0-9a-fA-F]{1,4}:){1,4}:(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])" +
+      ")$",
+    label: "ipv6",
+  },
+  // RFC 6901: either empty, or `/`-prefixed tokens where `~` only ever
+  // introduces `~0` or `~1`.
+  "json-pointer": {
+    pattern: "^(?:/(?:[^~/]|~[01])*)*$",
+    label: "json-pointer",
+  },
+  // RFC 6901 relative form: a non-negative integer of upward steps, then
+  // either a `#` or a JSON pointer.
+  "relative-json-pointer": {
+    pattern: "^(?:0|[1-9][0-9]*)(?:#|(?:/(?:[^~/]|~[01])*)*)$",
+    label: "relative-json-pointer",
+  },
+};
+
+/**
+ * The one enforced format that is not a pattern.
+ *
+ * "Is a regular expression" can only be answered by compiling the string, so
+ * the validator emits a `try`/`catch` for it rather than a `.test`.
+ */
+export const STRING_FORMAT_REGEX = "regex";
 
 /** Integers a JS number holds exactly; beyond this a `number` is already wrong. */
 export const SAFE_INTEGER = 9007199254740991n;

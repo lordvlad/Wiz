@@ -2,6 +2,7 @@ import type { TypeIR } from "../types.ts";
 import { generateKeysCode } from "./keys.ts";
 import { generateSchemaCode } from "./schema.ts";
 import { generateValidatorCode } from "./validator.ts";
+import { generateQueryParserCode } from "./query.ts";
 import { generateOpenApiSchemaCode } from "./openapi.ts";
 import { generateOpenRpcSchemaCode } from "./openrpc.ts";
 import type { ServiceIR } from "../ir/service.ts";
@@ -46,9 +47,10 @@ export interface VirtualModuleOptions {
 
 /** Which exports each generated section provides. */
 const SECTION_EXPORTS = {
-  keys: ["keys", "requiredKeys", "optionalKeys"],
+  keys: ["keys", "requiredKeys", "optionalKeys", "deepKeys"],
   schema: ["schema_draft2020", "schema_draft07"],
-  validator: ["validate", "is"],
+  validator: ["validate", "is", "assert"],
+  queryParser: ["parseQuery"],
   openapi: ["openapiSchema"],
   protobuf: ["encodeProto", "decodeProto"],
   protobufSchema: ["protobufSchema"],
@@ -68,13 +70,15 @@ export function generateVirtualModuleCode(
   const wanted = options?.only;
   const include = (section: keyof typeof SECTION_EXPORTS): boolean =>
     wanted === undefined ||
-    SECTION_EXPORTS[section].some((name) => wanted.includes(name));
+    SECTION_EXPORTS[section].some((name) => wanted.includes(name)) ||
+    (section === "validator" && wanted.includes("parseQuery"));
 
   const parts = [`// Auto-generated virtual module by wizPlugin`];
 
   if (include("keys")) parts.push(generateKeysCode(ir));
   if (include("schema")) parts.push(generateSchemaCode(ir));
   if (include("validator")) parts.push(generateValidatorCode(ir));
+  if (include("queryParser")) parts.push(generateQueryParserCode(ir));
   if (include("protobuf")) parts.push(generateProtobufCode(ir));
   if (include("avro")) parts.push(generateAvroCode(ir));
   if (include("json")) parts.push(generateJsonCode(ir));

@@ -1,4 +1,4 @@
-import type { ValidationError } from "./types.ts";
+import type { ValidateOptions, ValidationError } from "./types.ts";
 export { openRPCHandler, type OpenRpcHandlerOptions, type OpenRpcHandler } from "./server/openrpc.ts";
 export {
   openRpcClient,
@@ -13,6 +13,7 @@ export {
   type WebSocketTransportOptions,
   type TcpTransportOptions,
 } from "./transports/openrpc.ts";
+export { QueryValidationError } from "./generators/query.ts";
 
 
 export class PluginInactiveError extends Error {
@@ -61,7 +62,16 @@ export function schema<
   throw new PluginInactiveError("schema");
 }
 
-export function validate<T>(_arg: unknown): ValidationError[] {
+/**
+ * Collects every way `arg` fails to match `T`.
+ *
+ * `options.prune` additionally strips properties `T` does not declare, in
+ * place - see {@link ValidateOptions}.
+ */
+export function validate<T>(
+  _arg: unknown,
+  _options?: ValidateOptions
+): ValidationError[] {
   throw new PluginInactiveError("validate");
 }
 
@@ -72,6 +82,18 @@ export function validate<T>(_arg: unknown): ValidationError[] {
  */
 export function is<T>(_arg: unknown): _arg is T {
   throw new PluginInactiveError("is");
+}
+/**
+ * Parses a query string, `URLSearchParams`, or raw object into `T`.
+ *
+ * Coerces declared field values to expected types and validates the result.
+ * Throws {@link QueryValidationError} if validation fails.
+ */
+export function parseQuery<T>(
+  _input: unknown,
+  _options?: ValidateOptions
+): T {
+  throw new PluginInactiveError("parseQuery");
 }
 export type HttpMethod =
   | "get"

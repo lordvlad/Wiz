@@ -71,20 +71,23 @@ are exported for tests.
 
 ## What it generates
 
-| Call | Produces |
+| Call | Signature / Produces |
 |---|---|
 | `keysOf<T>()` | `(keyof T)[]` |
-| `requiredKeysOf<T>()` / `optionalKeysOf<T>()` | the split |
-| `schema<T>(version?)` | JSON Schema, `draft-2020-12` or `draft-07` |
-| `validate<T>(value)` | `ValidationError[]` with paths |
-| `is<T>(value)` | `value is T` — narrows, without building the error list |
-| `openapiSchema<[A, B]>(base?, ops?)` | an OpenAPI 3.0 or 3.1 document |
-| `protobufSchema<[A, B]>()` / `encodeProto` / `decodeProto` | `.proto` text and a binary codec |
-| `avroSchema<[A, B]>()` / `encodeAvro` / `decodeAvro` | `.avsc` text and a binary codec |
+| `requiredKeysOf<T>()` | `(keyof T)[]` (required properties only) |
+| `optionalKeysOf<T>()` | `(keyof T)[]` (optional properties only) |
+| `deepKeysOf<T>(options?)` | `string[]` (dot-separated deep keys, maxDepth default 5) |
+| `schema<T>(version?)` | JSON Schema document (`draft-2020-12` or `draft-07`) |
+| `validate<T>(value, options?)` | `ValidationError[]` (options: `prune: true`, `path`) |
+| `is<T>(value)` | `value is T` (type predicate narrowing, zero allocation) |
+| `assert<T>(value, options?)` | `asserts value is T` (narrows type, throws `AssertError` on failure) |
+| `parseQuery<T>(input, options?)` | `T` (parses query string/URLSearchParams/record with coercion) |
+| `openapiSchema<[A, B]>(base?, ops?)` | OpenAPI 3.0 or 3.1 document |
+| `protobufSchema<[A, B]>()` / `encodeProto` / `decodeProto` | `.proto` text and binary codec |
+| `avroSchema<[A, B]>()` / `encodeAvro` / `decodeAvro` | `.avsc` text and binary codec |
 | `arrowSchema<[A, B]>()` / `encodeArrow` / `decodeArrow` | Arrow IPC stream binary codec |
 | `encodeJson<T>(val)` / `decodeJson<T>(raw)` | JSON string codec with `bigint`, `Date`, `bytes` handling |
-| `zodSchema<T>()` | a `Promise` of a zod schema, built from the same IR |
-
+| `zodSchema<T>()` | `Promise<ZodSchema>` (built from same IR) |
 Detailed guides for every feature, extractor, and generator live in [docs/](./docs/README.md).
 Identical types share one generated module, so `is<User>(a)` in two files
 imports the same function.

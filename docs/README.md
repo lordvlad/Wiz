@@ -9,7 +9,7 @@
 - **[CLI Reference](./cli.md)** — `wiz init`, `wiz eject`, and `wiz generate` commands, flags, and options.
 
 ### Introspection & Validation
-- **[Type Introspection](./type-introspection.md)** — `keysOf`, `requiredKeysOf`, `optionalKeysOf`, `is<T>`, and `validate<T>`.
+- **[Type Introspection](./type-introspection.md)** — `keysOf<T>()`, `requiredKeysOf<T>()`, `optionalKeysOf<T>()`, `deepKeysOf<T>()`, `is<T>()`, `validate<T>()`, `assert<T>()`, and `parseQuery<T>()`.
 - **[JSDoc Annotations](./annotations.md)** — Reference for validation constraints (`@minLength`, `@min`, `@pattern`, `@format`), descriptive tags, and integer width formats.
 - **[JSON Codec](./json-codec.md)** — `encodeJson<T>` and `decodeJson<T>` with spec-aligned handling for `bigint`, `Date`, and `Uint8Array`.
 - **[Zod Integration](./zod.md)** — `zodSchema<T>()`, lazy loading, peer dependencies, and type mapping.

@@ -178,9 +178,17 @@ What differs is how much anything downstream *does* with it. Three tiers:
 | Format | Check |
 |---|---|
 | `email` | `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` on strings |
-| `uuid` | the 8-4-4-4-12 hex pattern on strings |
+| `uuid` | RFC 4122 8-4-4-4-12 hex pattern on strings |
+| `uri` | RFC 3986 scheme-prefixed URI pattern on strings |
+| `uri-reference` | RFC 3986 URI reference pattern on strings |
+| `uri-template` | RFC 6570 URI template pattern on strings |
+| `hostname` | RFC 1123 hostname pattern on strings |
+| `ipv4` | IPv4 dotted-quad pattern on strings |
+| `ipv6` | RFC 4291 IPv6 pattern on strings |
+| `regex` | regular expression compilation check on strings |
+| `json-pointer` | RFC 6901 JSON pointer pattern on strings |
+| `relative-json-pointer` | RFC 6901 relative JSON pointer pattern on strings |
 | every key of `INTEGER_FORMATS` | integrality and range, on `number` and `bigint` |
-
 **Mapped** — no check, but the format selects a different wire type in at least
 one codec: `float`, `double`, `date`, `time`, `date-time`, `byte`, `binary`,
 `sf-decimal`. See [protobuf.md](./protobuf.md) and

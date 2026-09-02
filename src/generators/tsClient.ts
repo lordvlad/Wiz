@@ -524,7 +524,7 @@ function httpOperation(
       `      if (${expression} !== undefined) {`,
       `        const errors: ValidationError[] = [];`,
       `        ${root.declaration}`,
-      generateValidationBlock(ir, expression, root.expression)
+      generateValidationBlock(ir, expression, root.expression, 0, true)
         .split("\n")
         .map((line) => `        ${line}`)
         .join("\n"),
@@ -582,7 +582,6 @@ function httpOperation(
     );
   }
 
-  const valPrefix = requestChecks.length > 0 ? `${requestChecks.join("\n")}\n` : "";
 
   const validatesResponse =
     responseTypeIR !== undefined && isValidationEnabled(options, "response");
@@ -594,13 +593,18 @@ function httpOperation(
     return [
       `      const errors: ValidationError[] = [];`,
       `      ${root.declaration}`,
-      generateValidationBlock(responseTypeIR!, "result", root.expression)
+      generateValidationBlock(responseTypeIR!, "result", root.expression, 0, true)
         .split("\n")
         .map((line) => `      ${line}`)
         .join("\n"),
       `      if (errors.length > 0) throw new ClientValidationError("response", errors);`,
     ].join("\n");
   };
+
+  const hasValidation = requestChecks.length > 0 || validatesResponse;
+  const valPrefix = hasValidation
+    ? `      const __prune = false;\n${requestChecks.length > 0 ? `${requestChecks.join("\n")}\n` : ""}`
+    : "";
 
   let body: string;
   if (returns === "void") {
