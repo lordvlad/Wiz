@@ -24,6 +24,7 @@
 - **[Protocol Buffers](./protobuf.md)** — `protobufSchema`, `encodeProto`, `decodeProto`, `@fieldNumber`, scalar widths, `oneof`, and `NumberedUnion`.
 - **[gRPC Client](./grpc.md)** — Proto front end, all 4 streaming directions, `createHttp2Transport()`, deadlines, metadata, and trailers.
 - **[Avro & Apache Arrow](./avro-and-arrow.md)** — `.avsc` row schemas, Avro codecs, and Apache Arrow IPC columnar batch streaming.
+- **[Erlang Codecs](./erlang.md)** — `encodeErlangText`, `decodeErlangText`, `encodeErlangBinary`, and `decodeErlangBinary` for Erlang Text and ETF 131 binary format.
 
 ### Extensibility & Architecture
 - **[Architecture](./architecture.md)** — IR design (`TypeIR`, `ServiceIR`, `ApiIR`), transform pipeline, virtual module mounting (`wiz-virtual/<key>/index.js`), and registry identity.

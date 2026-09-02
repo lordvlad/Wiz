@@ -162,6 +162,10 @@ export function evalModule<T>(code: string): T {
     "zodSchema",
     "encodeJson",
     "decodeJson",
+    "encodeErlangText",
+    "decodeErlangText",
+    "encodeErlangBinary",
+    "decodeErlangBinary",
   ];
 
   const collected = exportNames

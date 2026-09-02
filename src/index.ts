@@ -327,7 +327,7 @@ export function arrowSchema<TTypes extends unknown[]>(
 /**
  * Encodes an object to a JSON string with spec-aligned handling for bigint and date fields.
  */
-export function encodeJson<T>(_val: T): string {
+export function encodeJson<T>(_val: T, _indent?: string | number): string {
   throw new PluginInactiveError("encodeJson");
 }
 
@@ -336,6 +336,33 @@ export function encodeJson<T>(_val: T): string {
  */
 export function decodeJson<T>(_raw: string): T {
   throw new PluginInactiveError("decodeJson");
+}
+/**
+ * Encodes a term into Erlang Text format.
+ */
+export function encodeErlangText<T>(_val: T, _indent?: string | number): string {
+  throw new PluginInactiveError("encodeErlangText");
+}
+
+/**
+ * Decodes an Erlang Text format string into a term.
+ */
+export function decodeErlangText<T>(_raw: string): T {
+  throw new PluginInactiveError("decodeErlangText");
+}
+
+/**
+ * Encodes a term into Erlang ETF (External Term Format 131) binary.
+ */
+export function encodeErlangBinary<T>(_val: T): Uint8Array {
+  throw new PluginInactiveError("encodeErlangBinary");
+}
+
+/**
+ * Decodes an Erlang ETF (External Term Format 131) binary into a term.
+ */
+export function decodeErlangBinary<T>(_raw: Uint8Array): T {
+  throw new PluginInactiveError("decodeErlangBinary");
 }
 
 /**

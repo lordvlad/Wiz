@@ -45,6 +45,10 @@ const HELPER_FUNCTIONS = new Set([
   "zodSchema",
   "encodeJson",
   "decodeJson",
+  "encodeErlangText",
+  "decodeErlangText",
+  "encodeErlangBinary",
+  "decodeErlangBinary",
 ]);
 
 /**
@@ -140,6 +144,10 @@ export const VIRTUAL_EXPORTS: Record<string, string> = {
   zodSchema: "__wiz_zodSchema",
   encodeJson: "__wiz_encodeJson",
   decodeJson: "__wiz_decodeJson",
+  encodeErlangText: "__wiz_encodeErlangText",
+  decodeErlangText: "__wiz_decodeErlangText",
+  encodeErlangBinary: "__wiz_encodeErlangBinary",
+  decodeErlangBinary: "__wiz_decodeErlangBinary",
 };
 
 export function localAlias(exportName: string, hash: string): string {
@@ -643,6 +651,42 @@ export function transformSource(options: TransformOptions): TransformResult {
                 const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
                 return context.factory.createCallExpression(
                   context.factory.createIdentifier(`__wiz_decodeJson_${hash}`),
+                  undefined,
+                  visitedArgs
+                );
+              }
+              case "encodeErlangText": {
+                wantExport("encodeErlangText");
+                const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
+                return context.factory.createCallExpression(
+                  context.factory.createIdentifier(`__wiz_encodeErlangText_${hash}`),
+                  undefined,
+                  visitedArgs
+                );
+              }
+              case "decodeErlangText": {
+                wantExport("decodeErlangText");
+                const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
+                return context.factory.createCallExpression(
+                  context.factory.createIdentifier(`__wiz_decodeErlangText_${hash}`),
+                  undefined,
+                  visitedArgs
+                );
+              }
+              case "encodeErlangBinary": {
+                wantExport("encodeErlangBinary");
+                const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
+                return context.factory.createCallExpression(
+                  context.factory.createIdentifier(`__wiz_encodeErlangBinary_${hash}`),
+                  undefined,
+                  visitedArgs
+                );
+              }
+              case "decodeErlangBinary": {
+                wantExport("decodeErlangBinary");
+                const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
+                return context.factory.createCallExpression(
+                  context.factory.createIdentifier(`__wiz_decodeErlangBinary_${hash}`),
                   undefined,
                   visitedArgs
                 );

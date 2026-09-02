@@ -6,7 +6,7 @@ import { transformSource } from "../src/plugin.ts";
 import { silentLogger } from "../src/logger.ts";
 
 interface JsonCodec {
-  encodeJson(val: unknown): string;
+  encodeJson(val: unknown, indent?: string | number): string;
   decodeJson(raw: string): unknown;
 }
 
@@ -18,7 +18,7 @@ describe("JSON encoders and decoders (encodeJson / decodeJson)", () => {
     const ir = irFor("export interface Plain { id: string; count: number }", "Plain");
     const code = generateJsonCode(ir);
 
-    expect(code).toContain("return JSON.stringify(val);");
+    expect(code).toContain("return JSON.stringify(val, null, indent);");
     expect(code).toContain('return typeof raw === "string" ? JSON.parse(raw) : raw;');
   });
 
@@ -80,5 +80,17 @@ describe("JSON encoders and decoders (encodeJson / decodeJson)", () => {
     expect(code).toContain('import type { User } from "./model.ts";');
     expect(code).toContain("export function encodeUser(val: User): string");
     expect(code).toContain("export function decodeUser(raw: string): User");
+  });
+  test("encodeJson accepts optional indent parameter", () => {
+    const ir = irFor("export interface Plain { id: string; count: number }", "Plain");
+    const code = generateJsonCode(ir);
+    const mod = evalModule<JsonCodec>(code);
+
+    const data = { id: "a1", count: 10 };
+    const indentedNum = mod.encodeJson(data, 2);
+    expect(indentedNum).toBe(JSON.stringify(data, null, 2));
+
+    const indentedStr = mod.encodeJson(data, "\t");
+    expect(indentedStr).toBe(JSON.stringify(data, null, "\t"));
   });
 });

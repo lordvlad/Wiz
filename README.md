@@ -86,7 +86,9 @@ are exported for tests.
 | `protobufSchema<[A, B]>()` / `encodeProto` / `decodeProto` | `.proto` text and binary codec |
 | `avroSchema<[A, B]>()` / `encodeAvro` / `decodeAvro` | `.avsc` text and binary codec |
 | `arrowSchema<[A, B]>()` / `encodeArrow` / `decodeArrow` | Arrow IPC stream binary codec |
-| `encodeJson<T>(val)` / `decodeJson<T>(raw)` | JSON string codec with `bigint`, `Date`, `bytes` handling |
+| `encodeJson<T>(val, indent?)` / `decodeJson<T>(raw)` | JSON string codec with `indent`, `bigint`, `Date`, `bytes` handling |
+| `encodeErlangText<T>(val, indent?)` / `decodeErlangText<T>(raw)` | Erlang Text codec with atom mapping, map key rules, and `indent` |
+| `encodeErlangBinary<T>(val)` / `decodeErlangBinary<T>(raw)` | Erlang External Term Format (ETF 131) binary codec |
 | `zodSchema<T>()` | `Promise<ZodSchema>` (built from same IR) |
 Detailed guides for every feature, extractor, and generator live in [docs/](./docs/README.md).
 Identical types share one generated module, so `is<User>(a)` in two files

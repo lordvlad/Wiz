@@ -14,6 +14,7 @@ import { generateAvroCode, generateAvroSchemaCode } from "./avro.ts";
 import { generateArrowCode, generateArrowSchemaCode } from "./arrow.ts";
 import { generateJsonCode } from "./json.ts";
 import { generateZodSchemaCode } from "./zod.ts";
+import { generateErlangTextCode, generateErlangBinaryCode } from "./erlang.ts";
 import type { Generator } from "./generator.ts";
 
 export interface VirtualModuleOptions {
@@ -61,6 +62,8 @@ const SECTION_EXPORTS = {
   zod: ["zodSchema"],
   json: ["encodeJson", "decodeJson"],
   openrpc: ["openRPCSchema"],
+  erlangText: ["encodeErlangText", "decodeErlangText"],
+  erlangBinary: ["encodeErlangBinary", "decodeErlangBinary"],
 } as const;
 
 export function generateVirtualModuleCode(
@@ -82,6 +85,8 @@ export function generateVirtualModuleCode(
   if (include("protobuf")) parts.push(generateProtobufCode(ir));
   if (include("avro")) parts.push(generateAvroCode(ir));
   if (include("json")) parts.push(generateJsonCode(ir));
+  if (include("erlangText")) parts.push(generateErlangTextCode(ir));
+  if (include("erlangBinary")) parts.push(generateErlangBinaryCode(ir));
 
   // An empty `openApiTypes` array is still a request for an OpenAPI document:
   // `openapiSchema<[]>(base, [...ops])` carries all its content in methods.

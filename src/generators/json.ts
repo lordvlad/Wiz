@@ -215,8 +215,8 @@ export function generateJsonCode(ir: TypeIR): string {
 
   const encodeBody =
     enc === "val"
-      ? "  return JSON.stringify(val);"
-      : `  const obj = ${enc};\n  return JSON.stringify(obj);`;
+      ? "  return JSON.stringify(val, null, indent);"
+      : `  const obj = ${enc};\n  return JSON.stringify(obj, null, indent);`;
 
   const decodeBody =
     decStmts.length === 0
@@ -224,7 +224,7 @@ export function generateJsonCode(ir: TypeIR): string {
       : `  let val = typeof raw === "string" ? JSON.parse(raw) : raw;\n  ${decStmts.join("\n  ")}\n  return val;`;
 
   return [
-    `export function encodeJson(val) {`,
+    `export function encodeJson(val, indent) {`,
     encodeBody,
     `}`,
     ``,
