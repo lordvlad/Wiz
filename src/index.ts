@@ -251,6 +251,42 @@ export function openRPCSchema<TTypes extends unknown[] = unknown[]>(
 ): Record<string, unknown> {
   throw new PluginInactiveError("openRPCSchema");
 }
+/** Options for AsyncAPI channel descriptors. */
+export interface AsyncApiChannelOptions {
+  channel?: string;
+  summary?: string;
+  description?: string;
+}
+
+/**
+ * AsyncAPI producer operation descriptor (publish / send message).
+ */
+export function producer<TSpec>(
+  handlerOrChannel?: unknown,
+  _options?: AsyncApiChannelOptions
+): typeof handlerOrChannel {
+  return handlerOrChannel;
+}
+
+/**
+ * AsyncAPI consumer operation descriptor (subscribe / receive message).
+ */
+export function consumer<TSpec>(
+  handlerOrChannel?: unknown,
+  _options?: AsyncApiChannelOptions
+): typeof handlerOrChannel {
+  return handlerOrChannel;
+}
+
+/**
+ * AsyncAPI document generator stub.
+ */
+export function asyncapiSchema<TTypes extends unknown[] = unknown[]>(
+  _baseSchema?: Record<string, unknown>,
+  _options?: Record<string, unknown>
+): Record<string, unknown> {
+  throw new PluginInactiveError("asyncapiSchema");
+}
 
 
 /**

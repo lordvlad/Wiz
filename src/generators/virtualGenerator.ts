@@ -15,13 +15,14 @@ import { generateArrowCode, generateArrowSchemaCode } from "./arrow.ts";
 import { generateJsonCode } from "./json.ts";
 import { generateZodSchemaCode } from "./zod.ts";
 import { generateErlangTextCode, generateErlangBinaryCode } from "./erlang.ts";
-import type { Generator } from "./generator.ts";
+import { generateAsyncApiSchemaCode, type AsyncApiVersion } from "./asyncapi.ts";
 
 export interface VirtualModuleOptions {
   openApiTypes?: Array<{ name: string; ir: TypeIR }>;
   openRpcTypes?: Array<{ name: string; ir: TypeIR }>;
+  asyncApiTypes?: Array<{ name: string; ir: TypeIR }>;
   openApiVersion?: "3.0" | "3.1";
-  /** Methods harvested from route maps or the path builder. */
+  asyncApiVersion?: AsyncApiVersion;
   service?: ServiceIR;
   protobufSchemaTypes?: Array<{ name: string; ir: TypeIR }>;
   avroSchemaTypes?: Array<{ name: string; ir: TypeIR }>;
@@ -64,6 +65,7 @@ const SECTION_EXPORTS = {
   openrpc: ["openRPCSchema"],
   erlangText: ["encodeErlangText", "decodeErlangText"],
   erlangBinary: ["encodeErlangBinary", "decodeErlangBinary"],
+  asyncapi: ["asyncapiSchema"],
 } as const;
 
 export function generateVirtualModuleCode(
@@ -103,6 +105,15 @@ export function generateVirtualModuleCode(
     parts.push(
       generateOpenRpcSchemaCode(
         options.openRpcTypes ?? [],
+        options.service
+      )
+    );
+  }
+  if ((options?.asyncApiTypes || options?.service) && include("asyncapi")) {
+    parts.push(
+      generateAsyncApiSchemaCode(
+        options.asyncApiTypes ?? [],
+        options.asyncApiVersion ?? "3.0",
         options.service
       )
     );

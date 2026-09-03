@@ -33,6 +33,9 @@ const HELPER_FUNCTIONS = new Set([
   "assert",
   "openapiSchema",
   "openRPCSchema",
+  "asyncapiSchema",
+  "producer",
+  "consumer",
   "encodeProto",
   "decodeProto",
   "protobufSchema",
@@ -132,6 +135,7 @@ export const VIRTUAL_EXPORTS: Record<string, string> = {
   assert: "__wiz_assert",
   openapiSchema: "__wiz_openapiSchema",
   openRPCSchema: "__wiz_openRPCSchema",
+  asyncapiSchema: "__wiz_asyncapiSchema",
   encodeProto: "__wiz_encodeProto",
   decodeProto: "__wiz_decodeProto",
   protobufSchema: "__wiz_protobufSchema",
@@ -557,6 +561,45 @@ export function transformSource(options: TransformOptions): TransformResult {
                   : undefined;
                 return context.factory.createCallExpression(
                   context.factory.createIdentifier(`__wiz_openapiSchema_${key}`),
+                  undefined,
+                  baseArg ? [baseArg] : []
+                );
+              }
+              case "asyncapiSchema": {
+                const asyncApiVersion = "3.0" as const;
+
+                const asyncApiTypes: Array<{ name: string; ir: TypeIR }> = [];
+                let typeArgs: readonly ts.Type[] = [];
+                if (checker.isTupleType(tsType)) {
+                  typeArgs = checker.getTypeArguments(tsType as ts.TypeReference);
+                } else if (tsType) {
+                  typeArgs = [tsType];
+                }
+
+                for (const elemType of typeArgs) {
+                  const elemIR = extractTypeIR(elemType, checker);
+                  const sym = elemType.aliasSymbol ?? elemType.symbol;
+                  const name = sym && !sym.name.startsWith("__") ? sym.name : (elemIR.name ?? `Schema_${asyncApiTypes.length + 1}`);
+                  asyncApiTypes.push({ name, ir: elemIR });
+                }
+
+                const serviceMethods = collectOperations(
+                  node.arguments[1],
+                  checker,
+                  sourceFile
+                );
+
+                const key = registerPayload("asyncapiSchema", {
+                  asyncApiTypes,
+                  asyncApiVersion,
+                  service: { kind: "service", methods: serviceMethods },
+                });
+
+                const baseArg = node.arguments[0]
+                  ? (ts.visitNode(node.arguments[0], visitor) as ts.Expression)
+                  : undefined;
+                return context.factory.createCallExpression(
+                  context.factory.createIdentifier(`__wiz_asyncapiSchema_${key}`),
                   undefined,
                   baseArg ? [baseArg] : []
                 );

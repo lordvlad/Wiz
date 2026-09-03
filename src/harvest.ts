@@ -35,7 +35,7 @@ const HTTP_METHODS = new Set([
 
 const JSON_MIME = "application/json";
 
-/** Slots understood inside an `op<{ … }>()` type argument. */
+/** Slots understood inside an `op<{ … }>()`, `producer<{ … }>()`, or `consumer<{ … }>()` type argument. */
 const SPEC_SLOTS = new Set([
   "path",
   "query",
@@ -45,6 +45,10 @@ const SPEC_SLOTS = new Set([
   "response",
   "responses",
   "status",
+  "channel",
+  "message",
+  "payload",
+  "headers",
 ]);
 
 export const COMPILER_OPTIONS: ts.CompilerOptions = {
@@ -329,7 +333,7 @@ function asOperationCall(node: ts.Expression): ts.CallExpression | undefined {
     : ts.isPropertyAccessExpression(callee)
       ? callee.name.text
       : undefined;
-  return name === "op" ? node : undefined;
+  return name === "op" || name === "producer" || name === "consumer" ? node : undefined;
 }
 
 /**

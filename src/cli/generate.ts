@@ -203,11 +203,6 @@ function parse(argv: string[]): Invocation {
   };
 }
 
-/**
- * A generator is a plugin, so its shape is only known at runtime. Checking the
- * three roots individually is what makes the failure message say which export
- * was missing instead of "not a generator".
- */
 function usable(value: unknown): value is Generator<GenerateOptions> {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Partial<Generator<GenerateOptions>>;
@@ -224,8 +219,12 @@ const GENERATOR_SHORTCUTS: Record<string, string> = {
   "reactQuery.ts": "../generators/reactQuery.ts",
   tsClient: "../generators/tsClient.ts",
   "tsClient.ts": "../generators/tsClient.ts",
+  asyncapiClient: "../generators/tsClient.ts",
+  "asyncapiClient.ts": "../generators/tsClient.ts",
   openrpc: "../generators/openrpc.ts",
   "openrpc.ts": "../generators/openrpc.ts",
+  asyncapi: "../generators/asyncapi.ts",
+  "asyncapi.ts": "../generators/asyncapi.ts",
 };
 
 async function loadGenerator(

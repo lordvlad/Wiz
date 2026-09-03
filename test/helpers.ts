@@ -166,6 +166,9 @@ export function evalModule<T>(code: string): T {
     "decodeErlangText",
     "encodeErlangBinary",
     "decodeErlangBinary",
+    "asyncapiSchema",
+    "producer",
+    "consumer",
   ];
 
   const collected = exportNames

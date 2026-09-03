@@ -83,6 +83,7 @@ are exported for tests.
 | `assert<T>(value, options?)` | `asserts value is T` (narrows type, throws `AssertError` on failure) |
 | `parseQuery<T>(input, options?)` | `T` (parses query string/URLSearchParams/record with coercion) |
 | `openapiSchema<[A, B]>(base?, ops?)` | OpenAPI 3.0 or 3.1 document |
+| `asyncapiSchema<[A, B]>(base?, ops?)` / `producer` / `consumer` | AsyncAPI 2.6 or 3.0 document generator |
 | `protobufSchema<[A, B]>()` / `encodeProto` / `decodeProto` | `.proto` text and binary codec |
 | `avroSchema<[A, B]>()` / `encodeAvro` / `decodeAvro` | `.avsc` text and binary codec |
 | `arrowSchema<[A, B]>()` / `encodeArrow` / `decodeArrow` | Arrow IPC stream binary codec |

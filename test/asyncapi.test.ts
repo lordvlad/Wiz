@@ -1,0 +1,170 @@
+// @wiz-ignore
+import { describe, expect, test } from "bun:test";
+import { extractAsyncApiIR } from "../src/extractors/asyncapi.ts";
+import { generateAsyncApiSchemaCode } from "../src/generators/asyncapi.ts";
+import { generate } from "../src/generators/generator.ts";
+import { tsClientGenerator } from "../src/generators/tsClient.ts";
+import { transformSource } from "../src/plugin.ts";
+import { silentLogger } from "../src/logger.ts";
+import { getIRsForSource, evalModule } from "./helpers.ts";
+
+describe("AsyncAPI Extractor", () => {
+  test("extracts AsyncAPI 3.0 document IR", () => {
+    const doc = JSON.stringify({
+      asyncapi: "3.0.0",
+      info: { title: "User Events", version: "1.0.0" },
+      channels: {
+        userSignup: {
+          address: "users/signup",
+          messages: {
+            UserSignup: { $ref: "#/components/messages/UserSignup" },
+          },
+        },
+      },
+      operations: {
+        onSignup: {
+          action: "send",
+          channel: { $ref: "#/channels/userSignup" },
+          summary: "User signup event",
+        },
+      },
+      components: {
+        messages: {
+          UserSignup: {
+            payload: {
+              type: "object",
+              properties: {
+                userId: { type: "string" },
+                email: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const ir = extractAsyncApiIR(doc);
+    expect(ir.kind).toBe("api");
+    expect(ir.version).toBe("asyncapi-3.0");
+    expect(ir.service.name).toBe("User Events");
+
+    const method = ir.service.methods[0]!;
+    expect(method.operationId).toBe("onSignup");
+    expect(method.address.protocol).toBe("asyncapi");
+    expect(method.address.channel).toBe("users/signup");
+    expect(method.address.action).toBe("send");
+  });
+
+  test("extracts AsyncAPI 2.6 document IR", () => {
+    const doc = JSON.stringify({
+      asyncapi: "2.6.0",
+      info: { title: "Orders API", version: "2.0.0" },
+      channels: {
+        "orders/created": {
+          publish: {
+            operationId: "orderCreated",
+            message: {
+              payload: {
+                type: "object",
+                properties: {
+                  orderId: { type: "string" },
+                  total: { type: "number" },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const ir = extractAsyncApiIR(doc);
+    expect(ir.version).toBe("asyncapi-2.6");
+    expect(ir.service.name).toBe("Orders API");
+
+    const method = ir.service.methods[0]!;
+    expect(method.operationId).toBe("orderCreated");
+    expect(method.address.channel).toBe("orders/created");
+    expect(method.address.action).toBe("send");
+  });
+});
+
+describe("AsyncAPI Client Generator (model and decoder only)", () => {
+  test("client generator produces ONLY model.ts and codec.ts", () => {
+    const doc = JSON.stringify({
+      asyncapi: "3.0.0",
+      info: { title: "Events", version: "1.0.0" },
+      channels: {
+        userSignup: {
+          address: "users/signup",
+          messages: {
+            UserSignup: { $ref: "#/components/messages/UserSignup" },
+          },
+        },
+      },
+      operations: {
+        onSignup: {
+          action: "send",
+          channel: { $ref: "#/channels/userSignup" },
+        },
+      },
+      components: {
+        messages: {
+          UserSignup: {
+            payload: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const ir = extractAsyncApiIR(doc);
+    const files = generate(ir, tsClientGenerator, {}, silentLogger);
+
+    expect(Object.keys(files).sort()).toEqual(["codec.ts", "model.ts"]);
+    expect(files["api.ts"]).toBeUndefined();
+    expect(files["transport.ts"]).toBeUndefined();
+
+    expect(files["model.ts"]).toContain("export interface UserSignup");
+    expect(files["codec.ts"]).toContain("export function encodeUserSignup");
+    expect(files["codec.ts"]).toContain("export function decodeUserSignup");
+  });
+});
+
+describe("AsyncAPI Spec Generator and producer / consumer descriptors", () => {
+  test("generates AsyncAPI 3.0 schema virtual module", () => {
+    const irs = getIRsForSource(
+      `export interface OrderEvent { orderId: string; amount: number }`,
+      ["OrderEvent"]
+    );
+    const code = generateAsyncApiSchemaCode(
+      [{ name: "OrderEvent", ir: irs.OrderEvent!.ir }],
+      "3.0"
+    );
+
+    const mod = evalModule<{ asyncapiSchema(): any }>(code);
+    const doc = mod.asyncapiSchema();
+
+    expect(doc.asyncapi).toBe("3.0.0");
+    expect(doc.components.schemas.OrderEvent).toBeDefined();
+    expect(doc.components.messages.OrderEvent).toBeDefined();
+  });
+
+  test("plugin rewrites asyncapiSchema and supports producer and consumer", () => {
+    const source = `
+      import { asyncapiSchema, producer, consumer } from "wiz";
+      export interface UserEvent { id: string }
+      export const doc = asyncapiSchema<[UserEvent]>();
+      export const prod = producer<{ channel: "users/signup"; payload: UserEvent }>();
+      export const cons = consumer<{ channel: "users/logout"; payload: UserEvent }>();
+    `;
+
+    const result = transformSource({ path: "app.ts", contents: source, logger: silentLogger });
+    expect(result.code).toContain("asyncapiSchema as __wiz_asyncapiSchema_");
+    expect(result.code).toContain("producer<{");
+    expect(result.code).toContain("consumer<{");
+  });
+});
