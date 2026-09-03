@@ -1,6 +1,7 @@
 import type { ServiceIR } from "../ir/service.ts";
 import type { TypeIR } from "../types.ts";
 import { irToJsonSchema } from "./schema.ts";
+import { assertValidSpecDocumentSync } from "../validators/jsonSchema.ts";
 
 export type AsyncApiVersion = "2.6" | "3.0";
 
@@ -119,6 +120,7 @@ export function generateAsyncApiSchemaCode(
       schemas,
     };
   }
+  assertValidSpecDocumentSync(document, "AsyncAPI");
 
   const jsonText = JSON.stringify(document, null, 2);
 

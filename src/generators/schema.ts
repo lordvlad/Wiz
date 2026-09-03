@@ -1,5 +1,6 @@
 import type { Annotated, Constraint, TypeIR } from "../types.ts";
 import { INTEGER_FORMATS, SAFE_INTEGER } from "../types.ts";
+import { assertValidSpecDocumentSync } from "../validators/jsonSchema.ts";
 
 function applyConstraints(schema: Record<string, unknown>, constraints?: Constraint[]) {
   if (!constraints) return;
@@ -252,6 +253,8 @@ export function generateSchemaCode(ir: TypeIR): string {
     $schema: "http://json-schema.org/draft-07/schema#",
     ...irToJsonSchema(ir, "draft-07"),
   };
+  assertValidSpecDocumentSync(schema2020, "JSON Schema Draft 2020-12");
+  assertValidSpecDocumentSync(schema07, "JSON Schema Draft 07");
 
   return [
     `export const schema_draft2020 = ${JSON.stringify(schema2020, null, 2)};`,

@@ -5,6 +5,7 @@ import {
   type ServiceIR,
 } from "../ir/service.ts";
 import { irToOpenApiSchema } from "./openapi.ts";
+import { assertValidSpecDocumentSync } from "../validators/jsonSchema.ts";
 
 export interface OpenRpcGeneratorOptions {
   info?: {
@@ -112,6 +113,13 @@ export function generateOpenRpcSchemaCode(
       : {}),
   };
 
+  const sampleDoc = {
+    openrpc: "1.3.0",
+    info: defaultInfo,
+    methods: methodsList,
+    components: { schemas: schemasObj }
+  };
+  assertValidSpecDocumentSync(sampleDoc, "OpenRPC");
   const buildDocument = [
     `function buildOpenRpcDocument(baseSchema = {}) {`,
     `  const components = baseSchema.components || {};`,

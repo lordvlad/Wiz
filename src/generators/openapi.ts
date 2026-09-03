@@ -17,6 +17,7 @@ import {
   type ServiceIR,
   type ServiceMethodBodyIR,
 } from "../ir/service.ts";
+import { assertValidSpecDocumentSync } from "../validators/jsonSchema.ts";
 
 function applyConstraints(
   schema: Record<string, unknown>,
@@ -452,6 +453,13 @@ export function generateOpenApiSchemaCode(
   }
 
   const openapiVersion = version === "3.0" ? "3.0.3" : "3.1.0";
+  const sampleDoc = {
+    openapi: openapiVersion,
+    info: { title: service.name ?? "OpenAPI Service", version: service.version ?? "1.0.0" },
+    ...(version === "3.0" ? { paths: {} } : {}),
+    components: { schemas: schemasObj }
+  };
+  assertValidSpecDocumentSync(sampleDoc, "OpenAPI");
 
   const buildDocument = [
     `function buildDocument(baseSchema = {}) {`,
