@@ -36,8 +36,11 @@ function needsTransform(ir: TypeIR, visited = new Set<TypeIR>()): boolean {
   }
 }
 
+let varSeq = 0;
+
 function encodeExpr(ir: TypeIR, expr: string): string {
   if (!needsTransform(ir)) return expr;
+  const seq = ++varSeq;
 
   switch (ir.kind) {
     case "primitive":
@@ -62,26 +65,29 @@ function encodeExpr(ir: TypeIR, expr: string): string {
       const propsToTransform = ir.properties.filter((p) => needsTransform(p.type));
       if (propsToTransform.length === 0) return expr;
 
+      const varOut = `_out${seq}`;
       const assignments = propsToTransform
         .map(
           (p) =>
-            `if (_out[${JSON.stringify(p.name)}] !== undefined) _out[${JSON.stringify(
+            `if (${varOut}[${JSON.stringify(p.name)}] !== undefined) ${varOut}[${JSON.stringify(
               p.name
-            )}] = ${encodeExpr(p.type, `_out[${JSON.stringify(p.name)}]`)};`
+            )}] = ${encodeExpr(p.type, `${varOut}[${JSON.stringify(p.name)}]`)};`
         )
         .join(" ");
 
-      return `(() => { if (${expr} === null || typeof ${expr} !== "object") return ${expr}; const _out = { ...${expr} }; ${assignments} return _out; })()`;
+      return `(() => { if (${expr} === null || typeof ${expr} !== "object") return ${expr}; const ${varOut} = { ...${expr} }; ${assignments} return ${varOut}; })()`;
     }
 
     case "array":
-      return `(Array.isArray(${expr}) ? ${expr}.map((_item) => ${encodeExpr(
+      return `(Array.isArray(${expr}) ? ${expr}.map((_item${seq}) => ${encodeExpr(
         ir.element,
-        "_item"
+        `_item${seq}`
       )}) : ${expr})`;
 
     case "union":
     case "intersection": {
+      const varV = `_v${seq}`;
+      const varOut = `_out${seq}`;
       const branches: string[] = [];
       for (const t of ir.types) {
         if (needsTransform(t)) {
@@ -89,24 +95,24 @@ function encodeExpr(ir: TypeIR, expr: string): string {
             const propsToTransform = t.properties.filter((p) => needsTransform(p.type));
             for (const p of propsToTransform) {
               branches.push(
-                `if (_v[${JSON.stringify(p.name)}] !== undefined) _out[${JSON.stringify(p.name)}] = ${encodeExpr(p.type, `_v[${JSON.stringify(p.name)}]`)};`
+                `if (${varV}[${JSON.stringify(p.name)}] !== undefined) ${varOut}[${JSON.stringify(p.name)}] = ${encodeExpr(p.type, `${varV}[${JSON.stringify(p.name)}]`)};`
               );
             }
           }
         }
       }
       return `(() => {
-        const _v = ${expr};
-        if (_v === null || _v === undefined) return _v;
-        if (typeof _v === "bigint") return String(_v);
-        if (_v instanceof Date) return _v.toISOString();
-        if (_v instanceof Uint8Array) return typeof Buffer !== "undefined" ? Buffer.from(_v).toString("base64") : btoa(Array.from(_v, (x) => String.fromCharCode(x)).join(""));
-        if (typeof _v === "object") {
-          const _out = Array.isArray(_v) ? [..._v] : { ..._v };
+        const ${varV} = ${expr};
+        if (${varV} === null || ${varV} === undefined) return ${varV};
+        if (typeof ${varV} === "bigint") return String(${varV});
+        if (${varV} instanceof Date) return ${varV}.toISOString();
+        if (${varV} instanceof Uint8Array) return typeof Buffer !== "undefined" ? Buffer.from(${varV}).toString("base64") : btoa(Array.from(${varV}, (x) => String.fromCharCode(x)).join(""));
+        if (typeof ${varV} === "object") {
+          const ${varOut} = Array.isArray(${varV}) ? [...${varV}] : { ...${varV} };
           ${branches.join("\n          ")}
-          return _out;
+          return ${varOut};
         }
-        return _v;
+        return ${varV};
       })()`;
     }
     default:

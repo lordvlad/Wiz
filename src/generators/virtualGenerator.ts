@@ -16,11 +16,14 @@ import { generateJsonCode } from "./json.ts";
 import { generateZodSchemaCode } from "./zod.ts";
 import { generateErlangTextCode, generateErlangBinaryCode } from "./erlang.ts";
 import { generateAsyncApiSchemaCode, type AsyncApiVersion } from "./asyncapi.ts";
+import { generateMcpSchemaCode } from "./mcp.ts";
+import type { Generator } from "./generator.ts";
 
 export interface VirtualModuleOptions {
   openApiTypes?: Array<{ name: string; ir: TypeIR }>;
   openRpcTypes?: Array<{ name: string; ir: TypeIR }>;
   asyncApiTypes?: Array<{ name: string; ir: TypeIR }>;
+  mcpTypes?: Array<{ name: string; ir: TypeIR }>;
   openApiVersion?: "3.0" | "3.1";
   asyncApiVersion?: AsyncApiVersion;
   service?: ServiceIR;
@@ -66,6 +69,7 @@ const SECTION_EXPORTS = {
   erlangText: ["encodeErlangText", "decodeErlangText"],
   erlangBinary: ["encodeErlangBinary", "decodeErlangBinary"],
   asyncapi: ["asyncapiSchema"],
+  mcp: ["mcpSchema"],
 } as const;
 
 export function generateVirtualModuleCode(
@@ -114,6 +118,14 @@ export function generateVirtualModuleCode(
       generateAsyncApiSchemaCode(
         options.asyncApiTypes ?? [],
         options.asyncApiVersion ?? "3.0",
+        options.service
+      )
+    );
+  }
+  if ((options?.mcpTypes || options?.service) && include("mcp")) {
+    parts.push(
+      generateMcpSchemaCode(
+        options.mcpTypes ?? [],
         options.service
       )
     );

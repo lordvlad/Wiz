@@ -8,6 +8,12 @@ import {
   type TypeIR,
   type UnionTypeIR,
 } from "../types.ts";
+import {
+  emptyService,
+  isGrpcMethod,
+  type GrpcServiceMethodIR,
+  type ServiceIR,
+} from "../ir/service.ts";
 import { generateTypeCheckExpression } from "./validator.ts";
 
 /**

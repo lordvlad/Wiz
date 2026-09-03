@@ -5,10 +5,16 @@ import {
   collectOperations,
   collectRouteOperations,
   COMPILER_OPTIONS,
+  harvestAsyncApiOperationsFromTypeArgs,
   harvestDocument,
+  harvestMcpOperationsFromTypeArgs,
+  harvestOpenApiOperationsFromTypeArgs,
+  harvestOpenRpcOperationsFromTypeArgs,
   invalidateHarvest,
+  isServiceLikeType,
   readOpenApiVersion,
 } from "./harvest.ts";
+import { irToJsonSchema } from "./generators/schema.ts";
 import { defaultLogger, type WizLogger } from "./logger.ts";
 import { getRegisteredType, registerType } from "./registry.ts";
 import {
@@ -34,8 +40,7 @@ const HELPER_FUNCTIONS = new Set([
   "openapiSchema",
   "openRPCSchema",
   "asyncapiSchema",
-  "producer",
-  "consumer",
+  "mcpSchema",
   "encodeProto",
   "decodeProto",
   "protobufSchema",
@@ -136,6 +141,7 @@ export const VIRTUAL_EXPORTS: Record<string, string> = {
   openapiSchema: "__wiz_openapiSchema",
   openRPCSchema: "__wiz_openRPCSchema",
   asyncapiSchema: "__wiz_asyncapiSchema",
+  mcpSchema: "__wiz_mcpSchema",
   encodeProto: "__wiz_encodeProto",
   decodeProto: "__wiz_decodeProto",
   protobufSchema: "__wiz_protobufSchema",
@@ -294,7 +300,7 @@ export function transformSource(options: TransformOptions): TransformResult {
 
         // `openapiDocument()` is answered here, from the whole program,
         // so no fragment registry survives into the bundle.
-        if (fnName === "openapiDocument" && node.arguments.length === 0) {
+        if (fnName === "openapiDocument" && node.arguments.length <= 1) {
           if (isolated) {
             throw new Error(
               `[wiz] ${path} calls openapiDocument(), which is built from every ` +
@@ -308,26 +314,12 @@ export function transformSource(options: TransformOptions): TransformResult {
             harvestDocument(path, logger)
           );
         }
-
-        // `op(handler, options)` is a compile-time carrier; the handler is
-        // the only part with runtime meaning.
-        if (fnName === "op") {
-          const handler = node.arguments[0];
-          if (handler) {
-            modified = true;
-            return ts.visitNode(handler, visitor) as ts.Expression;
-          }
-        }
-        // `bunRoutes(base, routes)` / `honoRoutes(app, base, routes)` are
-        // declarations, not transformations: harvest descriptors and let
-        // the original value through untouched.
         const adapter =
           fnName === "bunRoutes"
             ? { base: 0, routes: 1 }
             : fnName === "honoRoutes"
               ? { base: 1, routes: 2 }
               : undefined;
-
         if (adapter && ts.isPropertyAccessExpression(expression)) {
           const routesArg = node.arguments[adapter.routes];
           if (!routesArg) return ts.visitEachChild(node, visitor, context);
@@ -536,18 +528,27 @@ export function transformSource(options: TransformOptions): TransformResult {
                 }
 
                 for (const elemType of typeArgs) {
+                  // A service interface or a function signature describes
+                  // operations, not a payload: it has no component schema.
+                  if (isServiceLikeType(elemType, checker)) continue;
                   const elemIR = extractTypeIR(elemType, checker);
                   const sym = elemType.aliasSymbol ?? elemType.symbol;
                   const name = sym && !sym.name.startsWith("__") ? sym.name : (elemIR.name ?? `Schema_${openApiTypes.length + 1}`);
                   openApiTypes.push({ name, ir: elemIR });
                 }
-
-                const serviceMethods = collectOperations(
+                const typeArgMethods = harvestOpenApiOperationsFromTypeArgs(
+                  typeArgs,
+                  checker,
+                  sourceFile,
+                  node,
+                  logger
+                );
+                const argMethods = collectOperations(
                   node.arguments[1],
                   checker,
                   sourceFile
                 );
-
+                const serviceMethods = [...typeArgMethods, ...argMethods];
                 const key = registerPayload("openapiSchema", {
                   openApiTypes,
                   openApiVersion,
@@ -583,12 +584,13 @@ export function transformSource(options: TransformOptions): TransformResult {
                   asyncApiTypes.push({ name, ir: elemIR });
                 }
 
-                const serviceMethods = collectOperations(
-                  node.arguments[1],
+                const serviceMethods = harvestAsyncApiOperationsFromTypeArgs(
+                  typeArgs,
                   checker,
-                  sourceFile
+                  sourceFile,
+                  node,
+                  logger
                 );
-
                 const key = registerPayload("asyncapiSchema", {
                   asyncApiTypes,
                   asyncApiVersion,
@@ -620,8 +622,17 @@ export function transformSource(options: TransformOptions): TransformResult {
                   openRpcTypes.push({ name, ir: elemIR });
                 }
 
+                const serviceMethods = harvestOpenRpcOperationsFromTypeArgs(
+                  typeArgs,
+                  checker,
+                  sourceFile,
+                  node,
+                  logger
+                );
+
                 const key = registerPayload("openRPCSchema", {
                   openRpcTypes,
+                  service: { kind: "service", methods: serviceMethods },
                 });
 
                 const baseArg = node.arguments[0]
@@ -629,6 +640,45 @@ export function transformSource(options: TransformOptions): TransformResult {
                   : undefined;
                 return context.factory.createCallExpression(
                   context.factory.createIdentifier(`__wiz_openRPCSchema_${key}`),
+                  undefined,
+                  baseArg ? [baseArg] : []
+                );
+              }
+              case "mcpSchema": {
+                const mcpTypes: Array<{ name: string; ir: TypeIR }> = [];
+                let typeArgs: readonly ts.Type[] = [];
+                if (checker.isTupleType(tsType)) {
+                  typeArgs = checker.getTypeArguments(tsType as ts.TypeReference);
+                } else if (tsType) {
+                  typeArgs = [tsType];
+                }
+
+                for (const elemType of typeArgs) {
+                  const elemIR = extractTypeIR(elemType, checker);
+                  const sym = elemType.aliasSymbol ?? elemType.symbol;
+                  const name = sym && !sym.name.startsWith("__") ? sym.name : (elemIR.name ?? `Tool_${mcpTypes.length + 1}`);
+                  mcpTypes.push({ name, ir: elemIR });
+                }
+
+                const serviceMethods = harvestMcpOperationsFromTypeArgs(
+                  typeArgs,
+                  checker,
+                  sourceFile,
+                  node,
+                  logger
+                );
+
+                const key = registerPayload("mcpSchema", {
+                  mcpTypes,
+                  service: { kind: "service", methods: serviceMethods },
+                });
+
+                const baseArg = node.arguments[0] && !ts.isArrayLiteralExpression(node.arguments[0])
+                  ? (ts.visitNode(node.arguments[0], visitor) as ts.Expression)
+                  : undefined;
+
+                return context.factory.createCallExpression(
+                  context.factory.createIdentifier(`__wiz_mcpSchema_${key}`),
                   undefined,
                   baseArg ? [baseArg] : []
                 );

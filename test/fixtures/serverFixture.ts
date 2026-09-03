@@ -1,4 +1,4 @@
-import { op, openapiDocument, openapiSchema } from "../../src/index.ts";
+import { openapiDocument, openapiSchema } from "../../src/index.ts";
 
 export interface User {
   id: number;
@@ -20,28 +20,48 @@ export interface NewUser {
   name: string;
 }
 
+export interface UserService {
+  /**
+   * @get /users
+   * @response 200 User[]
+   */
+  getUsers(query?: UserQuery): Promise<User[]>;
+  /**
+   * @post /users
+   * @service User
+   * @response 201 User
+   */
+  createUser(body: NewUser): Promise<User>;
+  /**
+   * @get /users/{id}
+   * @response 200 User
+   */
+  getUser(id: number): Promise<User>;
+  /**
+   * @delete /users/{id}
+   * @response 204
+   */
+  deleteUser(id: number): Promise<void>;
+}
+
+export const schema = openapiSchema<[UserService]>({
+  openapi: "3.0.3",
+  info: { title: "Users API", version: "1.0.0" },
+});
+
 const statusResponse = new Response("OK");
 
 export const routes = openapiSchema.bunRoutes(
   { openapi: "3.0.3", info: { title: "Users API", version: "1.0.0" } },
   {
     "/api/status": statusResponse,
-
     "/users": {
-      GET: op<{ query: UserQuery; response: User[] }>(() =>
-        Response.json([])
-      ),
-      POST: op<{ body: NewUser; response: User; status: 201 }>(
-        () => Response.json({ id: 1, name: "Alice" }),
-        { tags: ["User"] }
-      ),
+      GET: () => Response.json([]),
+      POST: () => Response.json({ id: 1, name: "Alice" }),
     },
-
     "/users/:id": {
-      GET: op<{ path: { id: number }; response: User }>(() =>
-        Response.json({ id: 1, name: "Alice" })
-      ),
-      DELETE: op<{ path: { id: number } }>(() => new Response(null)),
+      GET: () => Response.json({ id: 1, name: "Alice" }),
+      DELETE: () => new Response(null),
     },
   }
 );

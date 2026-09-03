@@ -38,6 +38,10 @@ export interface OpenRpcHandler {
   handleRequest(request: unknown): Promise<unknown>;
 }
 
+function safeJsonStringify(val: unknown): string {
+  return JSON.stringify(val, (_k, v) => (typeof v === "bigint" ? String(v) : v));
+}
+
 export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
   const methodTable = new Map<string, { fn: (...args: any[]) => any; target: any }>();
 
@@ -256,7 +260,7 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
       return new Response(null, { status: 204, headers: corsHeaders });
     }
 
-    return new Response(JSON.stringify(response), {
+    return new Response(safeJsonStringify(response), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -264,13 +268,22 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
 
   const websocket = {
     open(_ws: any) {},
-    async message(ws: any, msg: string | Uint8Array) {
+    async message(ws: any, msg: any) {
       try {
-        const text = typeof msg === "string" ? msg : new TextDecoder().decode(msg);
+        let text: string;
+        if (typeof msg === "string") {
+          text = msg;
+        } else if (msg instanceof Uint8Array) {
+          text = new TextDecoder().decode(msg);
+        } else if (msg && typeof msg === "object" && "byteLength" in msg) {
+          text = new TextDecoder().decode(new Uint8Array(msg));
+        } else {
+          text = String(msg);
+        }
         const parsed = JSON.parse(text);
         const res = await handleRequest(parsed);
         if (res !== null && ws && typeof ws.send === "function") {
-          ws.send(JSON.stringify(res));
+          ws.send(safeJsonStringify(res));
         }
       } catch (err) {
         if (ws && typeof ws.send === "function") {
@@ -298,7 +311,7 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
             const parsed = JSON.parse(line);
             const res = await handleRequest(parsed);
             if (res !== null && soc && typeof soc.write === "function") {
-              soc.write(JSON.stringify(res) + "\n");
+              soc.write(safeJsonStringify(res) + "\n");
             }
           } catch {
             if (soc && typeof soc.write === "function") {

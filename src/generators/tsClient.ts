@@ -2044,7 +2044,7 @@ function declaredTypes(
       for (const response of method.responses) collect(response.message);
       continue;
     }
-    if (isOpenRpcMethod(method)) continue;
+    if (!isHttpMethod(method)) continue;
     for (const parameter of method.request.parameters ?? []) collect(parameter.type);
     for (const body of method.request.body ?? []) collect(body.content);
     for (const response of method.responses) {
@@ -2189,7 +2189,8 @@ function emitFiles(
         // forwards to, and reads `client` per call so `configure` still applies.
         // The names have to match the emitted signature, since the parameters
         // are what the delegate forwards.
-        const parameters = operation.parameter
+        const cleanParamString = operation.parameter.replace(/\/\*[\s\S]*?\*\//g, "");
+        const parameters = cleanParamString
           .split(",")
           .map((part) => part.trim().split(/[?:]/)[0]!.trim())
           .filter((name) => name.length > 0)
@@ -2322,8 +2323,8 @@ function emitFiles(
       ["path", parameterGroupTypeIR(grouped("path"), "path")],
       ["query", parameterGroupTypeIR(grouped("query"), "query")],
       ["headers", parameterGroupTypeIR(grouped("header"), "header")],
-      ["body", jsonBody(http.request.body, onSkipped)],
-      ["response", jsonBody(chosen[0]?.body, onSkipped)],
+      ["body", jsonBody(http.request.body, context.options, onSkipped)],
+      ["response", jsonBody(chosen[0]?.body, context.options, onSkipped)],
     ];
 
     for (const [target, ir] of candidates) {

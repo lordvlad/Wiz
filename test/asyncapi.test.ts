@@ -1,6 +1,8 @@
 // @wiz-ignore
 import { describe, expect, test } from "bun:test";
 import { extractAsyncApiIR } from "../src/extractors/asyncapi.ts";
+import { extractApiIR } from "../src/extractors/openapi.ts";
+import { isAsyncApiMethod } from "../src/ir/service.ts";
 import { generateAsyncApiSchemaCode } from "../src/generators/asyncapi.ts";
 import { generate } from "../src/generators/generator.ts";
 import { tsClientGenerator } from "../src/generators/tsClient.ts";
@@ -50,7 +52,8 @@ describe("AsyncAPI Extractor", () => {
 
     const method = ir.service.methods[0]!;
     expect(method.operationId).toBe("onSignup");
-    expect(method.address.protocol).toBe("asyncapi");
+    expect(isAsyncApiMethod(method)).toBe(true);
+    if (!isAsyncApiMethod(method)) throw new Error("expected an asyncapi method");
     expect(method.address.channel).toBe("users/signup");
     expect(method.address.action).toBe("send");
   });
@@ -83,8 +86,27 @@ describe("AsyncAPI Extractor", () => {
 
     const method = ir.service.methods[0]!;
     expect(method.operationId).toBe("orderCreated");
+    if (!isAsyncApiMethod(method)) throw new Error("expected an asyncapi method");
     expect(method.address.channel).toBe("orders/created");
     expect(method.address.action).toBe("send");
+  });
+
+  /**
+   * `wiz generate` reaches every front end through `extractApiIR`, which picks
+   * the dialect off the document's root field. Without an `asyncapi` branch the
+   * documented `-g asyncapiClient` invocation died on the OpenAPI version check.
+   */
+  test("extractApiIR dispatches an AsyncAPI document to this extractor", () => {
+    const doc = JSON.stringify({
+      asyncapi: "3.0.0",
+      info: { title: "Routed", version: "1.0.0" },
+      channels: {},
+      operations: {},
+    });
+
+    const ir = extractApiIR(doc);
+    expect(ir.version).toBe("asyncapi-3.0");
+    expect(ir.service.name).toBe("Routed");
   });
 });
 
@@ -134,7 +156,7 @@ describe("AsyncAPI Client Generator (model and decoder only)", () => {
   });
 });
 
-describe("AsyncAPI Spec Generator and producer / consumer descriptors", () => {
+describe("AsyncAPI Spec Generator", () => {
   test("generates AsyncAPI 3.0 schema virtual module", () => {
     const irs = getIRsForSource(
       `export interface OrderEvent { orderId: string; amount: number }`,
@@ -153,18 +175,18 @@ describe("AsyncAPI Spec Generator and producer / consumer descriptors", () => {
     expect(doc.components.messages.OrderEvent).toBeDefined();
   });
 
-  test("plugin rewrites asyncapiSchema and supports producer and consumer", () => {
+  test("plugin rewrites asyncapiSchema for signature/service types", () => {
     const source = `
-      import { asyncapiSchema, producer, consumer } from "wiz";
+      import { asyncapiSchema } from "wiz";
       export interface UserEvent { id: string }
-      export const doc = asyncapiSchema<[UserEvent]>();
-      export const prod = producer<{ channel: "users/signup"; payload: UserEvent }>();
-      export const cons = consumer<{ channel: "users/logout"; payload: UserEvent }>();
+      export interface EventService {
+        /** @channel users/signup */
+        signup(event: UserEvent): void;
+      }
+      export const doc = asyncapiSchema<[EventService]>();
     `;
 
     const result = transformSource({ path: "app.ts", contents: source, logger: silentLogger });
     expect(result.code).toContain("asyncapiSchema as __wiz_asyncapiSchema_");
-    expect(result.code).toContain("producer<{");
-    expect(result.code).toContain("consumer<{");
   });
 });

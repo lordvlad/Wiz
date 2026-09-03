@@ -6,7 +6,7 @@ import { silentLogger } from "../src/logger.ts";
 
 plugin(wizPlugin({ logger: silentLogger }));
 
-describe("multi-status responses via op<{ responses }>", () => {
+describe("multi-status responses", () => {
   let doc: Record<string, any>;
 
   beforeAll(async () => {

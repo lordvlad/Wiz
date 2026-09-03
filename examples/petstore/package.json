@@ -1,0 +1,34 @@
+{
+  "name": "petstore",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/server.ts",
+
+    "build:schemas:openapi": "mkdir -p build/schemas && bun run src/schemas/openapi.ts > build/schemas/openapi.json",
+    "build:schemas:asyncapi": "mkdir -p build/schemas && bun run src/schemas/asyncapi.ts > build/schemas/asyncapi.json",
+    "build:schemas:openrpc": "mkdir -p build/schemas && bun run src/schemas/openrpc.ts > build/schemas/openrpc.json",
+    "build:schemas:proto": "mkdir -p build/schemas && bun run src/schemas/proto.ts > build/schemas/petstore.proto",
+    "build:schemas:jsonschema": "mkdir -p build/schemas && bun run src/schemas/jsonschema.ts > build/schemas/petstore.schema.json",
+    "build:schemas": "bun run --parallel build:schemas:openapi build:schemas:asyncapi build:schemas:openrpc build:schemas:proto build:schemas:jsonschema",
+
+    "build:clients:openapi": "bun run ../../src/cli.ts generate -g tsClient build/schemas/openapi.json --outdir build/clients/openapi --validate path,query,body",
+    "build:clients:reactquery": "bun run ../../src/cli.ts generate -g reactQuery build/schemas/openapi.json --outdir build/clients/reactquery",
+    "build:clients:asyncapi": "bun run ../../src/cli.ts generate -g asyncapiClient build/schemas/asyncapi.json --outdir build/clients/asyncapi",
+    "build:clients:openrpc": "bun run ../../src/cli.ts generate -g tsClient build/schemas/openrpc.json --outdir build/clients/openrpc",
+    "build:clients:proto": "bun run ../../src/cli.ts generate -g tsClient build/schemas/petstore.proto --outdir build/clients/proto",
+    "build:clients": "bun run --parallel build:clients:openapi build:clients:reactquery build:clients:asyncapi build:clients:openrpc build:clients:proto",
+
+    "build": "bun run build:schemas && bun run build:clients",
+    "clean": "rm -rf build",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "wiz": "file:../.."
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "typescript": "^5.7.3"
+  }
+}

@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "NewPet": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "The body accepted when creating a pet: the store assigns `id` and `addedAt`.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "species": {
+          "description": "What kind of animal. Ordinals are the protobuf enum values.",
+          "enum": [
+            0,
+            1,
+            2,
+            3
+          ]
+        },
+        "priceCents": {
+          "type": "string",
+          "format": "int64",
+          "pattern": "^-?\\d+$"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "species",
+        "priceCents"
+      ]
+    },
+    "PetChanged": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A change event, as published to the `petstore.pets.changed` topic and as\nconsumed back off it.\n\nThe consumer feeds these to `PetStore.applyChange`, so one declaration is the\nproducer's payload, the consumer's parameter and the AsyncAPI message.",
+      "type": "object",
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "description": "What changed. The discriminant of {@link PetChanged}.",
+          "enum": [
+            0,
+            1,
+            2
+          ]
+        },
+        "petId": {
+          "type": "number",
+          "format": "int32",
+          "minimum": -2147483648,
+          "maximum": 2147483647
+        },
+        "pet": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "number",
+              "format": "int32",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "name": {
+              "type": "string",
+              "description": "The pet's call name.",
+              "minLength": 1,
+              "maxLength": 80,
+              "examples": [
+                "Ada"
+              ]
+            },
+            "species": {
+              "description": "What kind of animal. Ordinals are the protobuf enum values.",
+              "enum": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "status": {
+              "description": "Where a pet is in its journey through the store.",
+              "enum": [
+                0,
+                1,
+                2
+              ]
+            },
+            "priceCents": {
+              "type": "string",
+              "format": "int64",
+              "pattern": "^-?\\d+$",
+              "description": "Retail price in minor units, so no float ever touches money."
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16
+            },
+            "owner": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "email": {
+                  "type": "string",
+                  "format": "email"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "email"
+              ],
+              "description": "Absent while the pet is still available."
+            },
+            "addedAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "species",
+            "status",
+            "priceCents",
+            "tags",
+            "addedAt"
+          ],
+          "description": "The pet as it now stands."
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "eventId",
+        "kind",
+        "petId",
+        "pet",
+        "occurredAt"
+      ]
+    }
+  }
+}

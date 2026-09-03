@@ -1,0 +1,4 @@
+preload = ["./wizPlugin.ts"]
+
+[test]
+preload = ["./wizPlugin.ts"]

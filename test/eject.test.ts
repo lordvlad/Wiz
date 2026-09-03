@@ -140,12 +140,12 @@ describe("ejecting a project", () => {
     );
     await Bun.write(
       join(dir, "src", "routes.ts"),
-      `import { op, openapiSchema } from "wiz";
+      `import { openapiSchema } from "wiz";
 import type { User } from "./types.ts";
 
 export const routes = openapiSchema.bunRoutes(
   { openapi: "3.1.0", info: { title: "Demo", version: "1.0.0" } },
-  { "/users": { GET: op<{ response: User }>(() => Response.json([])) } }
+  { "/users": { GET: () => Response.json([]) } }
 );
 `
     );

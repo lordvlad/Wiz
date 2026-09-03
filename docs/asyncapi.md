@@ -2,12 +2,14 @@
 
 `wiz` provides extractors, schema generators, and client code generators for AsyncAPI 2.x and 3.x event-driven architecture specifications.
 
-## 1. Spec Generator (`asyncapiSchema`, `producer`, `consumer`)
+## 1. Spec Generator (`asyncapiSchema`)
 
-Symmetric to OpenAPI's `openapiSchema` and `op`, `wiz` supports building AsyncAPI 2.6 and 3.0 schema documents directly from TypeScript types and operation descriptors.
+Symmetric to OpenAPI's `openapiSchema`, `wiz` builds AsyncAPI 2.6 and 3.0
+documents from TypeScript types and service interfaces. Channels and their
+direction are declared with JSDoc on the interface's methods.
 
 ```ts
-import { asyncapiSchema, producer, consumer } from "wiz";
+import { asyncapiSchema } from "wiz";
 
 export interface UserSignupEvent {
   userId: string;
@@ -19,22 +21,42 @@ export interface UserLogoutEvent {
   userId: string;
 }
 
-// Declare channels and operations using producer (send/publish) and consumer (receive/subscribe)
-export const document = asyncapiSchema<[UserSignupEvent, UserLogoutEvent]>(
-  {
-    info: { title: "User Event Service", version: "1.0.0" },
-  },
-  [
-    producer<{ channel: "user/signup"; payload: UserSignupEvent }>(),
-    consumer<{ channel: "user/logout"; payload: UserLogoutEvent }>(),
-  ]
-);
+/** @service UserEvents */
+export interface UserEvents {
+  /**
+   * @producer
+   * @channel user/signup
+   */
+  signup(event: UserSignupEvent): void;
+
+  /**
+   * @consumer
+   * @channel user/logout
+   */
+  logout(event: UserLogoutEvent): void;
+}
+
+export const document = asyncapiSchema<[UserEvents]>({
+  info: { title: "User Event Service", version: "1.0.0" },
+});
 ```
 
-### Operation Descriptors
+### JSDoc tags
 
-- **`producer<TSpec>(channelOrHandler?, options?)`**: Represents a publish/send operation on an AsyncAPI channel.
-- **`consumer<TSpec>(channelOrHandler?, options?)`**: Represents a subscribe/receive operation on an AsyncAPI channel.
+- `@producer` (or `@publish`, `@send`): a send operation on the channel.
+- `@consumer` (or `@subscribe`, `@receive`): a receive operation on the channel.
+- `@action send` / `@action receive`: the same choice spelled as one tag.
+- `@channel`: the channel address; defaults to the method name.
+- `@name`: overrides the operation id.
+- `@package` / `@service`: emitted as `x-package` / `x-service` on both the
+  channel and the operation, and prefixed onto the channel key
+  (`package.service.channel`, or `service.channel` when there is no package).
+- `@summary`, and the doc comment's prose as `description`.
+
+The message payload is the first parameter's type, or the return type for a
+method that takes none. A type passed to `asyncapiSchema` that has no callable
+members is a plain message type: it contributes a component schema and a
+message, and no channel.
 
 ## 2. Client Generator (`asyncapiClient` / `tsClient`)
 

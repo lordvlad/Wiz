@@ -103,7 +103,12 @@ export async function validateSpecDocument(
   if (typeof doc.openapi === "string") {
     const res = await openapiValidator.validate(doc);
     if (res.valid) return { valid: true };
-    const errs = res.errors?.map((e: any) => `${e.instancePath || "/"}: ${e.message}`) ?? ["Invalid OpenAPI document"];
+    const rawErrors = res.errors;
+    const errs = Array.isArray(rawErrors)
+      ? rawErrors.map((e: any) => `${e.instancePath || "/"}: ${e.message}`)
+      : typeof rawErrors === "string"
+        ? [rawErrors]
+        : ["Invalid OpenAPI document"];
     return { valid: false, errors: errs };
   }
 

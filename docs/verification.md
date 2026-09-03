@@ -12,6 +12,7 @@ To guarantee wire-format compliance, `wiz` verifies generator outputs against es
 |---|---|---|
 | **JSON Schema (`schema<T>`)** | [Ajv](https://ajv.js.org) & [JSON Schema Test Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite) | Ajv compiles generated draft-2020-12 and draft-07 schemas. Generated validators are driven against the official test suite. |
 | **OpenAPI (`openapiSchema`)** | `@seriousme/openapi-schema-validator` | Generated OpenAPI 3.0 and 3.1 documents are validated against official meta-schemas. |
+| **AsyncAPI (`asyncapiSchema`) / OpenRPC (`openRPCSchema`)** | Bundled official meta-schemas | Generated documents are validated against the AsyncAPI 2.6/3.0 and OpenRPC 1.3 meta-schemas shipped in `schemas/` before any code is emitted. |
 | **Protobuf Codec (`encodeProto`)** | [protobuf.js](https://github.com/protobufjs/protobuf.js) | `protobuf.js` parses generated `.proto` schemas. Bytes written by `encodeProto` are read by `protobufjs.Reader`; bytes written by `protobufjs.Writer` are decoded by `decodeProto`. |
 | **Avro Codec (`encodeAvro`)** | [avsc](https://github.com/mtth/avsc) | `avsc` compiles generated `.avsc` schemas and cross-verifies binary payloads in both directions. |
 | **gRPC HTTP/2 Client** | `@grpc/grpc-js` | Generated clients are executed over HTTP/2 against a live `@grpc/grpc-js` server for all 4 streaming directions, deadlines, cancellation, status codes, and compression. |

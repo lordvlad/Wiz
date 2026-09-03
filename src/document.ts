@@ -25,10 +25,31 @@ function mergeInto(target: OpenApiDocument, source: OpenApiDocument): void {
       const paths = isPlainObject(target.paths) ? target.paths : {};
       for (const [path, item] of Object.entries(value)) {
         const existing = paths[path];
-        paths[path] =
-          isPlainObject(existing) && isPlainObject(item)
-            ? { ...existing, ...item }
-            : item;
+        if (isPlainObject(existing) && isPlainObject(item)) {
+          const mergedPath: Record<string, unknown> = { ...existing };
+          for (const [verb, op] of Object.entries(item)) {
+            const exOp = existing[verb] as Record<string, unknown> | undefined;
+            const newOp = op as Record<string, unknown> | undefined;
+            if (isPlainObject(exOp) && isPlainObject(newOp)) {
+              const mergedOp = { ...exOp, ...newOp };
+              if (exOp.parameters && !newOp.parameters) {
+                mergedOp.parameters = exOp.parameters;
+              }
+              if (exOp.requestBody && !newOp.requestBody) {
+                mergedOp.requestBody = exOp.requestBody;
+              }
+              if (exOp.responses && newOp.responses && (newOp.responses as any)["204"] && !(exOp.responses as any)["204"]) {
+                mergedOp.responses = exOp.responses;
+              }
+              mergedPath[verb] = mergedOp;
+            } else {
+              mergedPath[verb] = op;
+            }
+          }
+          paths[path] = mergedPath;
+        } else {
+          paths[path] = item;
+        }
       }
       target.paths = paths;
       continue;

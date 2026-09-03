@@ -16,9 +16,12 @@
 
 ### Schemas & Web APIs
 - **[JSON Schema](./json-schema.md)** — `schema<T>()`, Draft 2020-12 and Draft 07 support, keyword mapping, and draft selection.
-- **[OpenAPI & Routes](./openapi.md)** — `openapiSchema`, `op` operation definitions, route harvesting for Bun (`Bun.serve`) and Hono, and `openapiDocument()`.
-- **[AsyncAPI & Events](./asyncapi.md)** — `asyncapiSchema`, `producer`, and `consumer` descriptors, 2.6 and 3.0 support, and model/codec generation.
+- **[OpenAPI & Routes](./openapi.md)** — `openapiSchema`, service-interface operation declarations, route mounting for Bun (`Bun.serve`) and Hono, and `openapiDocument()`.
+- **[AsyncAPI & Events](./asyncapi.md)** — `asyncapiSchema`, `@producer`/`@consumer` channel declarations, 2.6 and 3.0 support, and model/codec generation.
+- **[OpenRPC](./openrpc.md)** — `openRPCSchema`, method harvesting from signatures and service interfaces, and namespacing.
+- **[MCP](./mcp.md)** — `mcpSchema`, tool harvesting, input/output JSON schemas, and tool annotations.
 - **[TypeScript Client](./typescript-client.md)** — `wiz generate -g tsClient`, HTTP client operations, custom JSON codecs, interceptor chains, deadlines, `createClient`, and runtime validation via `--validate`.
+- **[React Query Client](./react-query.md)** — `wiz generate -g reactQuery`, generated queries and mutations, and query keys.
 
 ### Binary Codecs & Protocols
 - **[Protocol Buffers](./protobuf.md)** — `protobufSchema`, `encodeProto`, `decodeProto`, `@fieldNumber`, scalar widths, `oneof`, and `NumberedUnion`.

@@ -31,10 +31,9 @@ That is deliberate. A reflection library that returns `[]` when it is
 misconfigured produces a program that runs and is wrong; one that throws
 produces a stack trace pointing at the callsite. The exceptions are the
 route helpers, which are identity functions by design so that an app without
-the plugin still serves — `op()` hands its handler back, and
-`openapiSchema.bunRoutes`/`honoRoutes` hand back the router. See
-[openapi](./openapi.md). `NumberedUnion` is type-level and has no runtime
-existence to begin with.
+the plugin still serves — `openapiSchema.bunRoutes`/`honoRoutes` hand back the
+router. See [openapi](./openapi.md). `NumberedUnion` is type-level and has no
+runtime existence to begin with.
 
 ## Install
 
@@ -356,8 +355,8 @@ pure cost:
 - [annotations](./annotations.md) — the JSDoc tags: constraints the validator
   enforces, annotations that only describe, and `@format`, which picks the
   wire type in every back end at once.
-- [openapi](./openapi.md) — `op<{…}>`, `openapiSchema`, `openapiDocument`,
-  and harvesting a document out of a Bun or Hono router.
+- [openapi](./openapi.md) — service-interface operations, `openapiSchema`,
+  `openapiDocument`, and mounting a Bun or Hono router.
 - [protobuf](./protobuf.md) — `.proto` text and a binary codec,
   `@fieldNumber`, and `NumberedUnion` for `oneof`.
 - [avro-and-arrow](./avro-and-arrow.md) — `.avsc` and Arrow IPC from the same

@@ -55,6 +55,22 @@ export function optionalKeysOf<T>(): (keyof T)[] {
   throw new PluginInactiveError("optionalKeysOf");
 }
 
+/** Options for {@link deepKeysOf}. */
+export interface DeepKeysOptions {
+  /** How far to walk into nested objects. Clamped to 1–10; defaults to 5. */
+  maxDepth?: number;
+}
+
+/**
+ * Every dot-separated path through `T`, to `options.maxDepth` levels.
+ *
+ * A leaf contributes its own path; an object deeper than the limit contributes
+ * the path that reaches it rather than its members.
+ */
+export function deepKeysOf<T>(_options?: DeepKeysOptions): string[] {
+  throw new PluginInactiveError("deepKeysOf");
+}
+
 export function schema<
   T,
   V extends "draft-2020-12" | "draft-07" = "draft-2020-12"
@@ -83,6 +99,19 @@ export function validate<T>(
 export function is<T>(_arg: unknown): _arg is T {
   throw new PluginInactiveError("is");
 }
+
+/**
+ * Narrows `arg` to `T`, throwing when the generated structural check fails.
+ *
+ * The error is an `Error` named `AssertError` carrying every failure on
+ * `errors`, so a caller can report all of them rather than the first.
+ */
+export function assert<T>(
+  _arg: unknown,
+  _options?: ValidateOptions
+): asserts _arg is T {
+  throw new PluginInactiveError("assert");
+}
 /**
  * Parses a query string, `URLSearchParams`, or raw object into `T`.
  *
@@ -105,14 +134,6 @@ export type HttpMethod =
   | "options"
   | "trace";
 
-export interface OperationOptions {
-  tags?: string[];
-  summary?: string;
-  description?: string;
-  operationId?: string;
-  deprecated?: boolean;
-  [key: string]: unknown;
-}
 
 /**
  * Compile-time descriptor produced by `openapiSchema.<method>()`.
@@ -126,7 +147,7 @@ export interface OpenApiOperation {
 export interface OperationBuilder {
   <TPathParams, TQueryParams, TResponse, TRequestBody>(
     path: string,
-    options?: OperationOptions
+    options?: Record<string, unknown>
   ): OpenApiOperation;
 }
 
@@ -251,33 +272,6 @@ export function openRPCSchema<TTypes extends unknown[] = unknown[]>(
 ): Record<string, unknown> {
   throw new PluginInactiveError("openRPCSchema");
 }
-/** Options for AsyncAPI channel descriptors. */
-export interface AsyncApiChannelOptions {
-  channel?: string;
-  summary?: string;
-  description?: string;
-}
-
-/**
- * AsyncAPI producer operation descriptor (publish / send message).
- */
-export function producer<TSpec>(
-  handlerOrChannel?: unknown,
-  _options?: AsyncApiChannelOptions
-): typeof handlerOrChannel {
-  return handlerOrChannel;
-}
-
-/**
- * AsyncAPI consumer operation descriptor (subscribe / receive message).
- */
-export function consumer<TSpec>(
-  handlerOrChannel?: unknown,
-  _options?: AsyncApiChannelOptions
-): typeof handlerOrChannel {
-  return handlerOrChannel;
-}
-
 /**
  * AsyncAPI document generator stub.
  */
@@ -288,18 +282,17 @@ export function asyncapiSchema<TTypes extends unknown[] = unknown[]>(
   throw new PluginInactiveError("asyncapiSchema");
 }
 
-
 /**
- * Per-operation type carrier. The generics are the whole point; at runtime this
- * hands the handler straight back, so an app without the plugin still serves —
- * it just has no document.
+ * MCP document generator stub.
  */
-export function op<TSpec>(
-  handler: unknown,
-  _options?: OperationOptions
-): typeof handler {
-  return handler;
+export function mcpSchema<TTypes extends unknown[] = unknown[]>(
+  _baseSchema?: Record<string, unknown>,
+  _options?: Record<string, unknown>
+): Record<string, unknown> {
+  throw new PluginInactiveError("mcpSchema");
 }
+
+
 
 /**
  * The single merged OpenAPI document for every route declared in the program.
@@ -310,7 +303,9 @@ export function op<TSpec>(
  * bookkeeping in your bundle and reading a document assembled by import-order
  * side effects.
  */
-export function openapiDocument(): Record<string, unknown> {
+export function openapiDocument<TTypes extends unknown[] = unknown[]>(
+  _baseSchema?: Record<string, unknown>
+): Record<string, unknown> {
   throw new PluginInactiveError("openapiDocument");
 }
 export function encodeProto<T>(_val: T, _buf: Uint8Array, _offset = 0): number {
@@ -324,6 +319,11 @@ export function protobufSchema<TTypes extends unknown[]>(
   _options?: { indent?: string }
 ): string {
   throw new PluginInactiveError("protobufSchema");
+}
+export function grpcSchema<TTypes extends unknown[] = unknown[]>(
+  _options?: { indent?: string }
+): string {
+  throw new PluginInactiveError("grpcSchema");
 }
 export function encodeAvro<T>(_val: T, _buf: Uint8Array, _offset = 0): number {
   throw new PluginInactiveError("encodeAvro");

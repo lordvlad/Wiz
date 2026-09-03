@@ -1,4 +1,4 @@
-import { op, openapiSchema } from "../../src/index.ts";
+import { openapiSchema } from "../../src/index.ts";
 
 export interface Thing {
   id: number;
@@ -13,7 +13,7 @@ export const routes = openapiSchema.bunRoutes(
   { openapi: "3.0.3", info: { title: "Leaky API", version: "1.0.0" } },
   {
     // Documented normally — proves warnings do not suppress good entries.
-    "/ok": { GET: op<{ response: Thing }>(() => Response.json({ id: 1 })) },
+    "/ok": { GET: () => Response.json({ id: 1 }) },
 
     ...extraRoutes,
     [PATH_KEY]: () => new Response("computed"),

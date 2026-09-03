@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "lib": ["ESNext"],
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "types": ["bun"],
+    "paths": {
+      "wiz": ["../../src/index.ts"],
+      "wiz/plugin": ["../../src/plugin.ts"]
+    }
+  },
+  "include": ["src", "wizPlugin.ts", "test"],
+  "exclude": ["build"]
+}

@@ -1,0 +1,453 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Petstore",
+    "version": "1.0.0",
+    "description": "A mini petstore. Every path, schema and media type in this document was derived from TypeScript declarations by the wiz plugin."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000"
+    }
+  ],
+  "paths": {
+    "/pets": {
+      "get": {
+        "operationId": "listPets",
+        "x-service": "Pets",
+        "tags": [
+          "Pets"
+        ],
+        "summary": "List pets",
+        "description": "Lists pets, filtered and capped.\n\nThe one operation offered in four representations. Each `@response 200`\ntag adds a media type to the *same* response object, so the document says\none 200 with four `content` entries.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PetStatus"
+            },
+            "description": "Restrict to one status."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Substring match on the name, case-insensitive."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Pet"
+                  }
+                }
+              },
+              "application/yaml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Pet"
+                  }
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Pet"
+                  }
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Pet"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "addPet",
+        "x-service": "Pets",
+        "tags": [
+          "Pets"
+        ],
+        "summary": "Add a pet",
+        "description": "Adds a pet to the store and publishes a change event.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewPet"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pet"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pets/{id}": {
+      "get": {
+        "operationId": "getPet",
+        "x-service": "Pets",
+        "tags": [
+          "Pets"
+        ],
+        "summary": "Fetch a pet",
+        "description": "Fetches one pet as JSON or as protobuf.\n\nThe protobuf representation is encoded by `encodeProto<Pet>`, generated\nfrom the same `@fieldNumber` declarations as `build/schemas/petstore.proto`.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pet"
+                }
+              },
+              "application/x-protobuf": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pet"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removePet",
+        "x-service": "Pets",
+        "tags": [
+          "Pets"
+        ],
+        "summary": "Remove a pet",
+        "description": "Removes a pet. No body, so no content.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "404": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pets/{id}/sale": {
+      "post": {
+        "operationId": "sellPet",
+        "x-service": "Pets",
+        "tags": [
+          "Pets"
+        ],
+        "summary": "Sell a pet",
+        "description": "Sells a pet to an owner and publishes a change event.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Sale"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pet"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Problem": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "number",
+            "format": "int32",
+            "minimum": -2147483648,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "detail",
+          "status"
+        ]
+      },
+      "PetStatus": {
+        "description": "Where a pet is in its journey through the store.",
+        "type": "number",
+        "enum": [
+          0,
+          1,
+          2
+        ]
+      },
+      "Pet": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "minimum": -2147483648,
+            "format": "int32",
+            "maximum": 2147483647
+          },
+          "name": {
+            "type": "string",
+            "description": "The pet's call name.",
+            "minLength": 1,
+            "maxLength": 80,
+            "examples": [
+              "Ada"
+            ]
+          },
+          "species": {
+            "$ref": "#/components/schemas/Species"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PetStatus"
+          },
+          "priceCents": {
+            "type": "string",
+            "format": "int64",
+            "pattern": "^-?\\d+$",
+            "description": "Retail price in minor units, so no float ever touches money."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16
+          },
+          "owner": {
+            "$ref": "#/components/schemas/Owner",
+            "description": "Absent while the pet is still available."
+          },
+          "addedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "species",
+          "status",
+          "priceCents",
+          "tags",
+          "addedAt"
+        ]
+      },
+      "Species": {
+        "description": "What kind of animal. Ordinals are the protobuf enum values.",
+        "type": "number",
+        "enum": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      "Owner": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "email"
+        ]
+      },
+      "NewPet": {
+        "description": "The body accepted when creating a pet: the store assigns `id` and `addedAt`.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "species": {
+            "$ref": "#/components/schemas/Species"
+          },
+          "priceCents": {
+            "type": "string",
+            "format": "int64",
+            "pattern": "^-?\\d+$"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "species",
+          "priceCents"
+        ]
+      },
+      "Sale": {
+        "description": "The body accepted when selling a pet.",
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ownerName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "ownerEmail": {
+            "type": "string",
+            "format": "email"
+          }
+        },
+        "required": [
+          "ownerId",
+          "ownerName",
+          "ownerEmail"
+        ]
+      }
+    }
+  }
+}

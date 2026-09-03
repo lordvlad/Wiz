@@ -10,6 +10,7 @@ import {
   parseApiDocument,
 } from "../src/extractors/openapi.ts";
 import { generateOpenApiSchemaCode } from "../src/generators/openapi.ts";
+import { isHttpMethod } from "../src/ir/service.ts";
 import { asHttp, evalModule } from "./helpers.ts";
 
 /** Fails with the validator's own messages, which name the offending path. */
@@ -299,10 +300,11 @@ describe.each(["3.0", "3.1"] as const)(
       const { ir } = regenerate(roundTripDocument(version));
       expect(ir.service.name).toBe("Round Trip");
       expect(ir.service.version).toBe("2.0.0");
-      expect(ir.service.methods.map((m) => m.address.method)).toEqual([
-        "GET",
-        "PUT",
-      ]);
+      expect(
+        ir.service.methods
+          .filter(isHttpMethod)
+          .map((m) => m.address.method)
+      ).toEqual(["GET", "PUT"]);
     });
   }
 );

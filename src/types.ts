@@ -3,6 +3,13 @@ import { computeTypeIRHash, type TypeIR } from "./ir/types.ts";
 
 export * from "./ir/types.ts";
 
+export function toSnakeCase(str: string): string {
+  return str
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
+    .toLowerCase();
+}
+
 /**
  * Derives a deterministic virtual module key for a type.
  *

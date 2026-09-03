@@ -25,118 +25,45 @@ bunx wiz init
 ```
 
 `wiz init` writes a `wizPlugin.ts` preload and points `bunfig.toml` at it, for
-both `bun run` and `bun test`. It is safe to re-run: existing config is merged,
-not replaced, and comments survive. `--force` replaces an existing
-`wizPlugin.ts` instead of leaving it alone.
+both `bun run` and `bun test`. Called without the plugin active, every helper
+throws `PluginInactiveError` rather than returning something plausible.
 
-To do it by hand instead:
-
-```ts
-// wizPlugin.ts
-import { plugin } from "bun";
-import { wizPlugin } from "wiz/plugin";
-
-plugin(wizPlugin());
-```
-
-```toml
-# bunfig.toml
-preload = ["./wizPlugin.ts"]
-
-[test]
-preload = ["./wizPlugin.ts"]
-```
-
-Both entries matter: `bun run` reads the root table and `bun test` reads
-`[test]`, and neither implies the other.
-
-For a build, pass the plugin directly:
-
-```ts
-await Bun.build({
-  entrypoints: ["./src/app.ts"],
-  plugins: [wizPlugin()],
-});
-```
-
-The plugin rewrites modules as they are loaded, so the calls must live in a
-module imported *after* it is registered — which is what the preload is for.
-
-Called without the plugin active, every helper throws `PluginInactiveError`
-rather than returning something plausible.
-
-`wizPlugin({ logger })` takes a `WizLogger`; the default forwards `info`/`warn`
-/`error` to the console and drops `trace`. `silentLogger` and `consoleLogger`
-are exported for tests.
+Manual setup, build-time registration, `@wiz-ignore` and the logger options are
+in [getting-started.md](./docs/getting-started.md).
 
 ## What it generates
 
-| Call | Signature / Produces |
-|---|---|
-| `keysOf<T>()` | `(keyof T)[]` |
-| `requiredKeysOf<T>()` | `(keyof T)[]` (required properties only) |
-| `optionalKeysOf<T>()` | `(keyof T)[]` (optional properties only) |
-| `deepKeysOf<T>(options?)` | `string[]` (dot-separated deep keys, maxDepth default 5) |
-| `schema<T>(version?)` | JSON Schema document (`draft-2020-12` or `draft-07`) |
-| `validate<T>(value, options?)` | `ValidationError[]` (options: `prune: true`, `path`) |
-| `is<T>(value)` | `value is T` (type predicate narrowing, zero allocation) |
-| `assert<T>(value, options?)` | `asserts value is T` (narrows type, throws `AssertError` on failure) |
-| `parseQuery<T>(input, options?)` | `T` (parses query string/URLSearchParams/record with coercion) |
-| `openapiSchema<[A, B]>(base?, ops?)` | OpenAPI 3.0 or 3.1 document |
-| `asyncapiSchema<[A, B]>(base?, ops?)` / `producer` / `consumer` | AsyncAPI 2.6 or 3.0 document generator |
-| `protobufSchema<[A, B]>()` / `encodeProto` / `decodeProto` | `.proto` text and binary codec |
-| `avroSchema<[A, B]>()` / `encodeAvro` / `decodeAvro` | `.avsc` text and binary codec |
-| `arrowSchema<[A, B]>()` / `encodeArrow` / `decodeArrow` | Arrow IPC stream binary codec |
-| `encodeJson<T>(val, indent?)` / `decodeJson<T>(raw)` | JSON string codec with `indent`, `bigint`, `Date`, `bytes` handling |
-| `encodeErlangText<T>(val, indent?)` / `decodeErlangText<T>(raw)` | Erlang Text codec with atom mapping, map key rules, and `indent` |
-| `encodeErlangBinary<T>(val)` / `decodeErlangBinary<T>(raw)` | Erlang External Term Format (ETF 131) binary codec |
-| `zodSchema<T>()` | `Promise<ZodSchema>` (built from same IR) |
-Detailed guides for every feature, extractor, and generator live in [docs/](./docs/README.md).
+| Call | Signature / Produces | Docs |
+|---|---|---|
+| `keysOf<T>()` | `(keyof T)[]` | [type-introspection](./docs/type-introspection.md) |
+| `requiredKeysOf<T>()` / `optionalKeysOf<T>()` | `(keyof T)[]`, by presence | [type-introspection](./docs/type-introspection.md) |
+| `deepKeysOf<T>(options?)` | `string[]` (dot-separated deep keys) | [type-introspection](./docs/type-introspection.md) |
+| `is<T>(value)` | `value is T` (narrowing predicate, zero allocation) | [type-introspection](./docs/type-introspection.md) |
+| `validate<T>(value, options?)` | `ValidationError[]` | [type-introspection](./docs/type-introspection.md) |
+| `assert<T>(value, options?)` | `asserts value is T`, throws `AssertError` | [type-introspection](./docs/type-introspection.md) |
+| `parseQuery<T>(input, options?)` | `T`, coerced from a query string | [type-introspection](./docs/type-introspection.md) |
+| `schema<T>(version?)` | JSON Schema (`draft-2020-12` or `draft-07`) | [json-schema](./docs/json-schema.md) |
+| `zodSchema<T>()` | `Promise<ZodSchema>`, from the same IR | [zod](./docs/zod.md) |
+| `openapiSchema<[A, B]>(base?)` / `openapiDocument<[S]>(base?)` | OpenAPI 3.0 or 3.1 document | [openapi](./docs/openapi.md) |
+| `asyncapiSchema<[A, B]>(base?)` | AsyncAPI 2.6 or 3.0 document | [asyncapi](./docs/asyncapi.md) |
+| `openRPCSchema<[S]>(base?)` | OpenRPC 1.3 document | [openrpc](./docs/openrpc.md) |
+| `mcpSchema<[T]>(base?)` | MCP tool specifications | [mcp](./docs/mcp.md) |
+| `protobufSchema<[A, B]>()` / `encodeProto` / `decodeProto` | `.proto` text and binary codec | [protobuf](./docs/protobuf.md) |
+| `avroSchema<[A, B]>()` / `encodeAvro` / `decodeAvro` | `.avsc` text and binary codec | [avro-and-arrow](./docs/avro-and-arrow.md) |
+| `arrowSchema<[A, B]>()` / `encodeArrow` / `decodeArrow` | Arrow IPC stream binary codec | [avro-and-arrow](./docs/avro-and-arrow.md) |
+| `encodeJson<T>` / `decodeJson<T>` | JSON codec with `bigint`, `Date`, `bytes` handling | [json-codec](./docs/json-codec.md) |
+| `encodeErlangText<T>` / `decodeErlangText<T>` | Erlang Text codec | [erlang](./docs/erlang.md) |
+| `encodeErlangBinary<T>` / `decodeErlangBinary<T>` | Erlang External Term Format (ETF 131) | [erlang](./docs/erlang.md) |
+
 Identical types share one generated module, so `is<User>(a)` in two files
 imports the same function.
 
-`zodSchema` is the one call that reaches for a package: zod is an **optional
-peer dependency**, so the generated module never names it. The plugin writes
-`() => import("zod")` at the callsite instead, where the package resolves, and
-the import runs on first use — a program that asks for no zod schema neither
-loads zod nor needs it installed. The promise is memoised per type, so every
-callsite shares one schema:
-
-```ts
-const userSchema = await zodSchema<User>();
-userSchema.parse(input); // a real zod schema, from your own copy of zod
-```
-
-`@minLength`, `@min`, `@pattern`, `@format email` and the rest reach the schema
-as `.min()`, `.regex()` and `.email()`, and the emitted schema is tested to
-return the same verdict as the generated validator on a shared corpus. What zod
-cannot say — a tuple with a rest element, a symbol — throws when the schema is
-built, rather than validating loosely.
-
-`is` is a type predicate, so it narrows:
-
-```ts
-function nameOf(value: unknown): string {
-  if (is<User>(value)) return value.name; // value is User here
-  return "anonymous";
-}
-```
-
 ## Describing types
 
-wiz reads JSDoc. Tags fall into three channels that do different jobs.
-
-**Constraints** narrow the set of valid values and are enforced by the
-generated validator: `@min`/`@minimum`, `@max`/`@maximum`,
-`@exclusiveMinimum`, `@exclusiveMaximum`, `@minLength`, `@maxLength`,
-`@pattern`, `@format`, `@multipleOf`, `@minItems`, `@maxItems`,
-`@uniqueItems`.
-
-**Annotations** describe without validating: the doc comment becomes
-`description`, plus `@example` (repeatable), `@default` and `@deprecated`.
-
-**Everything else** is preserved verbatim in `meta` — `@since`, `@author`, your
-own tags — and is deliberately not emitted into any document.
+wiz reads JSDoc. Constraints (`@min`, `@minLength`, `@pattern`, `@format`, …)
+are enforced by the generated validator; annotations (`@example`, `@default`,
+`@deprecated`, the doc comment itself) only describe; everything else is
+preserved verbatim in `meta` and emitted into no document.
 
 ```ts
 interface User {
@@ -152,447 +79,77 @@ interface User {
    * @maximum 150
    */
   age?: number;
-
-  /** @deprecated Use `email` instead. */
-  oldEmail?: string;
 }
 ```
 
-### `@format` picks the wire type
+`@format` is the one tag that reaches every back end at once: it picks the JSON
+Schema format, the OpenAPI format, the protobuf field type, the Avro type and
+the Arrow column. Widths are ranges and the ranges are enforced — `@format
+int32` with `3000000000` is rejected rather than wrapped to `-1294967296`. Full
+tag reference, the format tiers and the integer-width table are in
+[annotations.md](./docs/annotations.md).
 
-One annotation drives the JSON Schema format, the OpenAPI format, the protobuf
-field type, the Avro type and the Arrow column. The values are the OpenAPI
-Format Registry's, so there is nothing wiz-specific to learn.
+## Specs and clients
 
-| `@format` | on | proto | Avro | Arrow | JSON Schema |
-|---|---|---|---|---|---|
-| *(none)* | `number` | `double` | `double` | `Float64` | `number` |
-| `int8` / `int16` | `number` | `int32` | `int` | `Int8` / `Int16` | `number` + bounds |
-| `uint8` / `uint16` | `number` | `uint32` | `int` | `Uint8` / `Uint16` | `number` + bounds |
-| `int32` | `number` | `int32` | `int` | `Int32` | `number` + bounds |
-| `uint32` | `number` | `uint32` | `long` | `Uint32` | `number` + bounds |
-| `int64` | `bigint` | `int64` | `long` | `Int64` | `string` + pattern |
-| `uint64` | `bigint` | `uint64` | `long` | `Uint64` | `string` + pattern |
-| `sint32` / `sint64` | `number` / `bigint` | zig-zag varint | `int` / `long` | `Int32` / `Int64` | + bounds |
-| `fixed32` / `sfixed32` | `number` | 4 bytes | `int` | `Uint32` / `Int32` | + bounds |
-| `fixed64` / `sfixed64` | `bigint` | 8 bytes | `long` | `Uint64` / `Int64` | `string` + pattern |
-| `double-int` | `number` | `int64` | `long` | `Int64` | `number` + bounds |
-| `unixtime` | `number` | `int64` | `long` | `Int64` | `number` + bounds |
-| `sf-integer` / `sf-decimal` | `number` | `int64` / `double` | `long` / `double` | `Int64` / `Float64` | `number` |
-| `float` | `number` | `float` | `float` | `Float32` | `number` + `float` |
-| `uuid` | `string` | `string` | `{string, uuid}` | `Utf8` | `string` + `uuid` |
-| `date` / `time` | `string` | `string` | `{int, date}` / `{int, time-millis}` | `Utf8` | `string` + format |
-| `date-time` | `string` | `string` | `{long, timestamp-millis}` | `Utf8` | `string` + format |
-| `byte` / `binary` | `string` | `string` | `bytes` | `Binary` | `string` + format |
-
-A plain `number` is a `double`, because in JavaScript it is one. Opt into a
-compact integer with `@format int32`.
-
-**A width is a range, and the range is enforced.** `@format int32` with
-`3000000000` is rejected by `validate`/`is` rather than wrapped to
-`-1294967296` by the codec, and the JSON Schema and OpenAPI output carry the
-matching `minimum`/`maximum` so any other validator agrees. A fractional value
-fails an integer width for the same reason, as does a `number` beyond 2^53 —
-past that the value is already wrong, whatever the width permits.
-
-Widths narrower than 32 bits are native columns in Arrow, and travel in the
-smallest type protobuf and Avro have, since neither has an 8- or 16-bit
-integer. Nothing widens silently, because the declared range is checked first.
-
-A `bigint` is described as a *string* in JSON Schema, with a digits pattern:
-JSON numbers are doubles, so precision above 2^53 dies on the way out, and
-`JSON.stringify` refuses a BigInt outright. The binary codecs carry the full
-64 bits. Bounds that a JSON number cannot state exactly are omitted rather
-than rounded, since an approximate bound admits or rejects the wrong values.
-
-`Uint8Array` and `Date` need no annotation — they are scalars everywhere:
-
-| type | proto | Avro | Arrow | JSON Schema |
-|---|---|---|---|---|
-| `Uint8Array` | `bytes` | `bytes` | `Binary` | `string`, base64 |
-| `Date` | `int64` | `{long, timestamp-millis}` | `Timestamp<ms>` | `string`, `date-time` |
-
-## OpenAPI
-
-Annotate a route handler with `op<{ … }>` and wiz assembles the document from
-the types. Slots: `path`, `query`, `header`, `cookie`, `body`, `response`,
-`responses`, `status`.
+Operations are declared as a service interface; JSDoc says where each method
+lives and the parameter and return types say what it carries.
 
 ```ts
-import { op, openapiSchema, openapiDocument } from "wiz";
+import { openapiSchema } from "wiz";
 
-export const routes = openapiSchema.bunRoutes(
-  { openapi: "3.1.0", info: { title: "Users", version: "1.0.0" } },
-  {
-    "/users/:id": {
-      GET: op<{
-        path: { id: number };
-        response: User;
-        responses: {
-          /** No such user */
-          404: NotFound;
-          /** Anything else */
-          default: never; // a `never` body means no content
-        };
-      }>(() => Response.json({ id: 1, name: "Ada" })),
-    },
-  }
-);
-
-Bun.serve({ routes });
-
-openapiDocument(); // every route in the program, merged
-```
-
-The routes object is handed back untouched, so it stays a working Bun router.
-A response's own doc comment becomes its description. `openapiSchema<[A, B]>()`
-generates a document from types alone when there are no routes to harvest.
-
-To print or export the generated schema as YAML when executing the file directly:
-
-```ts
-export const openapi = openapiSchema<[User]>({
-  info: { title: "User API", version: "1.0.0" },
-}, { version: "3.0" });
-
-if (import.meta.main) {
-  console.log(Bun.YAML.stringify(openapi, null, 2));
-}
-```
-Types reachable only through an error response are still hoisted into
-`components.schemas`. A route wiz cannot reach at compile time warns with a
-file:line rather than silently missing from the document.
-
-## Protobuf and Avro
-
-Both emit schema text and a binary codec generated from the same IR.
-
-Protobuf needs field numbers, since they are the wire contract and cannot be
-inferred:
-
-```ts
-interface Book {
-  /** @fieldNumber 1 */
-  title: string;
+export interface UserService {
   /**
-   * @fieldNumber 2
-   * @format int32
+   * @get /users/{id}
+   * @response 200 User
+   * @response 404 No such user NotFound
    */
-  year: number;
+  getUser(params: { path: { id: number } }): Promise<User>;
 }
-```
 
-Nested objects become embedded messages, `T[]` becomes packed repeated (the
-decoder accepts both framings), and `Record<string, T>` becomes a proto3 map.
-Avro needs no numbering — it is schema-driven, with no tags on the wire.
-
-### Unions
-
-A protobuf `oneof` needs a field number per variant, and TypeScript has nowhere
-to put one. `NumberedUnion` supplies them:
-
-```ts
-import type { NumberedUnion } from "wiz";
-
-type Shape = NumberedUnion<{ 2: Circle; 3: Square }>;
-```
-
-To TypeScript this is exactly `Circle | Square` — assignable, narrowable,
-printable. To wiz it is a `oneof`:
-
-```proto
-oneof shape {
-  Circle circle = 2;
-  Square square = 3;
-}
-```
-
-Those numbers live in the enclosing message's field-number space, because that
-is what a `oneof` occupies on the wire. So the property itself takes no
-`@fieldNumber`, and a collision with a sibling field is refused.
-
-An undeclared union is refused rather than encoded as something unreadable.
-Two things that look like unions are not, and still work: `T | undefined`
-(absence is field omission) and same-typed literal unions like
-`"read" | "write"` (a string).
-
-`Shape[]` and `Record<string, Shape>` are refused too — proto3 has no repeated
-or mapped `oneof`. Wrap the variants in their own type so the `oneof` sits
-inside a message that can be repeated.
-
-Only protobuf cares. JSON Schema, OpenAPI and Avro see an ordinary union.
-
-## CLI
-
-```
-wiz init [--force]             Register the plugin in the current project
-wiz eject <file.ts> [out.ts]   Eject one file; no output path prints to stdout
-wiz eject <dir> [outdir]       Eject a tsconfig project; no outdir prints JSON
-wiz generate -g <module> [in]  Run a generator over an API document
-wiz --help                     Show usage
-```
-
-`init` writes `wizPlugin.ts` and adds it to the root and `[test]` `preload`
-lists in `bunfig.toml`, creating the file or the section if needed.
-
-Your config is read with Bun's TOML parser but written as a text edit, so
-comments, key order and formatting are preserved — Bun ships `Bun.TOML.parse`
-and no serializer, and rewriting the file from a parsed object would throw all
-of that away. Entries already present are left alone, `./x.ts` and `x.ts` count
-as the same entry, and if the parser sees a `preload` the editor cannot safely
-place, `init` says so instead of writing a second one.
-
-`eject` writes what the plugin would have handed to Bun, so the result runs
-with no plugin and nothing importing wiz. It is the same transform the plugin
-uses, not a second implementation.
-
-A single file ejects to a single file, with the generated code inlined and
-trimmed to the parts that file uses. It refuses anything that cannot be
-answered from one file — `openapiDocument()` is built from every route
-reachable from the module, which is what the project form is for.
-
-A project ejects through its `tsconfig.json`, mirroring the tree. Generated
-modules stay separate there, since files share types by key and inlining would
-copy the same code into each one. Given no destination, the whole tree is
-printed as JSON with paths for keys.
-
-`generate` runs one generator over one document. The input is a file, or stdin
-when it is missing or `-`; the front end follows from the extension — `.proto`
-is a gRPC service definition, anything else an API document — and `--format`
-overrides the dialect. With `--outdir` the emitted files are written there,
-overwriting silently; without one, the whole `{ filename: contents }` record is
-printed as JSON so it can be post-processed.
-
-```bash
-wiz generate -g tsClient openapi.json --outdir src/api
-wiz generate -g reactQuery openapi.json --outdir src/api
-wiz generate -g tsClient openapi.json --outdir src/api --validate path,body
-cat openapi.yaml | wiz generate -g ./myGenerator.ts | jq -r '."model.ts"'
-```
-
-The bundled TypeScript client generators (`tsClient` and `reactQuery`) emit `model.ts` with the document's
-types and `api.ts` with its operations. Every operation takes exactly the
-parameters it declares — `path`, `query`, `headers`, `cookie`, `body` — and is
-reachable two ways: as a module-level function driven by `configure()`, or
-through `createClient()` when one process talks to several deployments. Both run
-the same interceptor chain, and both accept a `transport` (`HttpTransport` or
-`FetchLike`), symmetrical to gRPC clients. `--lenient` widens the parameter
-entry and query any string or boolean one, for the gateway the document forgot to
-mention.
-Every call also takes a second argument — `getPetById({ path: { petId } }, {
-signal, timeoutMs: 250 })` — the same cancellation and deadline a gRPC call
-takes. `signal` reaches `fetch` untouched, and the timeout is enforced locally:
-the call aborts with a `TimeoutError` when it passes, whatever the server is
-doing. A retried attempt (an interceptor calling `next` again) gets a fresh
-deadline; `timeoutMs` can also be a default on the client or `configure()`.
-
-`--validate` emits runtime checks from the document's own schema — constraints
-included, not just types. Bare it checks everything; a comma-separated list of
-`path`, `query`, `headers`, `body`, `response` narrows it. A failure throws
-`ClientValidationError`, naming the part that failed and carrying every error.
-
-The checks are wiz's own validators, not a second set: the same emitter
-`validate<T>` and `is<T>` are built from, run over the same IR, so a client
-cannot disagree with `validate<T>` about a value.
-
-```bash
-wiz generate -g tsClient openapi.json -o src/api --validate
-wiz generate -g tsClient openapi.json -o src/api --validate path,query,headers,body
-```
-
-The checks are inlined `typeof` tests and comparisons rather than a schema
-interpreted at runtime, so request validation is negligible against a network
-round trip. `response` is the one with a real cost: it walks the whole decoded
-payload on every call, so it scales with response size — worth it for small or
-critical payloads, usually not for large lists on a hot path. Without the flag
-the emitted client is byte-identical to before, so it costs nothing until asked
-for. See [docs/typescript-client.md](./docs/typescript-client.md#runtime-validation---validate).
-
-### Interceptors
-
-An interceptor wraps one call: `(call, next) => result`. It may change the call
-on the way in, change what comes back on the way out, call `next` more than once
-to retry, or never call it and answer from a cache. `[a, b]` nests, `a` outside
-`b`, and the response's status is judged *after* the chain, so a retry decides
-on a `503` rather than catching a thrown error.
-
-Both protocols use that one shape and share the `Call` type, so an interceptor
-that only touches the request is written once and used on either:
-
-```ts
-const bearer = <R>(call: Call, next: (call: Call) => R): R =>
-  next({ ...call, headers: { ...call.headers, authorization: `Bearer ${token}` } });
-
-configure({ interceptors: { http: [bearer], grpc: [bearer] } });
-```
-
-What differs is only what comes back. An HTTP interceptor awaits a `Response`; a
-gRPC one is handed a result whose messages have not arrived yet, and reads
-`headers` or `trailers` off it rather than awaiting the call — a stream has no
-single moment of arrival. Each key exists only when the document speaks that
-protocol, so an array can never be filed under a name nothing reads.
-
-### gRPC
-
-A `.proto` file is a front end like any other: messages, enums, `oneof`, `map`,
-`repeated`, `optional`, nested types and every scalar width become IR, and each
-`rpc` becomes a service method addressed by package, service and name. proto2's
-`required` is presence the other way round, so it lands as a non-optional field,
-and `default = X` lands in the slot the IR already had for a default. What the
-IR genuinely cannot hold — `extend`, groups, `reserved` — is reported as a
-diagnostic rather than dropped quietly.
-
-```bash
-wiz generate -g wiz/generators/tsClient.ts pets.proto --outdir src/api
-```
-
-That emits two more files. `codec.ts` holds a reader and a writer per message,
-generated from the same protobuf codec `encodeProto` uses. `transport.ts` holds
-the HTTP/2 transport. `api.ts` calls into both, so a method takes and returns
-messages, not bytes — in all four directions:
-
-```ts
-import { configure, unary, down, up, both } from "./api.ts";
-import { createHttp2Transport } from "./transport.ts";
-
-configure({
-  baseUrl: "http://127.0.0.1:50051",
-  transport: createHttp2Transport(),
+export const doc = openapiSchema<[UserService]>({
+  openapi: "3.1.0",
+  info: { title: "Users", version: "1.0.0" },
 });
-
-await unary({ text: "hi" });                                  // one to one
-for await (const pong of down({ text: "tick" })) { /* … */ }   // one to many
-await up(pings());                                             // many to one
-for await (const pong of both(pings())) { /* … */ }            // many to many
 ```
 
-Calls take a second argument for a deadline and cancellation —
-`unary(request, { timeoutMs: 250, signal })` — exactly as HTTP calls do, except
-that gRPC also carries ambient metadata there. A deadline is sent as
-`grpc-timeout` and enforced locally too, so a server that ignores it cannot hang
-the caller. `configure({ compression: "gzip" })` compresses what the client
-sends; replies are decompressed whenever the server says it compressed them,
-since every call advertises `grpc-accept-encoding: gzip, deflate, identity`.
-Compression goes through `CompressionStream`, so the same client does it in a
-browser as on a server. `gzip` and `deflate` are the registered gRPC encodings
-a browser can also perform; zstd is not one, so it is refused rather than
-guessed at.
+The same shape drives [OpenAPI](./docs/openapi.md),
+[AsyncAPI](./docs/asyncapi.md), [OpenRPC](./docs/openrpc.md) and
+[MCP](./docs/mcp.md).
 
-**Two transports, because two environments.** `transport.ts` speaks gRPC proper
-over `node:http2` — real HTTP/2, real trailers, a request body that stays open —
-and is the only one that can stream requests. It takes no URL: the origin comes
-off each call, so the client's `baseUrl` is the only place a URL is written and
-one transport serves several of them. It is a separate file so a browser
-bundle never imports `node:http2`. Without it, calls fall back to gRPC-Web over
-`fetch`, which runs anywhere and needs a proxy (Envoy, `grpcwebproxy`, Connect)
-in front of a gRPC server; a call that streams requests over that transport
-fails with `UNIMPLEMENTED` naming the fix rather than hanging.
+Going the other way, `wiz generate` turns an OpenAPI document or a `.proto`
+file into a typed client: [typescript-client](./docs/typescript-client.md),
+[react-query](./docs/react-query.md), [grpc](./docs/grpc.md), and
+[cli](./docs/cli.md) for `init`, `eject` and `generate`.
 
-The HTTP/2 path is tested against a real `@grpc/grpc-js` server: all four
-directions, server status codes, deadlines, cancellation and connection reuse.
-What a client built on `@grpc/grpc-js` still gives you that this does not:
+## Documentation
 
-| | wiz | notes |
-|---|---|---|
-| Unary and all three streaming directions | yes, over HTTP/2 | gRPC-Web carries unary and server streaming only |
-| Deadlines, cancellation | yes | `timeoutMs` and `AbortSignal` per call, or a default on the client |
-| Wire format | verified | checked byte for byte against protobufjs, both directions |
-| Metadata | headers plus trailing metadata | an interceptor sets it going out and reads `trailers` off the result coming back; a failure carries it on `GrpcError.metadata`. Not a typed `Metadata` object, and binary (`-bin`) values are not base64-decoded |
-| Retries, hedging | writable, not built in | an interceptor may call `next` again — a unary request is re-iterable, so the retry sends the same message. No policy, no backoff, no hedging |
-| Load balancing, name resolution, channel state | no | one session per origin, pooled; no resolver and no channel state to read |
-| TLS and credentials | the runtime's | `http2.connect` options are passed through; no per-call credentials |
-| Compression | `gzip`, `deflate` | per message, both directions, via `CompressionStream`; verified against grpc-js. `snappy` and zstd are not offered |
-| Interceptors | a chain, both protocols | `(call, next) => result`, nested outermost first, sharing one `Call` type. No per-method interception |
-| Reflection, health checking | no | generate a client from their own `.proto` like any other service |
-| Well-known types | `Timestamp`, `Duration`, `Empty`, `FieldMask`, the nine wrappers | declared as the messages the spec defines, so the bytes match protobufjs. `Any` and `Struct` carry meaning in the runtime rather than in their fields, and stay diagnosed |
+Every feature, extractor and generator has a guide in
+**[docs/](./docs/README.md)**.
 
 ## Design
 
-Two steps meeting at the IR. An *extractor* is a front end that produces IR —
-`extractors/typescript.ts` reads TypeScript types today, and the split exists
-so others can join it. *Generators* are back ends that turn IR into code.
+Two steps meeting at the IR. An *extractor* is a front end that produces IR;
+*generators* are back ends that turn IR into `GeneratedFiles` — a map of
+filenames to contents. The plugin mounts those virtually (under
+`wiz-virtual/<key>/index.js`) and rewrites callsites to import them, while
+`wiz generate` and `wiz eject` write them to disk.
 
-Because they meet at one IR and share the `@format` reader, a type cannot be
-described one way and encoded another — a class of bug this codebase has had
-repeatedly.
+Because every back end meets at one IR and shares the `@format` reader, a type
+cannot be described one way and encoded another — a class of bug this codebase
+has had repeatedly. See [architecture.md](./docs/architecture.md), and
+[writing-a-generator.md](./docs/writing-a-generator.md) to add a back end.
 
-
-```mermaid
-flowchart LR
-  subgraph front[front ends: extractors]
-    TS["TypeScript types<br><code>extractors/typescript.ts</code>"]
-    OA["OpenAPI document<br><code>extractors/openapi.ts</code>"]
-    PR[".proto file<br><code>extractors/proto.ts</code>"]
-  end
-
-  IR(("IR<br>types · service · api"))
-
-  subgraph back[back ends: generators]
-    SC["schema · validator<br>· keys · zod"]
-    OP["OpenAPI<br>document"]
-    PB["protobuf · avro<br>· arrow codecs"]
-    TC["TS client<br>model · api · codec<br>· transport"]
-  end
-
-  GF[("GeneratedFiles<br>filename → contents")]
-
-  VU["virtual modules<br>on the wire<br><code>wiz-virtual/&lt;key&gt;/index.js</code>"]
-  FS["files on disk<br><code>wiz generate</code><br><code>wiz eject</code>"]
-
-  TS --> IR
-  OA --> IR
-  PR --> IR
-  IR --> SC
-  IR --> OP
-  IR --> PB
-  IR --> TC
-  SC --> GF
-  OP --> GF
-  PB --> GF
-  TC --> GF
-  GF --> VU
-  GF --> FS
-```
-
-
-Every generator now returns the same contract: a map of filenames to contents
-(`GeneratedFiles`). The two ways out differ only in their driver: the plugin
-mounts generated modules virtually (under `wiz-virtual/<key>/index.js`) and
-rewrites call sites to import them, while `wiz generate` and `wiz eject` write
-the files to disk for anything that wants post-processing. Multi-file virtual
-modules are now possible, and deduplication of modules by content remains
-hash-keyed.
-
-### Verification
+## Verification
 
 Round-tripping wiz against itself proves nothing about a wire format: a codec
-wrong in both directions round-trips perfectly. Avro is worse still — it is
-schema-driven with no tags on the wire, so a field written one width and read
-another silently shifts everything after it.
-
-So the output is checked against independent implementations.
-[protobuf.js](https://github.com/protobufjs/protobuf.js) and
-[avsc](https://github.com/mtth/avsc) parse the generated `.proto` and `.avsc`,
-read what wiz writes and write what wiz reads. Generated OpenAPI documents are
-validated against the official OpenAPI schemas, and
-[Ajv](https://ajv.js.org) compiles the generated JSON Schema and must reach
-the same verdict as the generated validator on every case in a shared corpus —
-the schema and the validator come from one IR, so nothing else was checking
-that they agree.
-
-Agreeing with another implementation only shows the two reach the same answer,
-so the validator is also driven by the official
-[JSON Schema Test Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite),
-which pins it to the standard instead.
-
-That is not a formality. It caught negative `int32` truncated to two bytes
-instead of proto3's sign-extended ten, maps declared as `string`, `repeated
-double` where the codec wrote `int32`, Avro enum symbols naming the members
-while the codec indexed their values, the second use of a named type silently
-degrading to JSON in both back ends, `@multipleOf` emitted into every schema
-but enforced by nothing, string lengths counted in UTF-16 units rather than
-characters, and `uniqueItems` comparing objects by reference — none of which
-wiz's own tests could see.
+wrong in both directions round-trips perfectly. So the output is checked
+against independent implementations — protobuf.js and avsc read what wiz writes
+and write what wiz reads, Ajv must reach the same verdict as the generated
+validator on a shared corpus, generated documents are validated against the
+official OpenAPI/AsyncAPI/OpenRPC schemas, the gRPC client is driven against
+`@grpc/grpc-js`, and the validator is pinned to the official JSON Schema Test
+Suite. What that has caught is listed in
+[verification.md](./docs/verification.md).
 
 ## Tests
 

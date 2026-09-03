@@ -1,4 +1,4 @@
-import type { ServiceIR } from "../ir/service.ts";
+import { isAsyncApiMethod, type ServiceIR } from "../ir/service.ts";
 import type { TypeIR } from "../types.ts";
 import { irToJsonSchema } from "./schema.ts";
 import { assertValidSpecDocumentSync } from "../validators/jsonSchema.ts";
@@ -51,17 +51,28 @@ export function generateAsyncApiSchemaCode(
 
     if (service?.methods) {
       service.methods.forEach((method, index) => {
-        const addr = method.address.protocol === "asyncapi" ? method.address.channel : `channel_${index}`;
-        const action = method.address.protocol === "asyncapi" ? method.address.action : "send";
+        if (!isAsyncApiMethod(method)) return;
+        const pkg = method.address.package ?? service.package;
+        const svc = method.address.service ?? service.name;
+        const rawChan = method.address.channel || `channel_${index}`;
+        const fullChan = pkg && svc
+          ? `${pkg}.${svc}.${rawChan}`
+          : svc
+            ? `${svc}.${rawChan}`
+            : rawChan;
+        const action = method.address.action;
         const opId = method.operationId ?? `${action}_${index}`;
-        const chanKey = addr.replace(/[^a-zA-Z0-9_]/g, "_");
+        const chanKey = fullChan.replace(/[^a-zA-Z0-9_.]/g, "_");
+        const messageName = method.request.body?.[0]?.content.name;
 
         channels[chanKey] = {
-          address: addr,
-          messages: method.request?.body?.[0]?.content?.name
+          address: rawChan,
+          ...(pkg ? { "x-package": pkg } : {}),
+          ...(svc ? { "x-service": svc } : {}),
+          messages: messageName
             ? {
-                [method.request.body[0].content.name]: {
-                  $ref: `#/components/messages/${method.request.body[0].content.name}`,
+                [messageName]: {
+                  $ref: `#/components/messages/${messageName}`,
                 },
               }
             : {},
@@ -72,6 +83,8 @@ export function generateAsyncApiSchemaCode(
           channel: { $ref: `#/channels/${chanKey}` },
           summary: method.summary,
           description: method.description,
+          ...(pkg ? { "x-package": pkg } : {}),
+          ...(svc ? { "x-service": svc } : {}),
         };
       });
     }
@@ -95,21 +108,34 @@ export function generateAsyncApiSchemaCode(
 
     if (service?.methods) {
       service.methods.forEach((method, index) => {
-        const addr = method.address.protocol === "asyncapi" ? method.address.channel : `channel_${index}`;
-        const action = method.address.protocol === "asyncapi" && method.address.action === "send" ? "publish" : "subscribe";
+        if (!isAsyncApiMethod(method)) return;
+        const pkg = method.address.package ?? service.package;
+        const svc = method.address.service ?? service.name;
+        const rawChan = method.address.channel || `channel_${index}`;
+        const fullChan = pkg && svc
+          ? `${pkg}.${svc}.${rawChan}`
+          : svc
+            ? `${svc}.${rawChan}`
+            : rawChan;
+        const action = method.address.action === "send" ? "publish" : "subscribe";
         const opId = method.operationId ?? `${action}_${index}`;
+        const messageName = method.request.body?.[0]?.content.name;
 
-        const msgRef = method.request?.body?.[0]?.content?.name
-          ? { $ref: `#/components/messages/${method.request.body[0].content.name}` }
+        const msgRef = messageName
+          ? { $ref: `#/components/messages/${messageName}` }
           : undefined;
 
-        channels[addr] = {
+        channels[fullChan] = {
           [action]: {
             operationId: opId,
             summary: method.summary,
             description: method.description,
             message: msgRef,
+            ...(pkg ? { "x-package": pkg } : {}),
+            ...(svc ? { "x-service": svc } : {}),
           },
+          ...(pkg ? { "x-package": pkg } : {}),
+          ...(svc ? { "x-service": svc } : {}),
         };
       });
     }

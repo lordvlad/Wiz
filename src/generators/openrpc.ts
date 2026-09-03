@@ -54,9 +54,14 @@ export function generateOpenRpcSchemaCode(
 
   for (const method of service.methods) {
     if (isOpenRpcMethod(method)) {
-      const methodName = method.address.service
-        ? `${method.address.service}.${method.address.method}`
-        : method.address.method;
+      const pkg = method.address.package ?? service.package;
+      const svc = method.address.service ?? service.name;
+      const m = method.address.method;
+      const methodName = pkg && svc
+        ? `${pkg}.${svc}.${m}`
+        : svc
+          ? `${svc}.${m}`
+          : m;
 
       if (methodName === "rpc.discover") {
         hasRpcDiscover = true;

@@ -125,7 +125,7 @@ export interface JSDocInfo extends Annotated {
   fieldNumber?: number;
 }
 
-function extractJSDocInfo(
+export function extractJSDocInfo(
   symbol: ts.Symbol | undefined,
   checker: ts.TypeChecker
 ): JSDocInfo {
@@ -577,6 +577,71 @@ function numberedUnionEntries(
   }
   return entries.length > 0 ? entries : undefined;
 }
+
+/**
+ * The enum every non-nullable member of `type` belongs to, when there is
+ * exactly one and the union covers nothing else.
+ *
+ * A partial union — `PetStatus.Sold | PetStatus.Pending` written by hand, or an
+ * enum member mixed with a string — is deliberately not an enum: collapsing it
+ * would widen the type to values the declaration excluded.
+ */
+function sharedEnumSymbol(
+  type: ts.UnionType,
+  checker: ts.TypeChecker
+): ts.Symbol | undefined {
+  const members = type.types.filter(
+    (member) => !(member.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Null))
+  );
+  if (members.length === 0) return undefined;
+
+  let owner: ts.Symbol | undefined;
+  for (const member of members) {
+    if (!(member.flags & ts.TypeFlags.EnumLiteral)) return undefined;
+    const parent = (member.symbol as ts.Symbol & { parent?: ts.Symbol })?.parent;
+    if (!parent || !(parent.flags & ts.SymbolFlags.Enum)) return undefined;
+    if (owner && owner !== parent) return undefined;
+    owner ??= parent;
+  }
+  if (!owner) return undefined;
+
+  // Every member of the enum must be present, or the union is a subset.
+  const declared = checker.getDeclaredTypeOfSymbol(owner);
+  const declaredCount = declared.isUnion() ? declared.types.length : 1;
+  return members.length === declaredCount ? owner : undefined;
+}
+  // `status?: PetStatus` reaches here as `Available | Pending | Sold |
+  // undefined`: TypeScript models an enum as the union of its members, and the
+  // optional marker hides the enum's own symbol. Decomposing that yields one
+  // named `const` schema per member and loses the enum, so the parent enum is
+  // recovered before the union is taken apart.
+  if (type.isUnion()) {
+    const enumSymbol = sharedEnumSymbol(type, checker);
+    if (enumSymbol) {
+      const enumType = checker.getDeclaredTypeOfSymbol(enumSymbol);
+      const enumIR = extractTypeIR(enumType, checker, cache);
+      const nullable = type.types.filter((member) =>
+        Boolean(member.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Null))
+      );
+      if (nullable.length === 0) {
+        cache.set(type, enumIR);
+        return enumIR;
+      }
+      const res: UnionTypeIR = {
+        id: nextId(cache),
+        kind: "union",
+        types: [
+          enumIR,
+          ...nullable.map((member) => extractTypeIR(member, checker, cache)),
+        ],
+        name: typeName,
+        ...annotations,
+      };
+      cache.set(type, res);
+      return res;
+    }
+  }
+
   if (type.isUnion()) {
     const placeholder: UnionTypeIR = {
       id: nextId(cache),

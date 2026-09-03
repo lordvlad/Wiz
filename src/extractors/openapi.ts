@@ -5,6 +5,7 @@ import {
   type ApiIR,
 } from "../ir/api.ts";
 import { extractOpenRpcIR } from "./openrpc.ts";
+import { extractAsyncApiIR } from "./asyncapi.ts";
 import type {
   Annotated,
   EnumMemberIR,
@@ -149,7 +150,7 @@ function checkMismatchedConstraints(
   if (!types || types.length === 0) return;
 
   const anyNumeric = types.some((t) => isNumericType(t, raw));
-  const anyString = types.some((t) => isStringType(t, raw));
+  const anyString = types.some((t) => isStringType(t));
   const anyArray = types.some((t) => isArrayType(t));
 
   const typeNameStr = types.join(" | ");
@@ -1062,8 +1063,14 @@ export function extractApiIR(
   if (!isObject(parsed)) {
     throw new Error("[wiz] OpenAPI document must be an object");
   }
-  if (typeof parsed.openrpc === "string" || parsed.openrpc !== undefined) {
+  // The dialect is whichever root field the document declares. Each front end
+  // re-parses the text rather than the parsed object, which costs one parse
+  // and keeps every extractor callable on its own.
+  if (parsed.openrpc !== undefined) {
     return extractOpenRpcIR(text, options);
+  }
+  if (parsed.asyncapi !== undefined) {
+    return extractAsyncApiIR(text, options);
   }
 
 

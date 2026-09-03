@@ -9,6 +9,7 @@
     "./plugin": "./src/plugin.ts",
     "./openapi": "./src/extractors/openapi.ts"
   },
+  "workspaces": ["examples/*"],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test --timeout=20000",

@@ -1,0 +1,336 @@
+{
+  "openrpc": "1.3.2",
+  "info": {
+    "title": "Petstore RPC",
+    "version": "1.0.0",
+    "description": "JSON-RPC over WebSocket at ws://localhost:3000/rpc."
+  },
+  "methods": [
+    {
+      "name": "Pets.listPets",
+      "summary": "List pets",
+      "description": "Lists pets, filtered and capped.",
+      "params": [
+        {
+          "name": "query",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/PetQuery"
+          }
+        }
+      ],
+      "paramStructure": "by-name",
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/Pet"
+          }
+        }
+      }
+    },
+    {
+      "name": "Pets.getPet",
+      "summary": "Fetch a pet",
+      "description": "Fetches one pet by id.",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "number"
+          }
+        }
+      ],
+      "paramStructure": "by-name",
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Pet"
+        }
+      }
+    },
+    {
+      "name": "Pets.addPet",
+      "summary": "Add a pet",
+      "description": "Adds a pet to the store.",
+      "params": [
+        {
+          "name": "pet",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/NewPet"
+          }
+        }
+      ],
+      "paramStructure": "by-name",
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Pet"
+        }
+      }
+    },
+    {
+      "name": "Pets.sellPet",
+      "summary": "Sell a pet",
+      "description": "Sells a pet to an owner.",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "number"
+          }
+        },
+        {
+          "name": "sale",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Sale"
+          }
+        }
+      ],
+      "paramStructure": "by-name",
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Pet"
+        }
+      }
+    },
+    {
+      "name": "rpc.discover",
+      "summary": "Returns OpenRPC schema description",
+      "params": [],
+      "result": {
+        "name": "OpenRPC",
+        "schema": {
+          "type": "object"
+        }
+      }
+    }
+  ],
+  "components": {
+    "schemas": {
+      "PetRpcApi": {
+        "type": "object",
+        "properties": {
+          "listPets": {
+            "$ref": "#/components/schemas/listPets",
+            "description": "Lists pets, filtered and capped."
+          },
+          "getPet": {
+            "$ref": "#/components/schemas/getPet",
+            "description": "Fetches one pet by id."
+          },
+          "addPet": {
+            "$ref": "#/components/schemas/addPet",
+            "description": "Adds a pet to the store."
+          },
+          "sellPet": {
+            "$ref": "#/components/schemas/sellPet",
+            "description": "Sells a pet to an owner."
+          }
+        },
+        "required": [
+          "listPets",
+          "getPet",
+          "addPet",
+          "sellPet"
+        ]
+      },
+      "listPets": {
+        "description": "Lists pets, filtered and capped.",
+        "type": "object",
+        "properties": {}
+      },
+      "getPet": {
+        "description": "Fetches one pet by id.",
+        "type": "object",
+        "properties": {}
+      },
+      "addPet": {
+        "description": "Adds a pet to the store.",
+        "type": "object",
+        "properties": {}
+      },
+      "sellPet": {
+        "description": "Sells a pet to an owner.",
+        "type": "object",
+        "properties": {}
+      },
+      "PetQuery": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/PetStatus",
+            "description": "Restrict to one status."
+          },
+          "q": {
+            "type": "string",
+            "description": "Substring match on the name, case-insensitive."
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        }
+      },
+      "PetStatus": {
+        "description": "Where a pet is in its journey through the store.",
+        "type": "number",
+        "enum": [
+          0,
+          1,
+          2
+        ]
+      },
+      "Pet": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "minimum": -2147483648,
+            "format": "int32",
+            "maximum": 2147483647
+          },
+          "name": {
+            "type": "string",
+            "description": "The pet's call name.",
+            "minLength": 1,
+            "maxLength": 80,
+            "examples": [
+              "Ada"
+            ]
+          },
+          "species": {
+            "$ref": "#/components/schemas/Species"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PetStatus"
+          },
+          "priceCents": {
+            "type": "string",
+            "format": "int64",
+            "pattern": "^-?\\d+$",
+            "description": "Retail price in minor units, so no float ever touches money."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16
+          },
+          "owner": {
+            "$ref": "#/components/schemas/Owner",
+            "description": "Absent while the pet is still available."
+          },
+          "addedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "species",
+          "status",
+          "priceCents",
+          "tags",
+          "addedAt"
+        ]
+      },
+      "Species": {
+        "description": "What kind of animal. Ordinals are the protobuf enum values.",
+        "type": "number",
+        "enum": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      "Owner": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "email"
+        ]
+      },
+      "NewPet": {
+        "description": "The body accepted when creating a pet: the store assigns `id` and `addedAt`.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "species": {
+            "$ref": "#/components/schemas/Species"
+          },
+          "priceCents": {
+            "type": "string",
+            "format": "int64",
+            "pattern": "^-?\\d+$"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "species",
+          "priceCents"
+        ]
+      },
+      "Sale": {
+        "description": "The body accepted when selling a pet.",
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ownerName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "ownerEmail": {
+            "type": "string",
+            "format": "email"
+          }
+        },
+        "required": [
+          "ownerId",
+          "ownerName",
+          "ownerEmail"
+        ]
+      }
+    }
+  }
+}

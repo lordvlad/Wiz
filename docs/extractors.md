@@ -52,6 +52,18 @@ import { extractProtoIRFromFile } from "wiz/extractors/proto";
 
 const apiIR = await extractProtoIRFromFile("service.proto");
 ```
+### 4. Signature & Service Harvesters (`openapiSchema`, `asyncapiSchema`, `openRPCSchema`, `mcpSchema`)
+
+The type harvester (`src/harvest.ts`) extracts service methods, parameter shapes and response schemas directly from the generic type arguments of each spec macro. There are no builder functions: a type argument is either a function signature type or an interface/class whose members are callable.
+
+- **Function Signature Types**: Extract a single operation. Names derive from JSDoc `@name` if present, otherwise from the function/type name (`toSnakeCase` applied for MCP tools).
+- **Service Object Types**: Extract every callable member of an interface or class type.
+  - `openapiSchema`: verb and path come from `@get`/`@post`/… or `@http`; responses from `@response STATUS [MEDIATYPE] [TYPE] [DESCRIPTION]`; `x-service`/`x-package` and the operation tag from `@service`/`@package`.
+  - `asyncapiSchema`: channel from `@channel`, direction from `@producer`/`@consumer`/`@action`; the channel key is prefixed with `@package`/`@service`.
+  - `openRPCSchema`: namespaces methods as `${package}.${service}.${methodName}`, falling back to `${ServiceName}.${methodName}` (unless overridden by `@name` on member JSDoc).
+  - `mcpSchema`: namespaces tool names as `${package}.${service}.${toSnakeCase(methodName)}` (unless overridden by `@name` on member JSDoc).
+- **Payload Types**: A type argument with no callable members contributes a component schema and no operation. `openapiSchema` and `asyncapiSchema` accept these silently, since a components-only document is a normal use.
+- **0-Method Warning**: `openRPCSchema` and `mcpSchema` log a diagnostic (`no methods found on object type '<typeName>' for openRPCSchema` / `mcpSchema`) for an object type with no callable members, since those macros describe nothing else.
 
 ## Diagnostics (`ApiDiagnostic`)
 

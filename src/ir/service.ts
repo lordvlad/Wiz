@@ -5,7 +5,7 @@ import { normalizeTypeIR, type TypeIR } from "./types.ts";
  * so those pieces stay self-describing when passed around on their own, and
  * `ServiceMethodIR` repeats it so a whole method narrows in one check.
  */
-export type Protocol = "http" | "grpc" | "openrpc";
+export type Protocol = "http" | "grpc" | "openrpc" | "mcp" | "asyncapi";
 
 export type HttpMethodName =
   | "GET"
@@ -23,6 +23,9 @@ export interface HttpAddressIR {
   method: HttpMethodName;
   /** OpenAPI template form: `/users/{id}`, never `/users/:id`. */
   path: string;
+  package?: string;
+  service?: string;
+  methodName?: string;
 }
 
 /**
@@ -41,14 +44,36 @@ export interface GrpcAddressIR {
 }
 export interface OpenRpcAddressIR {
   protocol: "openrpc";
+  package?: string;
   service?: string;
   method: string;
+}
+export interface McpAddressIR {
+  protocol: "mcp";
+  package?: string;
+  service?: string;
+  method?: string;
+  name: string;
+}
+
+/**
+ * An AsyncAPI operation is addressed by channel plus the direction the
+ * application takes on it, which is all the protocol puts on the wire.
+ */
+export interface AsyncApiAddressIR {
+  protocol: "asyncapi";
+  package?: string;
+  service?: string;
+  channel: string;
+  action: string;
 }
 
 export type ServiceMethodAddressIR =
   | HttpAddressIR
   | GrpcAddressIR
-  | OpenRpcAddressIR;
+  | OpenRpcAddressIR
+  | McpAddressIR
+  | AsyncApiAddressIR;
 
 /**
  * One representation of a payload. A request or response holds a list of these
@@ -98,11 +123,22 @@ export interface OpenRpcRequestIR {
   params: ParameterIR[];
   paramsByName?: boolean;
 }
+export interface McpRequestIR {
+  protocol: "mcp";
+  input: TypeIR;
+}
+export interface AsyncApiRequestIR {
+  protocol: "asyncapi";
+  body?: ServiceMethodBodyIR[];
+}
 
 export type ServiceMethodRequestIR =
   | HttpRequestIR
   | GrpcRequestIR
-  | OpenRpcRequestIR;
+  | OpenRpcRequestIR
+  | McpRequestIR
+  | AsyncApiRequestIR;
+
 
 export interface HttpResponseIR {
   protocol: "http";
@@ -130,11 +166,22 @@ export interface OpenRpcResponseIR {
   result: TypeIR;
   error?: TypeIR;
 }
+export interface McpResponseIR {
+  protocol: "mcp";
+  output?: TypeIR;
+}
+export interface AsyncApiResponseIR {
+  protocol: "asyncapi";
+  body?: ServiceMethodBodyIR[];
+}
 
 export type ServiceMethodResponseIR =
   | HttpResponseIR
   | GrpcResponseIR
-  | OpenRpcResponseIR;
+  | OpenRpcResponseIR
+  | McpResponseIR
+  | AsyncApiResponseIR;
+
 
 /**
  * A single callable endpoint. Responses are a list rather than a TypeScript
@@ -148,10 +195,12 @@ export interface ServiceMethodIR {
   request: ServiceMethodRequestIR;
   responses: ServiceMethodResponseIR[];
   operationId?: string;
+  title?: string;
   summary?: string;
   description?: string;
   tags?: string[];
   deprecated?: boolean;
+  annotations?: McpToolAnnotationsIR;
   /**
    * Verbatim source for a caller-supplied options object, spread last by the
    * generator so hand-written OpenAPI beats anything derived from types.
@@ -187,6 +236,24 @@ export interface OpenRpcServiceMethodIR extends ServiceMethodIR {
   request: OpenRpcRequestIR;
   responses: OpenRpcResponseIR[];
 }
+export interface McpToolAnnotationsIR {
+  audience?: Array<"user" | "assistant">;
+  priority?: number;
+}
+export interface McpServiceMethodIR extends ServiceMethodIR {
+  protocol: "mcp";
+  address: McpAddressIR;
+  title?: string;
+  annotations?: McpToolAnnotationsIR;
+  request: McpRequestIR;
+  responses: McpResponseIR[];
+}
+export interface AsyncApiServiceMethodIR extends ServiceMethodIR {
+  protocol: "asyncapi";
+  address: AsyncApiAddressIR;
+  request: AsyncApiRequestIR;
+  responses: AsyncApiResponseIR[];
+}
 
 
 export function isHttpMethod(
@@ -205,6 +272,16 @@ export function isOpenRpcMethod(
 ): method is OpenRpcServiceMethodIR {
   return method.protocol === "openrpc";
 }
+export function isMcpMethod(
+  method: ServiceMethodIR
+): method is McpServiceMethodIR {
+  return method.protocol === "mcp";
+}
+export function isAsyncApiMethod(
+  method: ServiceMethodIR
+): method is AsyncApiServiceMethodIR {
+  return method.protocol === "asyncapi";
+}
 
 
 /**
@@ -218,6 +295,7 @@ export function isOpenRpcMethod(
 export interface ServiceIR {
   kind: "service";
   name?: string;
+  package?: string;
   version?: string;
   description?: string;
   methods: ServiceMethodIR[];
@@ -307,6 +385,30 @@ export function normalizeServiceMethod(method: ServiceMethodIR): unknown {
               : null,
           }
         : null,
+    };
+  }
+  if (isMcpMethod(method)) {
+    const mcpResp = method.responses.find(
+      (candidate): candidate is McpResponseIR => candidate.protocol === "mcp"
+    );
+    return {
+      a: method.address,
+      t: method.title ?? null,
+      de: method.description ?? null,
+      ann: method.annotations ?? null,
+      rq: {
+        in: normalizeTypeIR(method.request.input, true),
+      },
+      rs: mcpResp?.output ? normalizeTypeIR(mcpResp.output, true) : null,
+    };
+  }
+  if (isAsyncApiMethod(method)) {
+    return {
+      a: method.address,
+      oi: method.operationId ?? null,
+      su: method.summary ?? null,
+      de: method.description ?? null,
+      b: bodyKey(method.request.body),
     };
   }
 

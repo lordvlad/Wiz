@@ -308,8 +308,8 @@ harvested last time may describe source that is already gone.
   `harvestDocument` and inlined as an AST literal by `jsonToExpression`, so no
   fragment registry survives into the bundle. Under `isolated: true` — a
   single-file eject — it throws instead, naming the project form as the fix.
-- `op(handler, options)` is a compile-time carrier; it collapses to its first
-  argument, which is the only part with runtime meaning.
+- `openapiSchema<[Service]>(base)` collapses to a call into the virtual module
+  that holds the finished document.
 - `openapiSchema.bunRoutes(base, routes)` collapses to the routes literal,
   which `Bun.serve` consumes directly.
 - `honoRoutes(app, base, routes)` survives, because the call itself is what

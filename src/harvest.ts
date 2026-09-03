@@ -1,16 +1,26 @@
 import ts from "typescript";
 import { mergeDocuments, type OpenApiDocument } from "./document.ts";
-import { extractTypeIR } from "./extractors/typescript.ts";
+import {
+  extractJSDocInfo,
+  extractTypeIR,
+  type JSDocInfo,
+} from "./extractors/typescript.ts";
 import { generateOpenApiSchemaCode } from "./generators/openapi.ts";
 import {
+  type AsyncApiServiceMethodIR,
+  type GrpcServiceMethodIR,
   type HttpMethodName,
   type HttpRequestIR,
   type HttpResponseIR,
   type HttpServiceMethodIR,
+  type McpServiceMethodIR,
+  type McpToolAnnotationsIR,
+  type OpenRpcServiceMethodIR,
   type ParameterIR,
+  type ServiceMethodIR,
 } from "./ir/service.ts";
 import { silentLogger, type WizLogger } from "./logger.ts";
-import { flattenObjectProperties, type TypeIR } from "./types.ts";
+import { flattenObjectProperties, isUserNamedType, type TypeIR } from "./types.ts";
 
 /**
  * Reading routes out of source: `op<{ … }>` descriptors, Bun and Hono route
@@ -35,21 +45,13 @@ const HTTP_METHODS = new Set([
 
 const JSON_MIME = "application/json";
 
-/** Slots understood inside an `op<{ … }>()`, `producer<{ … }>()`, or `consumer<{ … }>()` type argument. */
-const SPEC_SLOTS = new Set([
-  "path",
-  "query",
-  "header",
-  "cookie",
-  "body",
-  "response",
-  "responses",
-  "status",
-  "channel",
-  "message",
-  "payload",
-  "headers",
-]);
+
+function toSnakeCase(str: string): string {
+  return str
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
+    .toLowerCase();
+}
 
 export const COMPILER_OPTIONS: ts.CompilerOptions = {
   target: ts.ScriptTarget.ESNext,
@@ -223,118 +225,6 @@ interface OperationSpec {
  * generics: callers omit what they do not use and new slots can be added
  * without shifting anyone's arguments.
  */
-function readOperationSpec(
-  call: ts.CallExpression,
-  checker: ts.TypeChecker,
-  sourceFile: ts.SourceFile,
-  logger: WizLogger
-): OperationSpec {
-  const request: HttpRequestIR = { protocol: "http" };
-  const specNode = call.typeArguments?.[0];
-  if (!specNode) {
-    return { request, responses: [{ protocol: "http", status: 204 }] };
-  }
-
-  const specIR = extractTypeIR(checker.getTypeFromTypeNode(specNode), checker);
-  const slots = new Map(
-    flattenObjectProperties(specIR).map((p) => [p.name, p])
-  );
-
-  for (const name of slots.keys()) {
-    if (!SPEC_SLOTS.has(name)) {
-      warnUndocumentable(
-        logger,
-        `unknown op slot "${name}"; expected one of ${[...SPEC_SLOTS].join(", ")}`,
-        specNode,
-        sourceFile
-      );
-    }
-  }
-
-  const slotType = (name: string) => {
-    const property = slots.get(name);
-    return property && !isAbsent(property.type) ? property.type : undefined;
-  };
-
-  const parameters = [
-    ...slotParameters(slotType("path"), "path"),
-    ...slotParameters(slotType("query"), "query"),
-    ...slotParameters(slotType("header"), "header"),
-    ...slotParameters(slotType("cookie"), "cookie"),
-  ];
-  if (parameters.length > 0) request.parameters = parameters;
-
-  const body = slotType("body");
-  if (body) {
-    request.body = [{ mimetype: JSON_MIME, content: body }];
-  }
-
-  // `status: 201` is a numeric literal type, not a payload schema.
-  const statusSlot = slots.get("status");
-  const status =
-    statusSlot?.type.kind === "literal" &&
-    typeof statusSlot.type.value === "number"
-      ? statusSlot.type.value
-      : undefined;
-
-  const responses: HttpResponseIR[] = [];
-
-  // `response` is the shorthand for the success case.
-  const response = slotType("response");
-  if (response) {
-    responses.push({
-      protocol: "http",
-      status: status ?? 200,
-      body: [{ mimetype: JSON_MIME, content: response }],
-    });
-  }
-
-  // `responses: { 404: NotFound }` covers everything else. A method really does
-  // have several responses at once, so these accumulate rather than replace.
-  const responsesSlot = slots.get("responses");
-  if (responsesSlot) {
-    for (const entry of flattenObjectProperties(responsesSlot.type)) {
-      const status =
-        entry.name === "default" ? ("default" as const) : Number(entry.name);
-      if (status !== "default" && !Number.isInteger(status)) {
-        warnUndocumentable(
-          logger,
-          `response key "${entry.name}" is not a status code or "default"`,
-          specNode,
-          sourceFile
-        );
-        continue;
-      }
-      responses.push({
-        protocol: "http",
-        status,
-        // The key's own JSDoc becomes the response description.
-        ...(entry.description ? { description: entry.description } : {}),
-        ...(isAbsent(entry.type)
-          ? {}
-          : { body: [{ mimetype: JSON_MIME, content: entry.type }] }),
-      });
-    }
-  }
-
-  if (responses.length === 0) {
-    responses.push({ protocol: "http", status: status ?? 204 });
-  }
-
-  return { request, responses };
-}
-
-/** Unwraps `op<…>(handler)` / `openapiSchema.op<…>(handler)`, else undefined. */
-function asOperationCall(node: ts.Expression): ts.CallExpression | undefined {
-  if (!ts.isCallExpression(node)) return undefined;
-  const callee = node.expression;
-  const name = ts.isIdentifier(callee)
-    ? callee.text
-    : ts.isPropertyAccessExpression(callee)
-      ? callee.name.text
-      : undefined;
-  return name === "op" || name === "producer" || name === "consumer" ? node : undefined;
-}
 
 /**
  * Harvests path descriptors from a Bun `routes` object literal. Purely a read:
@@ -370,21 +260,14 @@ export function collectRouteOperations(
     httpMethod: string,
     value: ts.Expression | undefined
   ) => {
-    const call = value ? asOperationCall(value) : undefined;
-    const spec = call
-      ? readOperationSpec(call, checker, sourceFile, logger)
-      : {
-          request: { protocol: "http" } as HttpRequestIR,
-          responses: [
-            { protocol: "http", status: 204 } as HttpResponseIR,
-          ],
-        };
+    const request: HttpRequestIR = { protocol: "http" };
+    const responses: HttpResponseIR[] = [{ protocol: "http", status: 204 }];
     const method = httpMethodIR(
       httpMethod,
       path,
-      spec.request,
-      spec.responses,
-      call?.arguments[1]?.getText(sourceFile)
+      request,
+      responses,
+      undefined
     );
     logger.trace(
       `[wiz] documented ${method.address.method} ${method.address.path}`
@@ -649,9 +532,6 @@ export function harvestDocument(
       const adapter = routeAdapterFor(node);
       if (adapter) {
         const { base, routes } = adapter;
-        // Silent: every route file is transformed in its own right, and the
-        // adapter reports these diagnostics there. Repeating them per harvest
-        // would just duplicate them.
         const methods = collectRouteOperations(routes, checker, sourceFile, silentLogger);
         if (methods.length > 0) {
           const baseValue = base ? staticValue(base) : {};
@@ -675,6 +555,48 @@ export function harvestDocument(
             )
           );
         }
+      } else if (ts.isCallExpression(node)) {
+        const callee = node.expression;
+        const fnName = ts.isIdentifier(callee)
+          ? callee.text
+          : ts.isPropertyAccessExpression(callee)
+            ? callee.name.text
+            : undefined;
+        if (fnName === "openapiSchema" || fnName === "openapiDocument") {
+          const typeNode = node.typeArguments?.[0];
+          if (typeNode) {
+            const tsType = checker.getTypeFromTypeNode(typeNode);
+            let elemTypes: readonly ts.Type[] = [];
+            if (checker.isTupleType(tsType)) {
+              elemTypes = checker.getTypeArguments(tsType as ts.TypeReference);
+            } else {
+              elemTypes = [tsType];
+            }
+            const methods = harvestOpenApiOperationsFromTypeArgs(elemTypes, checker, sourceFile, node, silentLogger);
+            if (methods.length > 0) {
+              const base = node.arguments[0];
+              const baseValue = base ? staticValue(base) : {};
+              const openApiTypes: Array<{ name: string; ir: TypeIR }> = [];
+              for (const elemType of elemTypes) {
+                if (isServiceLikeType(elemType, checker)) continue;
+                const elemIR = extractTypeIR(elemType, checker);
+                const sym = elemType.aliasSymbol ?? elemType.symbol;
+                const name = sym && !sym.name.startsWith("__") ? sym.name : (elemIR.name ?? `Schema_${openApiTypes.length + 1}`);
+                openApiTypes.push({ name, ir: elemIR });
+              }
+              const code = generateOpenApiSchemaCode(openApiTypes, readVersionFromBase(base), {
+                kind: "service",
+                methods,
+              });
+              fragments.push(
+                runGeneratedDocument(
+                  code,
+                  (baseValue as Record<string, unknown>) ?? {}
+                )
+              );
+            }
+          }
+        }
       }
       ts.forEachChild(node, visit);
     };
@@ -692,4 +614,1210 @@ export function harvestDocument(
   const document = mergeDocuments(fragments);
   harvestCache.set(entryPath, document);
   return document;
+}
+function parseAudience(val: unknown): Array<"user" | "assistant"> | undefined {
+  if (Array.isArray(val)) {
+    const list = val.filter((v) => v === "user" || v === "assistant") as Array<"user" | "assistant">;
+    return list.length > 0 ? list : undefined;
+  }
+  if (typeof val === "string") {
+    const parts = val.split(/[,\s]+/).map((s) => s.trim().toLowerCase());
+    const list = parts.filter((v) => v === "user" || v === "assistant") as Array<"user" | "assistant">;
+    return list.length > 0 ? list : undefined;
+  }
+  return undefined;
+}
+
+/** One callable member of an interface/class the harvesters read as a method. */
+export interface ObjectTypeMethod {
+  symbol: ts.Symbol;
+  name: string;
+  type: ts.Type;
+  declaration: ts.Declaration | undefined;
+  signatures: readonly ts.Signature[];
+}
+
+
+export function extractMethodsFromObjectType(
+  type: ts.Type,
+  checker: ts.TypeChecker
+): ObjectTypeMethod[] {
+  const props = checker.getPropertiesOfType(type);
+  const methods: ObjectTypeMethod[] = [];
+  for (const prop of props) {
+    if (prop.name.startsWith("__")) continue;
+    const decl = prop.valueDeclaration ?? prop.declarations?.[0];
+    const propType = decl
+      ? checker.getTypeOfSymbolAtLocation(prop, decl)
+      : checker.getTypeOfSymbol(prop);
+    const signatures = propType.getCallSignatures();
+    if (signatures.length > 0) {
+      methods.push({
+        symbol: prop,
+        name: prop.name,
+        type: propType,
+        declaration: decl,
+        signatures,
+      });
+    }
+  }
+  return methods;
+}
+
+/**
+ * A type that describes operations rather than a payload: either a callable
+ * signature or an interface/class whose members are all callable. Those never
+ * belong in `components.schemas`.
+ */
+export function isServiceLikeType(
+  type: ts.Type,
+  checker: ts.TypeChecker
+): boolean {
+  if (type.getCallSignatures().length > 0) return true;
+  return extractMethodsFromObjectType(type, checker).length > 0;
+}
+
+function unwrapOptionalTypeIR(ir: TypeIR): TypeIR {
+  if (ir.kind === "union") {
+    const nonNullables = ir.types.filter(
+      (t) => !(t.kind === "primitive" && (t.type === "undefined" || t.type === "null" || t.type === "void" || t.type === "never"))
+    );
+    if (nonNullables.length === 1) {
+      return nonNullables[0]!;
+    }
+  }
+  return ir;
+}
+
+/**
+ * The type a `@response`/`@body` tag names, resolved in the scope of the
+ * declaration that carries the tag.
+ *
+ * A model is normally imported rather than declared beside the service, so the
+ * symbol in scope is an *alias* whose first declaration is the `ImportSpecifier`
+ * — not the interface. Unwrapping that is what makes `@response 200 Pet` work
+ * for a `Pet` from `./model.ts`.
+ */
+function resolveTypeByName(
+  typeName: string,
+  checker: ts.TypeChecker,
+  sourceFile?: ts.SourceFile,
+  sig?: ts.Signature
+): TypeIR | undefined {
+  if (!typeName || typeName === "never" || typeName === "void" || typeName === "undefined") {
+    return undefined;
+  }
+
+  // The tag's own scope first: the service interface's file is where the name
+  // was written, and the callsite's file may not import it at all.
+  const scopes: ts.Node[] = [];
+  if (sig?.declaration) scopes.push(sig.declaration as ts.Node);
+  if (sourceFile) scopes.push(sourceFile);
+
+  // `Alias` as well as `Type`: an imported model is an alias symbol, and a
+  // service normally imports its model rather than declaring it alongside.
+  const meaning = ts.SymbolFlags.Type | ts.SymbolFlags.Alias;
+
+  let sym: ts.Symbol | undefined;
+  for (const scope of scopes) {
+    sym = checker
+      .getSymbolsInScope(scope, meaning)
+      .find((candidate) => candidate.name === typeName);
+    if (sym) break;
+  }
+  if (!sym && sourceFile) {
+    sym =
+      (sourceFile as any).locals?.get(typeName) ??
+      (sourceFile as any).symbol?.exports?.get(typeName as any);
+  }
+  if (!sym) return undefined;
+
+  if (sym.flags & ts.SymbolFlags.Alias) {
+    const aliased = checker.getAliasedSymbol(sym);
+    if (aliased && aliased !== sym) sym = aliased;
+  }
+
+  const symDecl = sym.declarations?.[0] ?? sym.valueDeclaration;
+  let type: ts.Type | undefined;
+  if (
+    symDecl &&
+    (ts.isInterfaceDeclaration(symDecl) ||
+      ts.isClassDeclaration(symDecl) ||
+      ts.isTypeAliasDeclaration(symDecl) ||
+      ts.isEnumDeclaration(symDecl))
+  ) {
+    type = checker.getTypeAtLocation(symDecl);
+  }
+  if (!type || type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) {
+    const declared = checker.getDeclaredTypeOfSymbol(sym);
+    if (declared && !(declared.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown))) {
+      type = declared;
+    }
+  }
+  if (!type && symDecl) {
+    type = checker.getTypeOfSymbolAtLocation(sym, symDecl);
+  }
+  if (!type || type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) {
+    return undefined;
+  }
+
+  const res = extractTypeIR(type, checker);
+  if (!res.name && isUserNamedType(typeName)) res.name = typeName;
+  return res;
+}
+
+export function harvestOpenApiOperationsFromTypeArgs(
+  typeArgs: readonly ts.Type[],
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  node: ts.Node,
+  logger?: WizLogger
+): HttpServiceMethodIR[] {
+  const methods: HttpServiceMethodIR[] = [];
+  for (const elemType of typeArgs) {
+    const signatures = elemType.getCallSignatures();
+    if (signatures.length > 0) {
+      const sig = signatures[0]!;
+      const sym = elemType.aliasSymbol ?? elemType.symbol ?? (sig.declaration as any)?.symbol;
+      const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
+      const method = parseOpenApiMethodFromSignature(sig, sym, jsDoc, checker, undefined, undefined, undefined, sourceFile);
+      if (method) methods.push(method);
+    } else {
+      const objectMethods = extractMethodsFromObjectType(elemType, checker);
+      const sym = elemType.aliasSymbol ?? elemType.symbol;
+      const typeName = sym && !sym.name.startsWith("__") ? sym.name : "Service";
+      const jsDocType = sym ? extractJSDocInfo(sym, checker) : undefined;
+      const pkgOverride = jsDocType?.meta?.["package"]?.[0] ?? jsDocType?.meta?.["Package"]?.[0];
+      const svcOverride = jsDocType?.meta?.["service"]?.[0] ?? jsDocType?.meta?.["Service"]?.[0];
+      const pkg = typeof pkgOverride === "string" ? pkgOverride : undefined;
+      const svc = typeof svcOverride === "string" ? svcOverride : typeName;
+
+      if (objectMethods.length === 0) {
+        // A plain payload type is a legitimate `openapiSchema` argument: it
+        // contributes a component schema and no operation. Only a type with
+        // nothing at all on it is undocumentable.
+        if (logger && checker.getPropertiesOfType(elemType).length === 0) {
+          warnUndocumentable(
+            logger,
+            `no methods found on object type '${typeName}' for openapiSchema`,
+            node,
+            sourceFile
+          );
+        }
+        continue;
+      }
+
+      for (const m of objectMethods) {
+        const sig = m.signatures[0]!;
+        const mSym = m.symbol;
+        const jsDoc = extractJSDocInfo(mSym, checker);
+        const method = parseOpenApiMethodFromSignature(sig, mSym, jsDoc, checker, pkg, svc, m.name, sourceFile);
+        if (method) methods.push(method);
+      }
+    }
+  }
+  return methods;
+}
+
+
+function parseOpenApiMethodFromSignature(
+  sig: ts.Signature,
+  sym: ts.Symbol | undefined,
+  jsDoc: JSDocInfo | undefined,
+  checker: ts.TypeChecker,
+  defaultPkg: string | undefined,
+  defaultSvc: string | undefined,
+  methodNameOverride?: string,
+  sourceFile?: ts.SourceFile
+): HttpServiceMethodIR {
+  const rawName = jsDoc?.meta?.["name"]?.[0] ?? jsDoc?.meta?.["Name"]?.[0];
+  const name = typeof rawName === "string" && rawName ? rawName : (methodNameOverride ?? sym?.name ?? "method");
+  const pkgMeta = jsDoc?.meta?.["package"]?.[0] ?? jsDoc?.meta?.["Package"]?.[0];
+  const svcMeta = jsDoc?.meta?.["service"]?.[0] ?? jsDoc?.meta?.["Service"]?.[0];
+  const pkg = typeof pkgMeta === "string" ? pkgMeta : defaultPkg;
+  const svc = typeof svcMeta === "string" ? svcMeta : defaultSvc;
+
+  let httpVerb: HttpMethodName = "GET";
+  let openApiPath = "/" + (name !== "method" ? toSnakeCase(name) : "");
+
+  const verbTags: Array<[string, HttpMethodName]> = [
+    ["get", "GET"],
+    ["post", "POST"],
+    ["put", "PUT"],
+    ["delete", "DELETE"],
+    ["patch", "PATCH"],
+    ["head", "HEAD"],
+    ["options", "OPTIONS"],
+    ["trace", "TRACE"],
+  ];
+
+  let foundVerb = false;
+  if (jsDoc?.meta) {
+    for (const [tag, verb] of verbTags) {
+      const val = jsDoc.meta[tag] ?? jsDoc.meta[tag.toUpperCase()];
+      if (val) {
+        httpVerb = verb;
+        foundVerb = true;
+        if (typeof val[0] === "string" && val[0].length > 0) {
+          openApiPath = toOpenApiPath(val[0]);
+        }
+        break;
+      }
+    }
+    if (!foundVerb) {
+      const httpTag = jsDoc.meta["http"] ?? jsDoc.meta["HTTP"];
+      if (httpTag && typeof httpTag[0] === "string") {
+        const parts = httpTag[0].split(/\s+/);
+        if (parts[0] && HTTP_METHODS.has(parts[0].toLowerCase())) {
+          httpVerb = parts[0].toUpperCase() as HttpMethodName;
+          foundVerb = true;
+          if (parts[1]) openApiPath = toOpenApiPath(parts[1]);
+        }
+      }
+    }
+  }
+
+  if (!foundVerb && name) {
+    const lowerName = name.toLowerCase();
+    if (lowerName.startsWith("create") || lowerName.startsWith("post") || lowerName.startsWith("add")) httpVerb = "POST";
+    else if (lowerName.startsWith("update") || lowerName.startsWith("put")) httpVerb = "PUT";
+    else if (lowerName.startsWith("delete") || lowerName.startsWith("remove")) httpVerb = "DELETE";
+    else if (lowerName.startsWith("patch")) httpVerb = "PATCH";
+  }
+
+  const jsDocSummary = jsDoc?.meta?.["summary"]?.[0] ?? jsDoc?.meta?.["Summary"]?.[0];
+  const summary = typeof jsDocSummary === "string" ? jsDocSummary : undefined;
+  const request: HttpRequestIR = { protocol: "http" };
+  const parameters: ParameterIR[] = [];
+
+  for (const p of sig.getParameters()) {
+    const pDecl = p.valueDeclaration ?? p.declarations?.[0];
+    const pType = pDecl
+      ? checker.getTypeOfSymbolAtLocation(p, pDecl)
+      : checker.getTypeOfSymbol(p);
+    const rawPIR = extractTypeIR(pType, checker);
+    const pIR = unwrapOptionalTypeIR(rawPIR);
+    const isOpt = (p.flags & ts.SymbolFlags.Optional) !== 0;
+    const pJsDoc = extractJSDocInfo(p, checker);
+    const pName = p.name;
+    if (pIR.kind === "object") {
+      const subProps = pIR.properties;
+      const hasKnownSlots = subProps.some((sp) =>
+        sp.name === "path" || sp.name === "query" || sp.name === "header" || sp.name === "cookie" || sp.name === "body"
+      );
+
+      if (hasKnownSlots) {
+        for (const sp of subProps) {
+          if (sp.name === "path") {
+            const flattened = flattenObjectProperties(sp.type);
+            for (const prop of flattened) {
+              parameters.push({
+                name: prop.name,
+                in: "path",
+                required: true,
+                type: prop.type,
+                ...(prop.description ? { description: prop.description } : {}),
+              });
+            }
+          } else if (sp.name === "query") {
+            const flattened = flattenObjectProperties(sp.type);
+            for (const prop of flattened) {
+              parameters.push({
+                name: prop.name,
+                in: "query",
+                required: !prop.optional,
+                type: prop.type,
+                ...(prop.description ? { description: prop.description } : {}),
+              });
+            }
+          } else if (sp.name === "header") {
+            const flattened = flattenObjectProperties(sp.type);
+            for (const prop of flattened) {
+              parameters.push({
+                name: prop.name,
+                in: "header",
+                required: !prop.optional,
+                type: prop.type,
+                ...(prop.description ? { description: prop.description } : {}),
+              });
+            }
+          } else if (sp.name === "cookie") {
+            const flattened = flattenObjectProperties(sp.type);
+            for (const prop of flattened) {
+              parameters.push({
+                name: prop.name,
+                in: "cookie",
+                required: !prop.optional,
+                type: prop.type,
+                ...(prop.description ? { description: prop.description } : {}),
+              });
+            }
+          } else if (sp.name === "body") {
+            request.body = [{ mimetype: JSON_MIME, content: sp.type }];
+          }
+        }
+        continue;
+      }
+    }
+
+    if (pName === "body" || pJsDoc.meta?.["body"] || pJsDoc.meta?.["Body"]) {
+      request.body = [{ mimetype: JSON_MIME, content: pIR }];
+    } else if (
+      pName === "query" ||
+      pJsDoc.meta?.["queryParams"] ||
+      pJsDoc.meta?.["queryparams"] ||
+      (pIR.kind === "object" && !openApiPath.includes(`{${pName}}`))
+    ) {
+      const flattened = flattenObjectProperties(pIR);
+      for (const prop of flattened) {
+        parameters.push({
+          name: prop.name,
+          in: "query",
+          required: !prop.optional,
+          type: prop.type,
+          ...(prop.description ? { description: prop.description } : {}),
+        });
+      }
+    } else if (pName === "path" || pJsDoc.meta?.["pathParams"] || pJsDoc.meta?.["pathparams"]) {
+      const flattened = flattenObjectProperties(pIR);
+      for (const prop of flattened) {
+        parameters.push({
+          name: prop.name,
+          in: "path",
+          required: true,
+          type: prop.type,
+          ...(prop.description ? { description: prop.description } : {}),
+        });
+      }
+    } else {
+      const loc: ParameterIR["in"] = openApiPath.includes(`{${pName}}`) ? "path" : "query";
+      parameters.push({
+        name: pName,
+        in: loc,
+        required: loc === "path" ? true : !isOpt,
+        type: pIR,
+        ...(pJsDoc.description ? { description: pJsDoc.description } : {}),
+      });
+    }
+  }
+  if (parameters.length > 0) request.parameters = parameters;
+
+  const responses: HttpResponseIR[] = [];
+  const responseTags = jsDoc?.meta?.["response"] ?? jsDoc?.meta?.["Response"];
+  if (responseTags && responseTags.length > 0) {
+    for (const tagVal of responseTags) {
+      if (typeof tagVal === "string") {
+        const parts = tagVal.trim().split(/\s+/);
+        let status: number | "default" = 200;
+        let mimetype = JSON_MIME;
+        let bodyIR: TypeIR | undefined;
+        const descParts: string[] = [];
+
+        for (const part of parts) {
+          if (part === "default") {
+            status = "default";
+          } else if (/^\d{3}$/.test(part)) {
+            status = parseInt(part, 10);
+          } else if (part.includes("/")) {
+            mimetype = part;
+          } else {
+            let typeStr = part;
+            let isArray = false;
+            if (typeStr.endsWith("[]")) {
+              isArray = true;
+              typeStr = typeStr.slice(0, -2);
+            }
+            const resolved = resolveTypeByName(typeStr, checker, sourceFile, sig);
+            if (resolved && !bodyIR) {
+              bodyIR = isArray ? { id: "t_arr", kind: "array", element: resolved } : resolved;
+            } else if (part !== "never" && part !== "void") {
+              descParts.push(part);
+            }
+          }
+        }
+        const description = descParts.length > 0 ? descParts.join(" ") : undefined;
+        responses.push({
+          protocol: "http",
+          status,
+          ...(description ? { description } : {}),
+          ...(bodyIR ? { body: [{ mimetype, content: bodyIR }] } : {}),
+        });
+      }
+    }
+  }
+
+  if (responses.length === 0) {
+    const returnType = sig.getReturnType();
+    let targetType = returnType;
+    if (
+      (returnType.symbol?.name === "Promise" || returnType.aliasSymbol?.name === "Promise") &&
+      (returnType as ts.TypeReference).typeArguments?.length
+    ) {
+      targetType = (returnType as ts.TypeReference).typeArguments![0]!;
+    }
+    if (targetType.flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined | ts.TypeFlags.Never)) {
+      responses.push({ protocol: "http", status: 204 });
+    } else {
+      const resIR = extractTypeIR(targetType, checker);
+      responses.push({
+        protocol: "http",
+        status: 200,
+        body: [{ mimetype: JSON_MIME, content: resIR }],
+      });
+    }
+  }
+
+  return {
+    kind: "serviceMethod",
+    protocol: "http",
+    address: {
+      protocol: "http",
+      method: httpVerb,
+      path: openApiPath,
+      ...(pkg ? { package: pkg } : {}),
+      ...(svc ? { service: svc } : {}),
+      ...(name ? { methodName: name } : {}),
+    },
+    operationId: name,
+    ...(summary ? { summary } : {}),
+    ...(jsDoc?.description ? { description: jsDoc.description } : {}),
+    ...(jsDoc?.deprecated ? { deprecated: true } : {}),
+    request,
+    responses,
+  };
+}
+
+export function harvestAsyncApiOperationsFromTypeArgs(
+  typeArgs: readonly ts.Type[],
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  node: ts.Node,
+  logger?: WizLogger
+): AsyncApiServiceMethodIR[] {
+  const methods: AsyncApiServiceMethodIR[] = [];
+  for (const elemType of typeArgs) {
+    const signatures = elemType.getCallSignatures();
+    if (signatures.length > 0) {
+      const sig = signatures[0]!;
+      const sym = elemType.aliasSymbol ?? elemType.symbol ?? (sig.declaration as any)?.symbol;
+      const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
+      const method = parseAsyncApiMethodFromSignature(sig, sym, jsDoc, checker, undefined, undefined);
+      if (method) methods.push(method);
+    } else {
+      const objectMethods = extractMethodsFromObjectType(elemType, checker);
+      const sym = elemType.aliasSymbol ?? elemType.symbol;
+      const typeName = sym && !sym.name.startsWith("__") ? sym.name : "Service";
+      const jsDocType = sym ? extractJSDocInfo(sym, checker) : undefined;
+      const pkgOverride = jsDocType?.meta?.["package"]?.[0] ?? jsDocType?.meta?.["Package"]?.[0];
+      const svcOverride = jsDocType?.meta?.["service"]?.[0] ?? jsDocType?.meta?.["Service"]?.[0];
+      const pkg = typeof pkgOverride === "string" ? pkgOverride : undefined;
+      const svc = typeof svcOverride === "string" ? svcOverride : typeName;
+
+      if (objectMethods.length === 0) {
+        // A plain message type is a legitimate `asyncapiSchema` argument: it
+        // contributes a component schema and no channel operation.
+        if (logger && checker.getPropertiesOfType(elemType).length === 0) {
+          warnUndocumentable(
+            logger,
+            `no methods found on object type '${typeName}' for asyncapiSchema`,
+            node,
+            sourceFile
+          );
+        }
+        continue;
+      }
+
+      for (const m of objectMethods) {
+        const sig = m.signatures[0]!;
+        const mSym = m.symbol;
+        const jsDoc = extractJSDocInfo(mSym, checker);
+        const method = parseAsyncApiMethodFromSignature(sig, mSym, jsDoc, checker, pkg, svc, m.name);
+        if (method) methods.push(method);
+      }
+    }
+  }
+  return methods;
+}
+
+function parseAsyncApiMethodFromSignature(
+  sig: ts.Signature,
+  sym: ts.Symbol | undefined,
+  jsDoc: JSDocInfo | undefined,
+  checker: ts.TypeChecker,
+  defaultPkg: string | undefined,
+  defaultSvc: string | undefined,
+  methodNameOverride?: string
+): AsyncApiServiceMethodIR {
+  const rawName = jsDoc?.meta?.["name"]?.[0] ?? jsDoc?.meta?.["Name"]?.[0];
+  const name = typeof rawName === "string" && rawName ? rawName : (methodNameOverride ?? sym?.name ?? "channel");
+  const pkgMeta = jsDoc?.meta?.["package"]?.[0] ?? jsDoc?.meta?.["Package"]?.[0];
+  const svcMeta = jsDoc?.meta?.["service"]?.[0] ?? jsDoc?.meta?.["Service"]?.[0];
+  const pkg = typeof pkgMeta === "string" ? pkgMeta : defaultPkg;
+  const svc = typeof svcMeta === "string" ? svcMeta : defaultSvc;
+  const channelTag = jsDoc?.meta?.["channel"]?.[0] ?? jsDoc?.meta?.["Channel"]?.[0];
+  const channel = typeof channelTag === "string" ? channelTag : name;
+
+  let action = "send";
+  if (jsDoc?.meta?.["consumer"] || jsDoc?.meta?.["subscribe"] || jsDoc?.meta?.["receive"]) {
+    action = "receive";
+  } else if (jsDoc?.meta?.["producer"] || jsDoc?.meta?.["publish"] || jsDoc?.meta?.["send"]) {
+    action = "send";
+  } else if (jsDoc?.meta?.["action"]) {
+    const actTag = String(jsDoc.meta["action"][0]);
+    if (actTag === "subscribe" || actTag === "receive") action = "receive";
+    else action = "send";
+  }
+
+  const jsDocSummary = jsDoc?.meta?.["summary"]?.[0] ?? jsDoc?.meta?.["Summary"]?.[0];
+  const summary = typeof jsDocSummary === "string" ? jsDocSummary : undefined;
+  const params = sig.getParameters();
+  let msgType = params[0]
+    ? checker.getTypeOfSymbolAtLocation(params[0], params[0].valueDeclaration ?? params[0].declarations?.[0]!)
+    : sig.getReturnType();
+
+  if (
+    (msgType.symbol?.name === "Promise" || msgType.aliasSymbol?.name === "Promise") &&
+    (msgType as ts.TypeReference).typeArguments?.length
+  ) {
+    msgType = (msgType as ts.TypeReference).typeArguments![0]!;
+  }
+  const msgIR = extractTypeIR(msgType, checker);
+
+  return {
+    kind: "serviceMethod",
+    protocol: "asyncapi",
+    address: {
+      protocol: "asyncapi",
+      channel,
+      action,
+      ...(pkg ? { package: pkg } : {}),
+      ...(svc ? { service: svc } : {}),
+    },
+    operationId: name,
+    ...(summary ? { summary } : {}),
+    ...(jsDoc?.description ? { description: jsDoc.description } : {}),
+    ...(jsDoc?.deprecated ? { deprecated: true } : {}),
+    request: {
+      protocol: "asyncapi",
+      body: [{ mimetype: JSON_MIME, content: msgIR }],
+    },
+    responses: [],
+  };
+}
+
+export function harvestOpenRpcOperationsFromTypeArgs(
+  typeArgs: readonly ts.Type[],
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  node: ts.Node,
+  logger?: WizLogger
+): OpenRpcServiceMethodIR[] {
+  const methods: OpenRpcServiceMethodIR[] = [];
+
+  for (const elemType of typeArgs) {
+    const signatures = elemType.getCallSignatures();
+    if (signatures.length > 0) {
+      const sig = signatures[0]!;
+      const sym =
+        elemType.aliasSymbol ??
+        elemType.symbol ??
+        (sig.declaration as any)?.symbol;
+      const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
+      const rawName = jsDoc?.meta?.["name"]?.[0] ?? jsDoc?.meta?.["Name"]?.[0];
+      const name =
+        (typeof rawName === "string" && rawName ? rawName : undefined) ??
+        (sym && !sym.name.startsWith("__") ? sym.name : undefined) ??
+        "method";
+
+      const pkgMeta = jsDoc?.meta?.["package"]?.[0] ?? jsDoc?.meta?.["Package"]?.[0];
+      const svcMeta = jsDoc?.meta?.["service"]?.[0] ?? jsDoc?.meta?.["Service"]?.[0];
+      const pkg = typeof pkgMeta === "string" ? pkgMeta : undefined;
+      const svc = typeof svcMeta === "string" ? svcMeta : undefined;
+
+      const jsDocSummary = jsDoc?.meta?.["summary"]?.[0] ?? jsDoc?.meta?.["Summary"]?.[0];
+      const summary = typeof jsDocSummary === "string" ? jsDocSummary : undefined;
+
+      const params: ParameterIR[] = sig.getParameters().map((p) => {
+        const pDecl = p.valueDeclaration ?? p.declarations?.[0];
+        const pType = pDecl
+          ? checker.getTypeOfSymbolAtLocation(p, pDecl)
+          : checker.getTypeOfSymbol(p);
+        const pIR = extractTypeIR(pType, checker);
+        const isOpt = (p.flags & ts.SymbolFlags.Optional) !== 0;
+        const pJsDoc = extractJSDocInfo(p, checker);
+        return {
+          name: p.name,
+          in: "rpc",
+          required: !isOpt,
+          type: pIR,
+          ...(pJsDoc.description ? { description: pJsDoc.description } : {}),
+        };
+      });
+
+      const returnType = sig.getReturnType();
+      let targetType = returnType;
+      if (
+        (returnType.symbol?.name === "Promise" ||
+          returnType.aliasSymbol?.name === "Promise") &&
+        (returnType as ts.TypeReference).typeArguments?.length
+      ) {
+        targetType = (returnType as ts.TypeReference).typeArguments![0]!;
+      }
+      const resultIR = extractTypeIR(targetType, checker);
+
+      const methodIR: OpenRpcServiceMethodIR = {
+        kind: "serviceMethod",
+        protocol: "openrpc",
+        address: {
+          protocol: "openrpc",
+          ...(pkg ? { package: pkg } : {}),
+          ...(svc ? { service: svc } : {}),
+          method: name,
+        },
+        ...(summary ? { summary } : {}),
+        ...(jsDoc?.description ? { description: jsDoc.description } : {}),
+        ...(jsDoc?.deprecated ? { deprecated: true } : {}),
+        request: {
+          protocol: "openrpc",
+          params,
+          paramsByName: true,
+        },
+        responses: [
+          {
+            protocol: "openrpc",
+            result: resultIR,
+          },
+        ],
+      };
+      methods.push(methodIR);
+    } else {
+      const objectMethods = extractMethodsFromObjectType(elemType, checker);
+      const sym = elemType.aliasSymbol ?? elemType.symbol;
+      const typeName =
+        sym && !sym.name.startsWith("__") ? sym.name : "Service";
+      const jsDocType = sym ? extractJSDocInfo(sym, checker) : undefined;
+      const pkgOverride = jsDocType?.meta?.["package"]?.[0] ?? jsDocType?.meta?.["Package"]?.[0];
+      const svcOverride = jsDocType?.meta?.["service"]?.[0] ?? jsDocType?.meta?.["Service"]?.[0];
+      const pkg = typeof pkgOverride === "string" ? pkgOverride : undefined;
+      const svc = typeof svcOverride === "string" ? svcOverride : typeName;
+
+      if (objectMethods.length === 0) {
+        if (logger) {
+          warnUndocumentable(
+            logger,
+            `no methods found on object type '${typeName}' for openRPCSchema`,
+            node,
+            sourceFile
+          );
+        }
+        continue;
+      }
+
+      for (const m of objectMethods) {
+        const sig = m.signatures[0]!;
+        const mSym = m.symbol;
+        const jsDoc = extractJSDocInfo(mSym, checker);
+        const rawName = jsDoc.meta?.["name"]?.[0] ?? jsDoc.meta?.["Name"]?.[0];
+        const hasOverride = typeof rawName === "string" && rawName.length > 0;
+        const methodName = hasOverride ? rawName : m.name;
+
+        const jsDocSummary = jsDoc.meta?.["summary"]?.[0] ?? jsDoc.meta?.["Summary"]?.[0];
+        const summary = typeof jsDocSummary === "string" ? jsDocSummary : undefined;
+
+        const params: ParameterIR[] = sig.getParameters().map((p) => {
+          const pDecl = p.valueDeclaration ?? p.declarations?.[0];
+          const pType = pDecl
+            ? checker.getTypeOfSymbolAtLocation(p, pDecl)
+            : checker.getTypeOfSymbol(p);
+          const pIR = extractTypeIR(pType, checker);
+          const isOpt = (p.flags & ts.SymbolFlags.Optional) !== 0;
+          const pJsDoc = extractJSDocInfo(p, checker);
+          return {
+            name: p.name,
+            in: "rpc",
+            required: !isOpt,
+            type: pIR,
+            ...(pJsDoc.description ? { description: pJsDoc.description } : {}),
+          };
+        });
+
+        const returnType = sig.getReturnType();
+        let targetType = returnType;
+        if (
+          (returnType.symbol?.name === "Promise" ||
+            returnType.aliasSymbol?.name === "Promise") &&
+          (returnType as ts.TypeReference).typeArguments?.length
+        ) {
+          targetType = (returnType as ts.TypeReference).typeArguments![0]!;
+        }
+        const resultIR = extractTypeIR(targetType, checker);
+
+        const methodIR: OpenRpcServiceMethodIR = {
+          kind: "serviceMethod",
+          protocol: "openrpc",
+          address: {
+            protocol: "openrpc",
+            ...(pkg ? { package: pkg } : {}),
+            ...(hasOverride ? {} : { service: svc }),
+            method: methodName,
+          },
+          ...(summary ? { summary } : {}),
+          ...(jsDoc.description ? { description: jsDoc.description } : {}),
+          ...(jsDoc.deprecated ? { deprecated: true } : {}),
+          request: {
+            protocol: "openrpc",
+            params,
+            paramsByName: true,
+          },
+          responses: [
+            {
+              protocol: "openrpc",
+              result: resultIR,
+            },
+          ],
+        };
+        methods.push(methodIR);
+      }
+    }
+  }
+
+  return methods;
+}
+
+export function harvestMcpOperationsFromTypeArgs(
+  typeArgs: readonly ts.Type[],
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  node: ts.Node,
+  logger?: WizLogger
+): McpServiceMethodIR[] {
+  const methods: McpServiceMethodIR[] = [];
+
+  for (const elemType of typeArgs) {
+    const signatures = elemType.getCallSignatures();
+    if (signatures.length > 0) {
+      const sig = signatures[0]!;
+      const sym =
+        elemType.aliasSymbol ??
+        elemType.symbol ??
+        (sig.declaration as any)?.symbol;
+      const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
+      const rawName = jsDoc?.meta?.["name"]?.[0] ?? jsDoc?.meta?.["Name"]?.[0];
+      const symName = sym && !sym.name.startsWith("__") ? sym.name : undefined;
+      const toolName =
+        (typeof rawName === "string" && rawName ? rawName : undefined) ??
+        (symName ? toSnakeCase(symName) : "tool");
+
+      const jsDocSummary = jsDoc?.meta?.["summary"]?.[0] ?? jsDoc?.meta?.["Summary"]?.[0];
+      const jsDocTitle = jsDoc?.meta?.["title"]?.[0] ?? jsDoc?.meta?.["Title"]?.[0] ?? jsDocSummary;
+      const title = typeof jsDocTitle === "string" ? jsDocTitle : undefined;
+      const description = jsDoc?.description;
+
+      const rawAudience = jsDoc?.meta?.["audience"] ?? jsDoc?.meta?.["Audience"];
+      const jsDocAudience = rawAudience
+        ? parseAudience(rawAudience.filter((a): a is string => typeof a === "string"))
+        : undefined;
+
+      const rawPriority = jsDoc?.meta?.["priority"]?.[0] ?? jsDoc?.meta?.["Priority"]?.[0];
+      let jsDocPriority: number | undefined;
+      if (typeof rawPriority === "string") {
+        const parsedP = parseFloat(rawPriority);
+        if (!Number.isNaN(parsedP)) jsDocPriority = parsedP;
+      }
+
+      const annotations: McpToolAnnotationsIR | undefined =
+        jsDocAudience || jsDocPriority !== undefined
+          ? {
+              ...(jsDocAudience ? { audience: jsDocAudience } : {}),
+              ...(jsDocPriority !== undefined ? { priority: jsDocPriority } : {}),
+            }
+          : undefined;
+
+      const params = sig.getParameters();
+      let inputIR: TypeIR;
+      if (params.length === 1) {
+        const pDecl = params[0]!.valueDeclaration ?? params[0]!.declarations?.[0];
+        const pType = pDecl
+          ? checker.getTypeOfSymbolAtLocation(params[0]!, pDecl)
+          : checker.getTypeOfSymbol(params[0]!);
+        const pIR = extractTypeIR(pType, checker);
+        if (pIR.kind === "object") {
+          inputIR = pIR;
+        } else {
+          const isOpt = (params[0]!.flags & ts.SymbolFlags.Optional) !== 0;
+          inputIR = {
+            id: "t_input",
+            kind: "object",
+            properties: [{ name: params[0]!.name, type: pIR, optional: isOpt, readonly: false }],
+          };
+        }
+      } else if (params.length > 1) {
+        const properties = params.map((p) => {
+          const pDecl = p.valueDeclaration ?? p.declarations?.[0];
+          const pType = pDecl
+            ? checker.getTypeOfSymbolAtLocation(p, pDecl)
+            : checker.getTypeOfSymbol(p);
+          const pIR = extractTypeIR(pType, checker);
+          const isOpt = (p.flags & ts.SymbolFlags.Optional) !== 0;
+          return { name: p.name, type: pIR, optional: isOpt, readonly: false };
+        });
+        inputIR = { id: "t_input", kind: "object", properties };
+      } else {
+        inputIR = { id: "t_input", kind: "object", properties: [] };
+      }
+
+      const returnType = sig.getReturnType();
+      let targetType = returnType;
+      if (
+        (returnType.symbol?.name === "Promise" ||
+          returnType.aliasSymbol?.name === "Promise") &&
+        (returnType as ts.TypeReference).typeArguments?.length
+      ) {
+        targetType = (returnType as ts.TypeReference).typeArguments![0]!;
+      }
+      const outputIR = extractTypeIR(targetType, checker);
+
+      const methodIR: McpServiceMethodIR = {
+        kind: "serviceMethod",
+        protocol: "mcp",
+        address: {
+          protocol: "mcp",
+          name: toolName,
+        },
+        ...(title ? { title } : {}),
+        ...(description ? { description } : {}),
+        ...(annotations ? { annotations } : {}),
+        request: {
+          protocol: "mcp",
+          input: inputIR,
+        },
+        responses: [
+          {
+            protocol: "mcp",
+            ...(!isAbsent(outputIR) ? { output: outputIR } : {}),
+          },
+        ],
+      };
+      methods.push(methodIR);
+    } else {
+      const objectMethods = extractMethodsFromObjectType(elemType, checker);
+      const sym = elemType.aliasSymbol ?? elemType.symbol;
+      const typeName =
+        sym && !sym.name.startsWith("__") ? sym.name : "Service";
+
+      if (objectMethods.length === 0) {
+        if (logger) {
+          warnUndocumentable(
+            logger,
+            `no methods found on object type '${typeName}' for mcpSchema`,
+            node,
+            sourceFile
+          );
+        }
+        continue;
+      }
+
+      for (const m of objectMethods) {
+        const sig = m.signatures[0]!;
+        const mSym = m.symbol;
+        const jsDoc = extractJSDocInfo(mSym, checker);
+        const rawName = jsDoc.meta?.["name"]?.[0] ?? jsDoc.meta?.["Name"]?.[0];
+        const hasOverride = typeof rawName === "string" && rawName.length > 0;
+        const toolName = hasOverride
+          ? rawName
+          : `${typeName}.${toSnakeCase(m.name)}`;
+
+        const jsDocSummary = jsDoc.meta?.["summary"]?.[0] ?? jsDoc.meta?.["Summary"]?.[0];
+        const jsDocTitle = jsDoc.meta?.["title"]?.[0] ?? jsDoc.meta?.["Title"]?.[0] ?? jsDocSummary;
+        const title = typeof jsDocTitle === "string" ? jsDocTitle : undefined;
+        const description = jsDoc.description;
+
+        const rawAudience = jsDoc.meta?.["audience"] ?? jsDoc.meta?.["Audience"];
+        const jsDocAudience = rawAudience
+          ? parseAudience(rawAudience.filter((a): a is string => typeof a === "string"))
+          : undefined;
+
+        const rawPriority = jsDoc.meta?.["priority"]?.[0] ?? jsDoc.meta?.["Priority"]?.[0];
+        let jsDocPriority: number | undefined;
+        if (typeof rawPriority === "string") {
+          const parsedP = parseFloat(rawPriority);
+          if (!Number.isNaN(parsedP)) jsDocPriority = parsedP;
+        }
+
+        const annotations: McpToolAnnotationsIR | undefined =
+          jsDocAudience || jsDocPriority !== undefined
+            ? {
+                ...(jsDocAudience ? { audience: jsDocAudience } : {}),
+                ...(jsDocPriority !== undefined ? { priority: jsDocPriority } : {}),
+              }
+            : undefined;
+
+        const params = sig.getParameters();
+        let inputIR: TypeIR;
+        if (params.length === 1) {
+          const pDecl = params[0]!.valueDeclaration ?? params[0]!.declarations?.[0];
+          const pType = pDecl
+            ? checker.getTypeOfSymbolAtLocation(params[0]!, pDecl)
+            : checker.getTypeOfSymbol(params[0]!);
+          const pIR = extractTypeIR(pType, checker);
+          if (pIR.kind === "object") {
+            inputIR = pIR;
+          } else {
+            const isOpt = (params[0]!.flags & ts.SymbolFlags.Optional) !== 0;
+            inputIR = {
+              id: "t_input",
+              kind: "object",
+              properties: [{ name: params[0]!.name, type: pIR, optional: isOpt, readonly: false }],
+            };
+          }
+        } else if (params.length > 1) {
+          const properties = params.map((p) => {
+            const pDecl = p.valueDeclaration ?? p.declarations?.[0];
+            const pType = pDecl
+              ? checker.getTypeOfSymbolAtLocation(p, pDecl)
+              : checker.getTypeOfSymbol(p);
+            const pIR = extractTypeIR(pType, checker);
+            const isOpt = (p.flags & ts.SymbolFlags.Optional) !== 0;
+            return { name: p.name, type: pIR, optional: isOpt, readonly: false };
+          });
+          inputIR = { id: "t_input", kind: "object", properties };
+        } else {
+          inputIR = { id: "t_input", kind: "object", properties: [] };
+        }
+
+        const returnType = sig.getReturnType();
+        let targetType = returnType;
+        if (
+          (returnType.symbol?.name === "Promise" ||
+            returnType.aliasSymbol?.name === "Promise") &&
+          (returnType as ts.TypeReference).typeArguments?.length
+        ) {
+          targetType = (returnType as ts.TypeReference).typeArguments![0]!;
+        }
+        const outputIR = extractTypeIR(targetType, checker);
+
+        const methodIR: McpServiceMethodIR = {
+          kind: "serviceMethod",
+          protocol: "mcp",
+          address: {
+            protocol: "mcp",
+            name: toolName,
+          },
+          ...(title ? { title } : {}),
+          ...(description ? { description } : {}),
+          ...(annotations ? { annotations } : {}),
+          request: {
+            protocol: "mcp",
+            input: inputIR,
+          },
+          responses: [
+            {
+              protocol: "mcp",
+              ...(!isAbsent(outputIR) ? { output: outputIR } : {}),
+            },
+          ],
+        };
+        methods.push(methodIR);
+      }
+    }
+  }
+
+  return methods;
+}
+function unwrapStreamingType(type: ts.Type): { streaming: boolean; type: ts.Type } {
+  const symName = type.aliasSymbol?.name ?? type.symbol?.name;
+  if (
+    symName === "AsyncIterable" ||
+    symName === "ReadableStream" ||
+    symName === "AsyncGenerator"
+  ) {
+    const typeArgs = (type as ts.TypeReference).typeArguments;
+    if (typeArgs && typeArgs.length > 0) {
+      return { streaming: true, type: typeArgs[0]! };
+    }
+  }
+  return { streaming: false, type };
+}
+
+function unwrapPromiseType(type: ts.Type): ts.Type {
+  const symName = type.aliasSymbol?.name ?? type.symbol?.name;
+  if (symName === "Promise") {
+    const typeArgs = (type as ts.TypeReference).typeArguments;
+    if (typeArgs && typeArgs.length > 0) {
+      return typeArgs[0]!;
+    }
+  }
+  return type;
+}
+
+export function harvestGrpcOperationsFromTypeArgs(
+  typeArgs: readonly ts.Type[],
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  node: ts.Node,
+  logger?: WizLogger
+): GrpcServiceMethodIR[] {
+  const methods: GrpcServiceMethodIR[] = [];
+
+  for (const elemType of typeArgs) {
+    const signatures = elemType.getCallSignatures();
+    if (signatures.length > 0) {
+      const sig = signatures[0]!;
+      const sym =
+        elemType.aliasSymbol ??
+        elemType.symbol ??
+        (sig.declaration as any)?.symbol;
+      const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
+      const rawName = jsDoc?.meta?.["name"]?.[0] ?? jsDoc?.meta?.["Name"]?.[0];
+      const name =
+        (typeof rawName === "string" && rawName ? rawName : undefined) ??
+        (sym && !sym.name.startsWith("__") ? sym.name : undefined) ??
+        "method";
+
+      const pkgMeta = jsDoc?.meta?.["package"]?.[0] ?? jsDoc?.meta?.["Package"]?.[0];
+      const svcMeta = jsDoc?.meta?.["service"]?.[0] ?? jsDoc?.meta?.["Service"]?.[0];
+      const pkg = typeof pkgMeta === "string" ? pkgMeta : undefined;
+      const svc = typeof svcMeta === "string" ? svcMeta : "Service";
+
+      const jsDocSummary = jsDoc?.meta?.["summary"]?.[0] ?? jsDoc?.meta?.["Summary"]?.[0];
+      const summary = typeof jsDocSummary === "string" ? jsDocSummary : undefined;
+
+      const params = sig.getParameters();
+      let reqIR: TypeIR;
+      let reqStreaming = false;
+      if (params.length > 0) {
+        const p = params[0]!;
+        const pDecl = p.valueDeclaration ?? p.declarations?.[0];
+        const pType = pDecl
+          ? checker.getTypeOfSymbolAtLocation(p, pDecl)
+          : checker.getTypeOfSymbol(p);
+        const { streaming, type: unwrappedReqType } = unwrapStreamingType(pType);
+        reqStreaming = streaming;
+        reqIR = extractTypeIR(unwrappedReqType, checker);
+      } else {
+        reqIR = extractTypeIR(checker.getVoidType(), checker);
+      }
+
+      const returnType = sig.getReturnType();
+      const unwrappedPromise = unwrapPromiseType(returnType);
+      const { streaming: resStreaming, type: unwrappedResType } = unwrapStreamingType(unwrappedPromise);
+      const resIR = extractTypeIR(unwrappedResType, checker);
+
+      const methodIR: GrpcServiceMethodIR = {
+        kind: "serviceMethod",
+        protocol: "grpc",
+        address: {
+          protocol: "grpc",
+          ...(pkg ? { package: pkg } : {}),
+          service: svc,
+          method: name,
+        },
+        ...(summary ? { summary } : {}),
+        ...(jsDoc?.description ? { description: jsDoc.description } : {}),
+        ...(jsDoc?.deprecated ? { deprecated: true } : {}),
+        request: {
+          protocol: "grpc",
+          message: reqIR,
+          streaming: reqStreaming,
+        },
+        responses: [
+          {
+            protocol: "grpc",
+            message: resIR,
+            streaming: resStreaming,
+          },
+        ],
+      };
+      methods.push(methodIR);
+    } else {
+      const objectMethods = extractMethodsFromObjectType(elemType, checker);
+      const sym = elemType.aliasSymbol ?? elemType.symbol;
+      const typeName =
+        sym && !sym.name.startsWith("__") ? sym.name : "Service";
+      const jsDocType = sym ? extractJSDocInfo(sym, checker) : undefined;
+      const pkgOverride = jsDocType?.meta?.["package"]?.[0] ?? jsDocType?.meta?.["Package"]?.[0];
+      const svcOverride = jsDocType?.meta?.["service"]?.[0] ?? jsDocType?.meta?.["Service"]?.[0];
+      const pkg = typeof pkgOverride === "string" ? pkgOverride : undefined;
+      const svc = typeof svcOverride === "string" ? svcOverride : typeName;
+
+      if (objectMethods.length === 0) {
+        if (logger) {
+          warnUndocumentable(
+            logger,
+            `no methods found on object type '${typeName}' for grpcSchema`,
+            node,
+            sourceFile
+          );
+        }
+        continue;
+      }
+
+      for (const m of objectMethods) {
+        const sig = m.signatures[0]!;
+        const mSym = m.symbol;
+        const jsDoc = extractJSDocInfo(mSym, checker);
+        const rawName = jsDoc.meta?.["name"]?.[0] ?? jsDoc.meta?.["Name"]?.[0];
+        const hasOverride = typeof rawName === "string" && rawName.length > 0;
+        const methodName = hasOverride ? rawName : m.name;
+
+        const mPkgMeta = jsDoc.meta?.["package"]?.[0] ?? jsDoc.meta?.["Package"]?.[0];
+        const mSvcMeta = jsDoc.meta?.["service"]?.[0] ?? jsDoc.meta?.["Service"]?.[0];
+        const methodPkg = (typeof mPkgMeta === "string" && mPkgMeta) ? mPkgMeta : pkg;
+        const methodSvc = (typeof mSvcMeta === "string" && mSvcMeta) ? mSvcMeta : svc;
+
+        const jsDocSummary = jsDoc.meta?.["summary"]?.[0] ?? jsDoc.meta?.["Summary"]?.[0];
+        const summary = typeof jsDocSummary === "string" ? jsDocSummary : undefined;
+
+        const params = sig.getParameters();
+        let reqIR: TypeIR;
+        let reqStreaming = false;
+        if (params.length > 0) {
+          const p = params[0]!;
+          const pDecl = p.valueDeclaration ?? p.declarations?.[0];
+          const pType = pDecl
+            ? checker.getTypeOfSymbolAtLocation(p, pDecl)
+            : checker.getTypeOfSymbol(p);
+          const { streaming, type: unwrappedReqType } = unwrapStreamingType(pType);
+          reqStreaming = streaming;
+          reqIR = extractTypeIR(unwrappedReqType, checker);
+        } else {
+          reqIR = extractTypeIR(checker.getVoidType(), checker);
+        }
+
+        const returnType = sig.getReturnType();
+        const unwrappedPromise = unwrapPromiseType(returnType);
+        const { streaming: resStreaming, type: unwrappedResType } = unwrapStreamingType(unwrappedPromise);
+        const resIR = extractTypeIR(unwrappedResType, checker);
+
+        const methodIR: GrpcServiceMethodIR = {
+          kind: "serviceMethod",
+          protocol: "grpc",
+          address: {
+            protocol: "grpc",
+            ...(methodPkg ? { package: methodPkg } : {}),
+            service: methodSvc,
+            method: methodName,
+          },
+          ...(summary ? { summary } : {}),
+          ...(jsDoc.description ? { description: jsDoc.description } : {}),
+          ...(jsDoc.deprecated ? { deprecated: true } : {}),
+          request: {
+            protocol: "grpc",
+            message: reqIR,
+            streaming: reqStreaming,
+          },
+          responses: [
+            {
+              protocol: "grpc",
+              message: resIR,
+              streaming: resStreaming,
+            },
+          ],
+        };
+        methods.push(methodIR);
+      }
+    }
+  }
+
+  return methods;
 }

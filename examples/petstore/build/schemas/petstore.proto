@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+message Pet {
+  // @format int32
+  // @minimum 1
+  int32 id = 1;
+  // The pet's call name.
+  // @minLength 1
+  // @maxLength 80
+  string name = 2;
+  Species species = 3;
+  PetStatus status = 4;
+  // Retail price in minor units, so no float ever touches money.
+  // @format int64
+  int64 priceCents = 5;
+  // @maxItems 16
+  repeated string tags = 6;
+  // Absent while the pet is still available.
+  Owner owner = 7;
+  int64 addedAt = 8;
+}
+
+// What kind of animal. Ordinals are the protobuf enum values.
+enum Species {
+  Unknown = 0;
+  Dog = 1;
+  Cat = 2;
+  Bird = 3;
+}
+
+// Where a pet is in its journey through the store.
+enum PetStatus {
+  Available = 0;
+  Pending = 1;
+  Sold = 2;
+}
+
+message Owner {
+  // @format uuid
+  string id = 1;
+  // @minLength 1
+  // @maxLength 120
+  string name = 2;
+  // @format email
+  string email = 3;
+}
+
+// The body accepted when creating a pet: the store assigns `id` and `addedAt`.
+message NewPet {
+  // @minLength 1
+  // @maxLength 80
+  string name = 1;
+  Species species = 2;
+  // @format int64
+  int64 priceCents = 3;
+  repeated string tags = 4;
+}
+
+// The body accepted when selling a pet.
+message Sale {
+  // @format uuid
+  string ownerId = 1;
+  // @minLength 1
+  string ownerName = 2;
+  // @format email
+  string ownerEmail = 3;
+}
+
+// A change event, as published to the `petstore.pets.changed` topic and as
+// consumed back off it.
+// The consumer feeds these to `PetStore.applyChange`, so one declaration is the
+// producer's payload, the consumer's parameter and the AsyncAPI message.
+message PetChanged {
+  // @format uuid
+  string eventId = 1;
+  ChangeKind kind = 2;
+  // @format int32
+  int32 petId = 3;
+  // The pet as it now stands.
+  Pet pet = 4;
+  int64 occurredAt = 5;
+}
+
+// What changed. The discriminant of {@link PetChanged}.
+enum ChangeKind {
+  Created = 0;
+  Updated = 1;
+  Sold = 2;
+}

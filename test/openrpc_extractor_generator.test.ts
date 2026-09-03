@@ -3,7 +3,9 @@ import { extractOpenRpcIR } from "../src/extractors/openrpc.ts";
 import { generateOpenRpcSchemaCode } from "../src/generators/openrpc.ts";
 import type { TypeIR } from "../src/ir/types.ts";
 import { isOpenRpcMethod } from "../src/ir/service.ts";
-
+import { transformSource } from "../src/plugin.ts";
+import { silentLogger } from "../src/logger.ts";
+import { evalModule } from "./helpers.ts";
 describe("OpenRPC Extractor & Generator", () => {
   test("extractOpenRpcIR extracts ApiIR from OpenRPC document", () => {
     const doc = JSON.stringify({
@@ -100,5 +102,82 @@ describe("OpenRPC Extractor & Generator", () => {
 
     const components = result.components as Record<string, Record<string, unknown>>;
     expect(components.schemas?.User).toBeDefined();
+  });
+  test("transforms openRPCSchema with function signature types", () => {
+    const source = `
+      import { openRPCSchema } from "./src/index.ts";
+
+      /**
+       * Get user by ID
+       * @name get_user_op
+       */
+      function getUser(id: string): Promise<{ id: string; name: string }> {
+        return Promise.resolve({ id, name: "Alice" });
+      }
+
+      export const schema = openRPCSchema<[typeof getUser]>();
+    `;
+
+    const res = transformSource({ path: "test.ts", contents: source, logger: silentLogger });
+    expect(res.code).toContain("openRPCSchema as __wiz_openRPCSchema_");
+
+    const virtualModule = Array.from(res.modules.values())[0]!;
+    const code = virtualModule.files["index.js"]!;
+    const mod = evalModule<{ openRPCSchema: (base?: any) => any }>(code);
+    const doc = mod.openRPCSchema();
+
+    expect(doc).toBeDefined();
+    expect(doc.methods).toBeDefined();
+    const m = doc.methods.find((m: any) => m.name === "get_user_op");
+    expect(m).toBeDefined();
+    expect(m.params.length).toBe(1);
+    expect(m.params[0].name).toBe("id");
+  });
+
+  test("transforms openRPCSchema with service object types and namespacing", () => {
+    const source = `
+      import { openRPCSchema } from "./src/index.ts";
+
+      interface UserService {
+        getUser(id: string): Promise<{ id: string }>;
+        /** @name search_users_override */
+        searchUsers(query: string): Promise<Array<{ id: string }>>;
+      }
+
+      export const schema = openRPCSchema<[UserService]>();
+    `;
+
+    const res = transformSource({ path: "test.ts", contents: source, logger: silentLogger });
+    const virtualModule = Array.from(res.modules.values())[0]!;
+    const code = virtualModule.files["index.js"]!;
+    const mod = evalModule<{ openRPCSchema: (base?: any) => any }>(code);
+    const doc = mod.openRPCSchema();
+
+    expect(doc.methods).toBeDefined();
+    expect(doc.methods.some((m: any) => m.name === "UserService.getUser")).toBe(true);
+    expect(doc.methods.some((m: any) => m.name === "search_users_override")).toBe(true);
+  });
+
+  test("emits compiler warning when object type with 0 methods is passed to openRPCSchema", () => {
+    const source = `
+      import { openRPCSchema } from "./src/index.ts";
+
+      interface EmptyService {
+        name: string;
+      }
+
+      export const schema = openRPCSchema<[EmptyService]>();
+    `;
+    const warnings: string[] = [];
+    const testLogger = {
+      warn: (msg: string) => warnings.push(msg),
+      error: () => {},
+      info: () => {},
+      debug: () => {},
+      trace: () => {},
+    };
+
+    transformSource({ path: "test.ts", contents: source, logger: testLogger });
+    expect(warnings.some((w) => w.includes("no methods found on object type 'EmptyService' for openRPCSchema"))).toBe(true);
   });
 });

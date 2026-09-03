@@ -150,6 +150,7 @@ export function evalModule<T>(code: string): T {
     "is",
     "assert",
     "openapiSchema",
+    "openRPCSchema",
     "encodeProto",
     "decodeProto",
     "protobufSchema",
@@ -167,8 +168,7 @@ export function evalModule<T>(code: string): T {
     "encodeErlangBinary",
     "decodeErlangBinary",
     "asyncapiSchema",
-    "producer",
-    "consumer",
+    "mcpSchema",
   ];
 
   const collected = exportNames

@@ -12,7 +12,6 @@ import { silentLogger } from "../src/logger.ts";
  * build that re-transformed the entry then got the previous build's document.
  */
 const routesSource = (paths: string[]): string => `
-declare function op<TSpec>(handler: unknown): unknown;
 declare const openapiSchema: {
   bunRoutes<TRoutes>(base: Record<string, unknown>, routes: TRoutes): TRoutes;
 };
@@ -24,7 +23,7 @@ export interface User {
 export const routes = openapiSchema.bunRoutes(
   { openapi: "3.1.0", info: { title: "Users", version: "1.0.0" } },
   {
-${paths.map((path) => `    "${path}": { GET: op<{ response: User[] }>(() => null) },`).join("\n")}
+${paths.map((path) => `    "${path}": { GET: () => null },`).join("\n")}
   }
 );
 `;

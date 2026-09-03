@@ -334,10 +334,20 @@ function operationSource(
 ): string {
   const operation: Record<string, unknown> = {};
 
-  if (method.tags) operation.tags = method.tags;
+  const pkg = method.address.package;
+  const svc = method.address.service;
+  const methodName = (method.address as any).methodName ?? (method.address as any).method;
+  if (method.operationId ?? methodName) operation.operationId = method.operationId ?? methodName;
+  if (pkg) operation["x-package"] = pkg;
+  if (svc) {
+    operation["x-service"] = svc;
+    const existingTags = method.tags ?? [];
+    operation.tags = Array.from(new Set([svc, ...existingTags]));
+  } else if (method.tags) {
+    operation.tags = method.tags;
+  }
   if (method.summary) operation.summary = method.summary;
   if (method.description) operation.description = method.description;
-  if (method.operationId) operation.operationId = method.operationId;
   if (method.deprecated) operation.deprecated = true;
 
   const parameters = parametersFor(method.request.parameters, version);
@@ -351,7 +361,10 @@ function operationSource(
     };
   }
 
-  const responses: Record<string, unknown> = {};
+  // Several `@response` tags may share a status and differ only in media type,
+  // which is one response object with several `content` entries — not one
+  // response per tag, or the last tag would be the only one documented.
+  const responses: Record<string, Record<string, unknown>> = {};
   for (const response of method.responses) {
     const content = contentFor(response.body, version);
     const headers: Record<string, unknown> = {};
@@ -365,12 +378,28 @@ function operationSource(
       if (header.deprecated) entry.deprecated = true;
       headers[header.name] = entry;
     }
-    responses[String(response.status)] = {
-      description:
-        response.description ?? (content ? "Successful response" : "No content"),
-      ...(Object.keys(headers).length > 0 ? { headers } : {}),
-      ...(content ? { content } : {}),
-    };
+
+    const key = String(response.status);
+    const existing = responses[key];
+    if (!existing) {
+      responses[key] = {
+        description:
+          response.description ??
+          (content ? "Successful response" : "No content"),
+        ...(Object.keys(headers).length > 0 ? { headers } : {}),
+        ...(content ? { content } : {}),
+      };
+      continue;
+    }
+
+    // A later tag may be the one carrying the prose.
+    if (response.description) existing.description = response.description;
+    if (Object.keys(headers).length > 0) {
+      existing.headers = { ...(existing.headers as object), ...headers };
+    }
+    if (content) {
+      existing.content = { ...(existing.content as object), ...content };
+    }
   }
   operation.responses = responses;
 
@@ -428,9 +457,10 @@ export function generateOpenApiSchemaCode(
 
   const collect = (ir: TypeIR) => {
     for (const [name, namedIR] of collectNamedTypes(ir).entries()) {
-      // A `ref` node only names its target; it is never the definition of it.
-      if (namedIR.kind === "ref") continue;
-      if (!allNamedTypes.has(name)) allNamedTypes.set(name, namedIR);
+      const existing = allNamedTypes.get(name);
+      if (!existing || (existing.kind === "ref" && namedIR.kind !== "ref")) {
+        allNamedTypes.set(name, namedIR);
+      }
     }
   };
 

@@ -451,7 +451,8 @@ export function collectNamedTypes(ir: TypeIR): Map<string, TypeIR> {
 
   walkTypeIR(ir, (node) => {
     if (isUserNamedType(node.name)) {
-      if (!namedMap.has(node.name!)) {
+      const existing = namedMap.get(node.name!);
+      if (!existing || (existing.kind === "ref" && node.kind !== "ref")) {
         namedMap.set(node.name!, node);
       }
     }

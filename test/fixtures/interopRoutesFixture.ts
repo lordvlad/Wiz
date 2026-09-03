@@ -1,4 +1,4 @@
-import { op, openapiDocument, openapiSchema } from "../../src/index.ts";
+import { openapiDocument, openapiSchema } from "../../src/index.ts";
 
 export interface Product {
   /** @format uuid */
@@ -23,31 +23,46 @@ export interface ProductQuery {
   page?: number;
 }
 
+export interface ProductService {
+  /**
+   * @get /products
+   * @response 200 Product[]
+   */
+  getProducts(query?: ProductQuery): Promise<Product[]>;
+  /**
+   * @post /products
+   * @response 201 Created Product
+   * @response 422 Rejected Problem
+   */
+  createProduct(body: Product): Promise<Product>;
+  /**
+   * @get /products/{id}
+   * @response 200 Product
+   * @response 404 No such product Problem
+   */
+  getProduct(id: string): Promise<Product>;
+  /**
+   * @delete /products/{id}
+   * @response 204
+   */
+  deleteProduct(id: string): Promise<void>;
+}
+
+export const schema = openapiSchema<[ProductService]>({
+  openapi: "3.1.0",
+  info: { title: "Catalogue", version: "2.0.0" },
+});
+
 export const routes = openapiSchema.bunRoutes(
   { openapi: "3.1.0", info: { title: "Catalogue", version: "2.0.0" } },
   {
     "/products": {
-      GET: op<{ query: ProductQuery; response: Product[] }>(() => Response.json([])),
-      POST: op<{
-        body: Product;
-        responses: {
-          /** Created */
-          201: Product;
-          /** Rejected */
-          422: Problem;
-        };
-      }>(() => Response.json({}, { status: 201 })),
+      GET: () => Response.json([]),
+      POST: () => Response.json({}, { status: 201 }),
     },
     "/products/:id": {
-      GET: op<{
-        path: { id: string };
-        response: Product;
-        responses: {
-          /** No such product */
-          404: Problem;
-        };
-      }>(() => Response.json({})),
-      DELETE: op<{ path: { id: string }; status: 204 }>(() => new Response(null, { status: 204 })),
+      GET: () => Response.json({}),
+      DELETE: () => new Response(null, { status: 204 }),
     },
   }
 );

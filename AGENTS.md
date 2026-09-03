@@ -35,11 +35,16 @@ Welcome to `wiz`. This document provides technical context, architecture princip
 1. **Extractors** (`src/extractors/`): Parse input documents (OpenAPI, AsyncAPI, OpenRPC, Protobuf, TypeScript source) into intermediate representation (IR) nodes.
 2. **Intermediate Representation** (`src/ir/`):
    - `TypeIR`: Structural type graphs (`primitive`, `literal`, `object`, `array`, `tuple`, `union`, `intersection`, `enum`, `record`, `ref`).
-   - `ServiceIR`: Operation definitions (`HttpServiceMethodIR`, `GrpcServiceMethodIR`, `OpenRpcServiceMethodIR`, AsyncAPI methods).
+   - `ServiceIR`: Operation definitions (`HttpServiceMethodIR`, `GrpcServiceMethodIR`, `OpenRpcServiceMethodIR`, `McpServiceMethodIR`, AsyncAPI methods).
    - `ApiIR`: Document root combining `types`, `components`, and `service`.
 3. **Generators** (`src/generators/`): Code generators that turn IR into executable JavaScript / TypeScript code, virtual module definitions, or schema JSON.
-4. **Plugin Transformer** (`src/plugin.ts`, `src/harvest.ts`): Bun build/runtime plugin (`wizPlugin()`) that harvests AST callsites (`keysOf`, `is`, `validate`, `schema`, `openapiSchema`, `asyncapiSchema`, `encodeJson`, `encodeErlangText`, `encodeErlangBinary`, etc.) and rewrites them into imports from virtual modules mounted on `wiz-virtual/<hash>/index.js`.
-
+4. **Plugin Transformer** (`src/plugin.ts`, `src/harvest.ts`): Bun build/runtime plugin (`wizPlugin()`) that harvests AST callsites (`keysOf`, `is`, `validate`, `schema`, `openapiSchema`, `openRPCSchema`, `asyncapiSchema`, `mcpSchema`, `encodeJson`, `encodeErlangText`, `encodeErlangBinary`, etc.) and rewrites them into imports from virtual modules mounted on `wiz-virtual/<hash>/index.js`.
+   - **Signature & Service Harvesters**: Every spec macro (`openapiSchema`, `asyncapiSchema`, `openRPCSchema`, `mcpSchema`) harvests its operations from its generic type arguments — either a function signature type or an interface/class whose members are callable. There are no builder functions; JSDoc tags carry what the types cannot:
+     - OpenAPI: `@get`/`@post`/`@put`/`@patch`/`@delete`/`@head`/`@options`/`@trace` (verb + path template), `@http VERB /path`, `@response STATUS [MEDIATYPE] [TYPE] [DESCRIPTION]`.
+     - AsyncAPI: `@producer`/`@consumer`/`@action`, `@channel`.
+     - Global: `@name` (operation id / method name override), `@package`, `@service`, `@summary`, `@title`, `@audience`, `@priority`.
+   - **Assembly rules**: OpenAPI sets `operationId` and attaches `x-package`/`x-service` plus a `service` tag; AsyncAPI attaches `x-package`/`x-service` and prefixes the channel key; OpenRPC names methods `package.service.method`; MCP names tools `package.service.snake_case_method`. gRPC binds directly to `GrpcAddressIR.package`/`service`.
+   - A type argument with no callable members is a payload type: it contributes a component schema and no operation. `openRPCSchema` and `mcpSchema` emit a `warnUndocumentable` diagnostic for an object type with zero methods, since those macros describe nothing else.
 ---
 
 ## 2. Directory Layout & Key Modules
@@ -50,7 +55,7 @@ wiz/
 ├── src/
 │   ├── index.ts            # Public API exported functions & stubs
 │   ├── plugin.ts           # Bun macro/plugin transformer and callsite rewrites
-│   ├── harvest.ts          # TypeScript AST callsite harvesting (op, producer, consumer, Bun/Hono routes)
+│   ├── harvest.ts          # TypeScript AST/type harvesting (openapiSchema, asyncapiSchema, openRPCSchema, mcpSchema, grpc, Bun/Hono routes)
 │   ├── registry.ts         # Structural type key hash computation & module registry
 │   ├── types.ts            # TypeIR definitions and utility re-exports
 │   ├── openapiDialect.ts   # OpenAPI JSDoc annotation and constraint mappings
