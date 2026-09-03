@@ -1080,4 +1080,60 @@ describe("diagnostics and refusals", () => {
     expect(ir.diagnostics.map((d) => d.keyword)).toEqual(["content"]);
     expect(asHttp(ir.service.methods[0]!).request.parameters).toBeUndefined();
   });
+  test("a duplicate operationId is reported as a diagnostic", () => {
+    const ir = extractApiIR(
+      JSON.stringify({
+        openapi: "3.1.0",
+        info: { title: "dup", version: "1" },
+        paths: {
+          "/a": {
+            get: {
+              operationId: "getThing",
+              responses: { "204": { description: "none" } },
+            },
+          },
+          "/b": {
+            get: {
+              operationId: "getThing",
+              responses: { "204": { description: "none" } },
+            },
+          },
+        },
+      })
+    );
+    expect(ir.diagnostics).toEqual([
+      {
+        pointer: "#/paths/~1b/get/operationId",
+        keyword: "operationId",
+        message: "duplicate operationId 'getThing'",
+      },
+    ]);
+  });
+
+  test("unsupported/mismatched constraints are reported as diagnostics", () => {
+    const ir = extractApiIR(
+      wrap({
+        StringWithMin: { type: "string", minimum: 5 },
+        NumberWithMinLength: { type: "number", minLength: 3 },
+        ObjectWithMinItems: { type: "object", minItems: 2 },
+      })
+    );
+    expect(ir.diagnostics).toEqual([
+      {
+        pointer: "#/components/schemas/StringWithMin/minimum",
+        keyword: "minimum",
+        message: "unsupported constraint 'minimum' on non-numeric type 'string'",
+      },
+      {
+        pointer: "#/components/schemas/NumberWithMinLength/minLength",
+        keyword: "minLength",
+        message: "unsupported constraint 'minLength' on non-string type 'number'",
+      },
+      {
+        pointer: "#/components/schemas/ObjectWithMinItems/minItems",
+        keyword: "minItems",
+        message: "unsupported constraint 'minItems' on non-array type 'object'",
+      },
+    ]);
+  });
 });

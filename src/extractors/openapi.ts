@@ -118,6 +118,81 @@ function reportUnsupported(schema: JsonObject, ctx: Ctx, pointer: string): void 
   }
 }
 
+const NUMERIC_KEYWORDS = [
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "multipleOf",
+] as const;
+const STRING_KEYWORDS = ["minLength", "maxLength", "pattern"] as const;
+const ARRAY_KEYWORDS = ["minItems", "maxItems", "uniqueItems"] as const;
+
+function isNumericType(type: string, raw: JsonObject): boolean {
+  return type === "number" || type === "integer" || raw.format === "int64";
+}
+
+function isStringType(type: string): boolean {
+  return type === "string";
+}
+
+function isArrayType(type: string): boolean {
+  return type === "array";
+}
+
+function checkMismatchedConstraints(
+  raw: JsonObject,
+  types: string[] | undefined,
+  ctx: Ctx,
+  pointer: string
+): void {
+  if (!types || types.length === 0) return;
+
+  const anyNumeric = types.some((t) => isNumericType(t, raw));
+  const anyString = types.some((t) => isStringType(t, raw));
+  const anyArray = types.some((t) => isArrayType(t));
+
+  const typeNameStr = types.join(" | ");
+
+  if (!anyNumeric) {
+    for (const kw of NUMERIC_KEYWORDS) {
+      if (raw[kw] !== undefined) {
+        diagnose(
+          ctx,
+          `${pointer}/${kw}`,
+          kw,
+          `unsupported constraint '${kw}' on non-numeric type '${typeNameStr}'`
+        );
+      }
+    }
+  }
+
+  if (!anyString) {
+    for (const kw of STRING_KEYWORDS) {
+      if (raw[kw] !== undefined) {
+        diagnose(
+          ctx,
+          `${pointer}/${kw}`,
+          kw,
+          `unsupported constraint '${kw}' on non-string type '${typeNameStr}'`
+        );
+      }
+    }
+  }
+
+  if (!anyArray) {
+    for (const kw of ARRAY_KEYWORDS) {
+      if (raw[kw] !== undefined) {
+        diagnose(
+          ctx,
+          `${pointer}/${kw}`,
+          kw,
+          `unsupported constraint '${kw}' on non-array type '${typeNameStr}'`
+        );
+      }
+    }
+  }
+}
 function readAnnotations(
   schema: JsonObject,
   ctx: Ctx,
@@ -201,7 +276,16 @@ function schemaToIR(
       : undefined;
   const nonNull = typeNames?.filter((t) => t !== "null");
 
-  // `type: "string"` plus one of a few formats is how the generator spells
+  const inferredTypes =
+    nonNull && nonNull.length > 0
+      ? nonNull
+      : raw.properties !== undefined || raw.additionalProperties !== undefined
+        ? ["object"]
+        : raw.items !== undefined || raw.prefixItems !== undefined
+          ? ["array"]
+          : undefined;
+
+  checkMismatchedConstraints(raw, inferredTypes, ctx, pointer);
   // bigint/bytes/date, so those formats are part of the type, not a constraint.
   const consumedFormat =
     Boolean(nonNull?.includes("string")) &&
@@ -886,6 +970,7 @@ function responsesToIR(
  */
 function pathsToService(ctx: Ctx): ServiceIR {
   const service: ServiceIR = { kind: "service", methods: [] };
+  const seenOperationIds = new Set<string>();
 
   const info = ctx.document.info;
   if (isObject(info)) {
@@ -918,7 +1003,18 @@ function pathsToService(ctx: Ctx): ServiceIR {
       };
 
       if (typeof operation.operationId === "string") {
-        irMethod.operationId = operation.operationId;
+        const opId = operation.operationId;
+        if (seenOperationIds.has(opId)) {
+          diagnose(
+            ctx,
+            `${pointer}/operationId`,
+            "operationId",
+            `duplicate operationId '${opId}'`
+          );
+        } else {
+          seenOperationIds.add(opId);
+        }
+        irMethod.operationId = opId;
       }
       if (typeof operation.summary === "string") {
         irMethod.summary = operation.summary;
