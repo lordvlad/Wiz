@@ -39,8 +39,8 @@ what makes post-processing possible:
 cat openapi.yaml | wiz generate -g node_modules/wiz/src/generators/tsClient.ts | jq -r '."model.ts"'
 ```
 
-The rest of the flags — `--format`, `--lenient`, stdin and outdir handling — are
-in [cli](./cli.md). `--lenient` is the only one this generator reads.
+The rest of the flags — `--format`, `--lenient`, `--media-types`, stdin and outdir handling — are
+in [cli](./cli.md). `--media-types` specifies additional supported payload formats (`jsonl`, `jsonc`, `json5`, `xml`, `html`, `grpc`, `erlangText`, `erlangBinary`, `yaml`, or `all`).
 
 ## What comes out
 

@@ -517,4 +517,35 @@ describe("wiz generate through the binary", () => {
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("unknown option '--nope'");
   });
+
+  test("passes --media-types array or 'all' to generator options", async () => {
+    const cwd = await workspace();
+    await Bun.write(
+      join(cwd, "gen_media.ts"),
+      `export default {
+  name: "test-gen",
+  api(ir, context) {
+    return { "options.json": JSON.stringify(context.options) + "\\n" };
+  },
+};`
+    );
+
+    const result1 = await run(
+      ["generate", "-g", "gen_media.ts", "api.json", "--media-types=jsonl,yaml"],
+      cwd
+    );
+    expect(result1.code).toBe(0);
+    const files1 = JSON.parse(result1.stdout);
+    const opts1 = JSON.parse(files1["options.json"]);
+    expect(opts1.mediaTypes).toEqual(["jsonl", "yaml"]);
+
+    const result2 = await run(
+      ["generate", "-g", "gen_media.ts", "api.json", "--media-types", "all"],
+      cwd
+    );
+    expect(result2.code).toBe(0);
+    const files2 = JSON.parse(result2.stdout);
+    const opts2 = JSON.parse(files2["options.json"]);
+    expect(opts2.mediaTypes).toBe("all");
+  });
 });

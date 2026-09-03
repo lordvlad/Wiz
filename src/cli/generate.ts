@@ -34,6 +34,7 @@ interface GenerateOptions {
   /** Passed through, not interpreted: a generator decides what it relaxes. */
   lenient: boolean;
   validate?: boolean | ValidateTarget[];
+  mediaTypes?: string[] | "all";
 }
 
 /**
@@ -55,9 +56,9 @@ interface Invocation {
   outdir: string | undefined;
   lenient: boolean;
   validate?: boolean | ValidateTarget[];
+  mediaTypes?: string[] | "all";
   format: ExtractApiOptions["format"];
 }
-
 /** The parts of a call `--validate` can name, in the order they are checked. */
 const VALIDATE_TARGETS = ["path", "query", "headers", "body", "response"] as const;
 
@@ -89,8 +90,8 @@ function parse(argv: string[]): Invocation {
   let outdir: string | undefined;
   let lenient = false;
   let validate: boolean | ValidateTarget[] | undefined;
+  let mediaTypes: string[] | "all" | undefined;
   let format: ExtractApiOptions["format"];
-
   /**
    * Flags that take a value must not silently swallow the next flag. A bare `-`
    * is exempt: it is a value, and the one `--outdir` legitimately takes.
@@ -125,6 +126,28 @@ function parse(argv: string[]): Invocation {
     }
     if (arg === "--lenient") {
       lenient = true;
+      continue;
+    }
+    if (
+      arg === "--media-types" ||
+      arg === "--mediaTypes" ||
+      arg === "--media-type" ||
+      arg.startsWith("--media-types=") ||
+      arg.startsWith("--mediaTypes=") ||
+      arg.startsWith("--media-type=")
+    ) {
+      let raw: string;
+      if (arg.includes("=")) {
+        raw = arg.slice(arg.indexOf("=") + 1);
+      } else {
+        raw = valueOf(arg, argv[++i]);
+      }
+      const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
+      if (parts.includes("all") || parts.includes("ALL")) {
+        mediaTypes = "all";
+      } else {
+        mediaTypes = parts;
+      }
       continue;
     }
     // The one flag whose value is optional: bare it means "everything", and a
@@ -175,6 +198,7 @@ function parse(argv: string[]): Invocation {
     outdir: outdir === "-" ? undefined : outdir,
     lenient,
     validate,
+    mediaTypes,
     format,
   };
 }
@@ -304,7 +328,11 @@ export async function runGenerate(argv: string[]): Promise<number> {
     const files = generate(
       ir,
       generator,
-      { lenient: invocation.lenient, validate: invocation.validate },
+      {
+        lenient: invocation.lenient,
+        validate: invocation.validate,
+        mediaTypes: invocation.mediaTypes,
+      },
       consoleLogger
     );
 

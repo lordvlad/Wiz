@@ -16,8 +16,9 @@ import { collectNamedTypes, type PropertyIR, type TypeIR } from "../types.ts";
 import type { GeneratedFiles, Generator, GeneratorContext } from "./generator.ts";
 import { generateProtobufCodecCode } from "./protobuf.ts";
 import { generateJsonCodecCode } from "./json.ts";
-import { docComment, tsDeclarations, typeIdentifiers, typeText } from "./tsTypes.ts";
+import { generateErlangTextCode, generateErlangBinaryCode } from "./erlang.ts";
 import { generateValidationBlock, helpersFor } from "./validator.ts";
+import { docComment, tsDeclarations, typeIdentifiers, typeText } from "./tsTypes.ts";
 
 /**
  * A TypeScript HTTP client, emitted as two files a consumer can drop into a
@@ -36,6 +37,20 @@ import { generateValidationBlock, helpersFor } from "./validator.ts";
 
 export type ValidateTarget = "path" | "query" | "body" | "headers" | "response";
 
+export type MediaType =
+  | "json"
+  | "jsonl"
+  | "jsonc"
+  | "json5"
+  | "xml"
+  | "html"
+  | "xml+html"
+  | "grpc"
+  | "erlangText"
+  | "erlangBinary"
+  | "erlang"
+  | "yaml";
+
 export interface TsClientOptions {
   /**
    * Widens the parameter objects: headers accept any string entry and query
@@ -51,8 +66,12 @@ export interface TsClientOptions {
    * or an array of specific parts to validate.
    */
   validate?: boolean | ValidateTarget[];
+  /**
+   * Additional media types to support when generating the client.
+   * "all" enables all supported media types (JSONL, JSONC, JSON5, XML, HTML, gRPC, Erlang Text, Erlang Binary, YAML).
+   */
+  mediaTypes?: string[] | "all";
 }
-
 function isValidationEnabled(
   options: TsClientOptions,
   target: ValidateTarget
@@ -189,25 +208,143 @@ function isAbsent(ir: TypeIR | undefined): boolean {
   );
 }
 
-/**
- * The JSON representation of a payload, which is the only one a fetch client
- * can build without being told how to encode the rest.
- */
-function jsonBody(
-  bodies: ServiceMethodBodyIR[] | undefined,
-  onSkipped: (mimetype: string) => void
-): TypeIR | undefined {
-  if (!bodies || bodies.length === 0) return undefined;
-
-  const json = bodies.find((body) => body.mimetype === JSON_MIME);
-  for (const body of bodies) {
-    if (body !== json) onSkipped(body.mimetype);
+function normalizeMediaTypes(mediaTypes?: string[] | "all"): Set<string> | "all" {
+  if (mediaTypes === "all") return "all";
+  if (Array.isArray(mediaTypes)) {
+    if (mediaTypes.includes("all")) return "all";
+    const set = new Set<string>();
+    for (const item of mediaTypes) {
+      const lower = item.toLowerCase().trim();
+      set.add(lower);
+      if (lower === "erlangtext" || lower === "erlang-text" || lower === "erlang") {
+        set.add("erlangtext");
+        set.add("erlang-text");
+        set.add("erlang");
+      }
+      if (lower === "erlangbinary" || lower === "erlang-binary") {
+        set.add("erlangbinary");
+        set.add("erlang-binary");
+      }
+      if (lower === "xml+html") {
+        set.add("xml");
+        set.add("html");
+        set.add("xml+html");
+      }
+    }
+    return set;
   }
-
-  const chosen = json ?? bodies[0];
-  return chosen && !isAbsent(chosen.content) ? chosen.content : undefined;
+  return new Set();
 }
 
+function isMimetypeSupported(mimetype: string, mediaTypes?: string[] | "all"): boolean {
+  const norm = mimetype.toLowerCase().trim();
+
+  // JSON is always supported
+  if (norm === "application/json" || norm.endsWith("+json") || norm === "json") {
+    return true;
+  }
+
+  const enabled = normalizeMediaTypes(mediaTypes);
+  const isAll = enabled === "all";
+  const has = (key: string) => isAll || (enabled instanceof Set && enabled.has(key));
+
+  if (norm.includes("jsonl") || norm.includes("json-lines") || norm.includes("x-jsonlines")) {
+    return has("jsonl");
+  }
+  if (norm.includes("jsonc")) {
+    return has("jsonc");
+  }
+  if (norm.includes("json5")) {
+    return has("json5");
+  }
+  if (norm.includes("yaml") || norm.includes("x-yaml")) {
+    return has("yaml");
+  }
+  if (norm.includes("xml")) {
+    return has("xml") || has("xml+html");
+  }
+  if (norm.includes("html")) {
+    return has("html") || has("xml+html");
+  }
+  if (norm.includes("erlang-binary") || norm.includes("x-erlang-binary") || norm.includes("etf")) {
+    return has("erlangbinary") || has("erlang-binary");
+  }
+  if (norm.includes("erlang")) {
+    return has("erlangtext") || has("erlang-text") || has("erlang");
+  }
+  if (norm.includes("grpc")) {
+    return has("grpc");
+  }
+
+  return false;
+}
+
+function selectBody(
+  bodies: ServiceMethodBodyIR[] | undefined,
+  options: TsClientOptions,
+  onSkipped?: (mimetype: string) => void
+): ServiceMethodBodyIR | undefined {
+  if (!bodies || bodies.length === 0) return undefined;
+
+  const chosen =
+    bodies.find((body) => body.mimetype === JSON_MIME) ??
+    bodies.find((body) => isMimetypeSupported(body.mimetype, options.mediaTypes)) ??
+    bodies[0];
+
+  const supported = chosen && isMimetypeSupported(chosen.mimetype, options.mediaTypes);
+
+  if (onSkipped) {
+    for (const body of bodies) {
+      if (body !== chosen || !supported) {
+        onSkipped(body.mimetype);
+      }
+    }
+  }
+
+  if (!supported || !chosen || isAbsent(chosen.content)) {
+    return undefined;
+  }
+
+  return chosen;
+}
+
+function bodySerializer(mimetype: string, access: string, encode?: string): string {
+  const norm = mimetype.toLowerCase().trim();
+  if (norm.includes("jsonl") || norm.includes("json-lines") || norm.includes("x-jsonlines")) {
+    return `(${access}.body).map((row: any) => JSON.stringify(row)).join("\\n")`;
+  }
+  if (norm.includes("jsonc")) {
+    return `JSON.stringify(${access}.body)`;
+  }
+  if (norm.includes("json5")) {
+    return `((globalThis as any).Bun?.JSON5 ?? JSON).stringify(${access}.body)`;
+  }
+  if (norm.includes("yaml") || norm.includes("x-yaml")) {
+    return `((globalThis as any).Bun?.YAML ?? JSON).stringify(${access}.body)`;
+  }
+  if (norm.includes("xml")) {
+    return `((globalThis as any).Bun?.XML ?? { stringify: (v: any) => String(v) }).stringify(${access}.body)`;
+  }
+  if (norm.includes("html")) {
+    return `typeof ${access}.body === "string" ? ${access}.body : ((globalThis as any).Bun?.escapeHTML ? (globalThis as any).Bun.escapeHTML(String(${access}.body)) : String(${access}.body))`;
+  }
+  if (norm.includes("erlang-binary") || norm.includes("x-erlang-binary") || norm.includes("etf")) {
+    return `encodeErlangBinary(${access}.body)`;
+  }
+  if (norm.includes("erlang")) {
+    return `encodeErlangText(${access}.body)`;
+  }
+  return encode ? `${encode}(${access}.body)` : `JSON.stringify(${access}.body)`;
+}
+
+function jsonBody(
+  bodies: ServiceMethodBodyIR[] | undefined,
+  options: TsClientOptions,
+  onSkipped?: (mimetype: string) => void
+): TypeIR | undefined {
+  const chosen = selectBody(bodies, options, onSkipped);
+  return chosen ? chosen.content : undefined;
+}
 /**
  * A method name for an operation that named none: `/pets/{petId}` becomes
  * `getPetsByPetId`. An rpc always carries its own name, so the gRPC side is
@@ -348,7 +485,7 @@ function requestSlots(
     slots.push({ name: "cookie", type: cookie.text, required: cookie.required });
   }
 
-  const body = jsonBody(method.request.body, onSkipped);
+  const body = jsonBody(method.request.body, options, onSkipped);
   if (body) {
     slots.push({
       name: "body",
@@ -369,6 +506,7 @@ function requestSlots(
 function successType(
   method: HttpServiceMethodIR,
   identifiers: ReadonlyMap<string, string>,
+  options: TsClientOptions,
   onSkipped: (mimetype: string) => void
 ): string {
   const isSuccess = (response: HttpResponseIR) =>
@@ -384,7 +522,7 @@ function successType(
 
   const types: string[] = [];
   for (const response of chosen) {
-    const body = jsonBody(response.body, onSkipped);
+    const body = jsonBody(response.body, options, onSkipped);
     const text = body ? typeText(body, identifiers) : "void";
     if (!types.includes(text)) types.push(text);
   }
@@ -438,10 +576,8 @@ function httpOperation(
   onSkipped: (mimetype: string) => void
 ): Operation {
   const slots = requestSlots(method, identifiers, options, onSkipped);
-  const returns = successType(method, identifiers, onSkipped);
+  const returns = successType(method, identifiers, options, onSkipped);
   const required = slots.some((slot) => slot.required);
-  // Without a required slot the whole argument is optional, so every read of it
-  // has to tolerate its absence.
   const access = slots.length === 0 || required ? "options" : "options?";
 
   const parameter =
@@ -451,7 +587,9 @@ function httpOperation(
           .map((slot) => `${slot.name}${slot.required ? "" : "?"}: ${slot.type}`)
           .join("; ")} }, callOptions?: HttpCallOptions`;
 
-  const requestType = jsonBody(method.request.body, onSkipped);
+  const requestBodyObj = selectBody(method.request.body, options, onSkipped);
+  const requestType = requestBodyObj?.content;
+  const requestMimetype = requestBodyObj?.mimetype ?? JSON_MIME;
   const requestName = requestType?.name;
   const requestIdentifier = requestName ? identifiers.get(requestName) : undefined;
   const encode = requestIdentifier ? codecName("encode", requestIdentifier) : undefined;
@@ -465,7 +603,8 @@ function httpOperation(
     responses.length > 0
       ? responses
       : method.responses.filter((response) => response.status === "default");
-  const responseType = jsonBody(chosen[0]?.body, onSkipped);
+  const responseBodyObj = selectBody(chosen[0]?.body, options, onSkipped);
+  const responseType = responseBodyObj?.content;
   const responseName = responseType?.name;
   const responseIdentifier = responseName ? identifiers.get(responseName) : undefined;
   const decode = responseIdentifier ? codecName("decode", responseIdentifier) : undefined;
@@ -477,15 +616,11 @@ function httpOperation(
     `        headers: headerRecord(${[
       has("headers") ? `${access}.headers` : "undefined",
       has("cookie") ? `${access}.cookie` : "undefined",
-      has("body") ? JSON.stringify(JSON_MIME) : "undefined",
+      has("body") ? JSON.stringify(requestMimetype) : "undefined",
     ].join(", ")}),`,
     ...(has("body")
       ? [
-          `        body: ${
-            encode
-              ? `${encode}(${access}.body)`
-              : `JSON.stringify(${access}.body)`
-          },`,
+          `        body: ${bodySerializer(requestMimetype, access, encode)},`,
         ]
       : []),
   ].join("\n");
@@ -502,8 +637,8 @@ function httpOperation(
   const pathTypeIR = resolved(parameterGroupTypeIR(grouped("path"), "path"));
   const queryTypeIR = resolved(parameterGroupTypeIR(grouped("query"), "query"));
   const headerTypeIR = resolved(parameterGroupTypeIR(grouped("header"), "header"));
-  const bodyTypeIR = resolved(jsonBody(method.request.body, onSkipped));
-  const responseTypeIR = resolved(jsonBody(chosen[0]?.body, onSkipped));
+  const bodyTypeIR = resolved(jsonBody(method.request.body, options, onSkipped));
+  const responseTypeIR = resolved(jsonBody(chosen[0]?.body, options, onSkipped));
 
   /**
    * One slot's checks, as a guarded block.
@@ -1051,13 +1186,66 @@ async function parseBody(response: Response): Promise<unknown> {
   if (response.status === 204) return undefined;
   const text = await response.text();
   if (text === "") return undefined;
-  if (!(response.headers.get("content-type") ?? "").includes("json")) return text;
-  try {
-    return JSON.parse(text);
-  } catch {
-    // A body that claims JSON and is not is still evidence; the caller sees it.
-    return text;
+  const ct = (response.headers.get("content-type") ?? "").toLowerCase();
+  const bun = (globalThis as any).Bun;
+  if (ct.includes("jsonl") || ct.includes("json-lines") || ct.includes("x-jsonlines")) {
+    try {
+      return (bun?.JSONL ?? { parse: (t: string) => t.trim().split("\\n").map((l: string) => JSON.parse(l)) }).parse(text);
+    } catch {
+      return text;
+    }
   }
+  if (ct.includes("jsonc")) {
+    try {
+      return (bun?.JSONC ?? JSON).parse(text);
+    } catch {
+      return text;
+    }
+  }
+  if (ct.includes("json5")) {
+    try {
+      return (bun?.JSON5 ?? JSON).parse(text);
+    } catch {
+      return text;
+    }
+  }
+  if (ct.includes("yaml")) {
+    try {
+      return (bun?.YAML ?? { parse: (t: string) => JSON.parse(t) }).parse(text);
+    } catch {
+      return text;
+    }
+  }
+  if (ct.includes("xml")) {
+    try {
+      return (bun?.XML ?? { parse: (t: string) => t }).parse(text);
+    } catch {
+      return text;
+    }
+  }
+  if (ct.includes("erlang-binary") || ct.includes("etf")) {
+    try {
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      return typeof (globalThis as any).decodeErlangBinary === "function" ? (globalThis as any).decodeErlangBinary(bytes) : bytes;
+    } catch {
+      return text;
+    }
+  }
+  if (ct.includes("erlang")) {
+    try {
+      return typeof (globalThis as any).decodeErlangText === "function" ? (globalThis as any).decodeErlangText(text) : text;
+    } catch {
+      return text;
+    }
+  }
+  if (ct.includes("json")) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
+  }
+  return text;
 }
 
 async function send(
@@ -1994,18 +2182,41 @@ function emitFiles(
   // The wire codec is a file of its own: it is the only generated code with no
   // types in it, it is large, and a caller may well want to frame a message
   // without going through a method.
-  const codecTypes = service.methods.length > 0 ? messageTypes(service.methods, declared) : [];
-  const codecImports = [...new Set(
-    codecTypes.flatMap(({ name }) => {
+  const codecTypes = service.methods.length > 0 ? messageTypes(service.methods, declared, context.options) : [];
+  const speaksErlangText = service.methods.some((m) => {
+    if (!isHttpMethod(m)) return false;
+    const http = m as HttpServiceMethodIR;
+    const reqBody = selectBody(http.request.body, context.options, () => {});
+    const respBody = selectBody(http.responses[0]?.body, context.options, () => {});
+    const reqMime = reqBody?.mimetype.toLowerCase() ?? "";
+    const respMime = respBody?.mimetype.toLowerCase() ?? "";
+    const isErlangText = (mime: string) => mime.includes("erlang") && !mime.includes("binary") && !mime.includes("etf");
+    return isErlangText(reqMime) || isErlangText(respMime);
+  });
+
+  const speaksErlangBinary = service.methods.some((m) => {
+    if (!isHttpMethod(m)) return false;
+    const http = m as HttpServiceMethodIR;
+    const reqBody = selectBody(http.request.body, context.options, () => {});
+    const respBody = selectBody(http.responses[0]?.body, context.options, () => {});
+    const reqMime = reqBody?.mimetype.toLowerCase() ?? "";
+    const respMime = respBody?.mimetype.toLowerCase() ?? "";
+    const isErlangBinary = (mime: string) => mime.includes("erlang-binary") || mime.includes("x-erlang-binary") || mime.includes("etf");
+    return isErlangBinary(reqMime) || isErlangBinary(respMime);
+  });
+
+  const codecImports = [...new Set([
+    ...codecTypes.flatMap(({ name }) => {
       const identifier = identifiers.get(name);
       return identifier
         ? [codecName("encode", identifier), codecName("decode", identifier)]
         : [];
-    })
-  )]
-    .filter((fn) => new RegExp(`\\b${fn}\\b`).test(declarations))
+    }),
+    ...(speaksErlangText ? ["encodeErlangText", "decodeErlangText"] : []),
+    ...(speaksErlangBinary ? ["encodeErlangBinary", "decodeErlangBinary"] : []),
+  ])]
+    .filter((fn) => new RegExp(`\\b${fn}\\b`).test(declarations) || speaksErlangText || speaksErlangBinary)
     .sort();
-
   // The gRPC fields only exist on a client that has rpcs to make, so the shared
   // configuration carries them conditionally rather than always.
   const speaksGrpc = grpcMethods.length > 0;
@@ -2160,13 +2371,20 @@ ${valHelpers.size > 0 ? `${[...valHelpers].join("\n\n")}\n` : ""}`
     operations.length > 0 ? `\n${declarations}\n` : "",
   ].join("");
   const files: GeneratedFiles = { [MODEL_FILE]: model, [API_FILE]: api };
-  if (codecTypes.length > 0) {
+  if (codecTypes.length > 0 || speaksErlangText || speaksErlangBinary) {
     const parts: string[] = [];
     if (speaksGrpc) {
       parts.push(generateProtobufCodecCode(codecTypes, { modelModule: `./${MODEL_FILE}`, identifiers }));
     }
-    if (speaksHttp) {
+    if (speaksHttp && codecTypes.length > 0) {
       parts.push(generateJsonCodecCode(codecTypes, { modelModule: `./${MODEL_FILE}`, identifiers }));
+    }
+    const emptyIR: TypeIR = { id: "erlang", kind: "primitive", type: "unknown" };
+    if (speaksErlangText) {
+      parts.push(generateErlangTextCode(emptyIR));
+    }
+    if (speaksErlangBinary) {
+      parts.push(generateErlangBinaryCode(emptyIR));
     }
     files[CODEC_FILE] = `${banner("Wire encoders and decoders.")}\n${parts.join("\n\n")}\n`;
     if (speaksGrpc) {
@@ -2178,11 +2396,11 @@ ${valHelpers.size > 0 ? `${[...valHelpers].join("\n\n")}\n` : ""}`
   return files;
 }
 
-/** Every message a gRPC method puts on the wire, in a stable order. */
 /** Every message or body a service method puts on the wire, in a stable order. */
 function messageTypes(
   methods: ServiceMethodIR[],
-  declared: ReadonlyMap<string, TypeIR>
+  declared: ReadonlyMap<string, TypeIR>,
+  options: TsClientOptions
 ): Array<{ name: string; ir: TypeIR }> {
   const wanted = new Map<string, TypeIR>();
 
@@ -2199,7 +2417,7 @@ function messageTypes(
       }
     } else {
       const http = method as HttpServiceMethodIR;
-      const reqBody = jsonBody(http.request.body, () => {});
+      const reqBody = jsonBody(http.request.body, options, () => {});
       if (reqBody) {
         const name = reqBody.name;
         if (name) {
@@ -2208,7 +2426,7 @@ function messageTypes(
         }
       }
       for (const response of http.responses) {
-        const resBody = jsonBody(response.body, () => {});
+        const resBody = jsonBody(response.body, options, () => {});
         if (resBody) {
           const name = resBody.name;
           if (name) {

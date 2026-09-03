@@ -635,3 +635,113 @@ describe("emitted code compiles and runs", () => {
     expect(attempts).toBe(2);
   });
 });
+describe("mediaTypes option support in tsClient", () => {
+  test("emits client with YAML, JSONL, Erlang, XML support when mediaTypes is set", () => {
+    const yamlDoc = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "MediaTypesTest", version: "1.0.0" },
+      paths: {
+        "/config": {
+          post: {
+            operationId: "updateConfig",
+            requestBody: {
+              content: {
+                "application/yaml": {
+                  schema: { type: "object", properties: { key: { type: "string" } } },
+                },
+              },
+            },
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/yaml": {
+                    schema: { type: "object", properties: { status: { type: "string" } } },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "/events": {
+          post: {
+            operationId: "sendEvents",
+            requestBody: {
+              content: {
+                "application/jsonl": {
+                  schema: { type: "array", items: { type: "string" } },
+                },
+              },
+            },
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/x-erlang-text": {
+                    schema: { type: "object", properties: { result: { type: "string" } } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const ir = extractApiIR(yamlDoc, { format: "json" });
+    const files = generate(
+      ir,
+      tsClientGenerator,
+      { mediaTypes: ["yaml", "jsonl", "erlangText"] },
+      silentLogger
+    );
+
+    expect(files["api.ts"]).toContain('"application/yaml"');
+    expect(files["api.ts"]).toContain("Bun");
+    expect(files["api.ts"]).toContain('"application/jsonl"');
+    expect(files["api.ts"]).toContain("encodeErlangText");
+    expect(files["codec.ts"]).toContain("encodeErlangText");
+  });
+
+  test("emits client with all media types when mediaTypes is 'all'", () => {
+    const doc = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "AllMediaTypes", version: "1.0.0" },
+      paths: {
+        "/binary": {
+          post: {
+            operationId: "sendEtf",
+            requestBody: {
+              content: {
+                "application/x-etf": {
+                  schema: { type: "object", properties: { data: { type: "string" } } },
+                },
+              },
+            },
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/xml": {
+                    schema: { type: "object", properties: { xmlRes: { type: "string" } } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const ir = extractApiIR(doc, { format: "json" });
+    const files = generate(
+      ir,
+      tsClientGenerator,
+      { mediaTypes: "all" },
+      silentLogger
+    );
+
+    expect(files["api.ts"]).toContain('"application/x-etf"');
+    expect(files["codec.ts"]).toContain("encodeErlangBinary");
+  });
+});
