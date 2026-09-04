@@ -32,6 +32,8 @@ const HELPER_FUNCTIONS = new Set([
   "requiredKeysOf",
   "optionalKeysOf",
   "deepKeysOf",
+  "jsonSchema",
+  "jsonSchemas",
   "schema",
   "validate",
   "parseQuery",
@@ -133,6 +135,10 @@ export const VIRTUAL_EXPORTS: Record<string, string> = {
   requiredKeys: "__wiz_reqKeys",
   optionalKeys: "__wiz_optKeys",
   deepKeys: "__wiz_deepKeys",
+  jsonSchema_draft2020: "__wiz_jsonSchema",
+  jsonSchema_draft07: "__wiz_jsonSchema07",
+  jsonSchemas_draft2020: "__wiz_jsonSchemas",
+  jsonSchemas_draft07: "__wiz_jsonSchemas07",
   schema_draft2020: "__wiz_schema",
   schema_draft07: "__wiz_schema07",
   validate: "__wiz_validate",
@@ -435,6 +441,7 @@ export function transformSource(options: TransformOptions): TransformResult {
                   [loader]
                 );
               }
+              case "jsonSchema":
               case "schema": {
                 // Check version parameter (type arg or value arg)
                 let isDraft07 = false;
@@ -450,11 +457,35 @@ export function transformSource(options: TransformOptions): TransformResult {
                 }
 
                 if (isDraft07) {
-                  wantExport("schema_draft07");
-                  return context.factory.createIdentifier(`__wiz_schema07_${hash}`);
+                  wantExport("jsonSchema_draft07");
+                  return context.factory.createIdentifier(`__wiz_jsonSchema07_${hash}`);
                 } else {
-                  wantExport("schema_draft2020");
-                  return context.factory.createIdentifier(`__wiz_schema_${hash}`);
+                  wantExport("jsonSchema_draft2020");
+                  return context.factory.createIdentifier(`__wiz_jsonSchema_${hash}`);
+                }
+              }
+              case "jsonSchemas": {
+                let isDraft07 = false;
+                const versionTypeArg = node.typeArguments?.[1];
+                if (versionTypeArg && ts.isLiteralTypeNode(versionTypeArg)) {
+                  if (versionTypeArg.literal.getText() === '"draft-07"' || versionTypeArg.literal.getText() === "'draft-07'") {
+                    isDraft07 = true;
+                  }
+                } else if (node.arguments.length > 0 && ts.isStringLiteral(node.arguments[0]!)) {
+                  if (node.arguments[0]!.text === "draft-07") {
+                    isDraft07 = true;
+                  }
+                }
+
+                const exportName = isDraft07 ? "jsonSchemas_draft07" : "jsonSchemas_draft2020";
+                const key = registerPayload(exportName, {
+                  jsonSchemasTypes: namedTypeArgs(),
+                });
+
+                if (isDraft07) {
+                  return context.factory.createIdentifier(`__wiz_jsonSchemas07_${key}`);
+                } else {
+                  return context.factory.createIdentifier(`__wiz_jsonSchemas_${key}`);
                 }
               }
               case "validate": {

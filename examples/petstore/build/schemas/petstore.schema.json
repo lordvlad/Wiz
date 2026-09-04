@@ -2,7 +2,6 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
     "NewPet": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "description": "The body accepted when creating a pet: the store assigns `id` and `addedAt`.",
       "type": "object",
       "properties": {
@@ -38,8 +37,16 @@
         "priceCents"
       ]
     },
+    "Species": {
+      "description": "What kind of animal.\n\nA union of string literals rather than an `enum`: it is a type, so it costs\nnothing at runtime, and the value on the wire is the word itself in every\nformat - `\"dog\"` in JSON, YAML, XML, CSV and protobuf alike, where a numeric\nenum would be `1` in some and `Dog` in others.",
+      "enum": [
+        "unknown",
+        "dog",
+        "cat",
+        "bird"
+      ]
+    },
     "PetChanged": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "description": "A change event, as published to the `petstore.pets.changed` topic and as\nconsumed back off it.\n\nThe consumer feeds these to `PetStore.applyChange`, so one declaration is the\nproducer's payload, the consumer's parameter and the AsyncAPI message.",
       "type": "object",
       "properties": {
@@ -160,6 +167,132 @@
         "petId",
         "pet",
         "occurredAt"
+      ]
+    },
+    "ChangeKind": {
+      "description": "What changed. The discriminant of {@link PetChanged}.",
+      "enum": [
+        "created",
+        "updated",
+        "sold"
+      ]
+    },
+    "Pet": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "number",
+          "format": "int32",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "name": {
+          "type": "string",
+          "description": "The pet's call name.",
+          "minLength": 1,
+          "maxLength": 80,
+          "examples": [
+            "Ada"
+          ]
+        },
+        "species": {
+          "description": "What kind of animal.\n\nA union of string literals rather than an `enum`: it is a type, so it costs\nnothing at runtime, and the value on the wire is the word itself in every\nformat - `\"dog\"` in JSON, YAML, XML, CSV and protobuf alike, where a numeric\nenum would be `1` in some and `Dog` in others.",
+          "enum": [
+            "unknown",
+            "dog",
+            "cat",
+            "bird"
+          ]
+        },
+        "status": {
+          "description": "Where a pet is in its journey through the store.",
+          "enum": [
+            "sold",
+            "available",
+            "pending"
+          ]
+        },
+        "priceCents": {
+          "type": "string",
+          "format": "int64",
+          "pattern": "^-?\\d+$",
+          "description": "Retail price in minor units, so no float ever touches money."
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16
+        },
+        "owner": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "email": {
+              "type": "string",
+              "format": "email"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "email"
+          ],
+          "description": "Absent while the pet is still available."
+        },
+        "addedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "species",
+        "status",
+        "priceCents",
+        "tags",
+        "addedAt"
+      ]
+    },
+    "PetStatus": {
+      "description": "Where a pet is in its journey through the store.",
+      "enum": [
+        "sold",
+        "available",
+        "pending"
+      ]
+    },
+    "Owner": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "email": {
+          "type": "string",
+          "format": "email"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "email"
       ]
     }
   }

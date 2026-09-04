@@ -15,7 +15,7 @@
 - **[Zod Integration](./zod.md)** — `zodSchema<T>()`, lazy loading, peer dependencies, and type mapping.
 
 ### Schemas & Web APIs
-- **[JSON Schema](./json-schema.md)** — `schema<T>()`, Draft 2020-12 and Draft 07 support, keyword mapping, and draft selection.
+- **[JSON Schema](./json-schema.md)** — `jsonSchema<T>()`, `jsonSchemas<[...T]>()`, Draft 2020-12 and Draft 07 support, keyword mapping, and draft selection.
 - **[OpenAPI](./openapi.md)** — `openapiSchema`, service-interface operation declarations, `openapiDocument()`, and why a router is never part of the document.
 - **[AsyncAPI & Events](./asyncapi.md)** — `asyncapiSchema`, `@producer`/`@consumer` channel declarations, 2.6 and 3.0 support, and model/codec generation.
 - **[OpenRPC](./openrpc.md)** — `openRPCSchema`, method harvesting from signatures and service interfaces, and namespacing.

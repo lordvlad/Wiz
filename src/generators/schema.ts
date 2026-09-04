@@ -1,4 +1,4 @@
-import type { Annotated, Constraint, TypeIR } from "../types.ts";
+import { collectNamedTypes, type Annotated, type Constraint, type TypeIR } from "../types.ts";
 import { INTEGER_FORMATS, SAFE_INTEGER } from "../types.ts";
 import { assertValidSpecDocumentSync } from "../validators/jsonSchema.ts";
 
@@ -235,7 +235,7 @@ export function irToJsonSchema(
     }
 
     case "ref": {
-      schema.$ref = `#/$defs/${ir.targetId}`;
+      schema.$ref = draft === "draft-2020-12" ? `#/$defs/${ir.targetId}` : `#/definitions/${ir.targetId}`;
       break;
     }
   }
@@ -243,21 +243,80 @@ export function irToJsonSchema(
   return schema;
 }
 
+function collectDefsForSchema(
+  ir: TypeIR,
+  draft: "draft-2020-12" | "draft-07"
+): Record<string, unknown> | undefined {
+  const defs: Record<string, unknown> = {};
+  for (const [name, namedIR] of collectNamedTypes(ir)) {
+    if (namedIR.kind === "ref") continue;
+    if (name === ir.name && ir.kind !== "ref") continue;
+    defs[name] = irToJsonSchema(namedIR, draft);
+  }
+  return Object.keys(defs).length > 0 ? defs : undefined;
+}
+
 export function generateSchemaCode(ir: TypeIR): string {
+  const defs2020 = collectDefsForSchema(ir, "draft-2020-12");
   const schema2020 = {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     ...irToJsonSchema(ir, "draft-2020-12"),
+    ...(defs2020 ? { $defs: defs2020 } : {}),
   };
 
+  const defs07 = collectDefsForSchema(ir, "draft-07");
   const schema07 = {
     $schema: "http://json-schema.org/draft-07/schema#",
     ...irToJsonSchema(ir, "draft-07"),
+    ...(defs07 ? { definitions: defs07 } : {}),
   };
   assertValidSpecDocumentSync(schema2020, "JSON Schema Draft 2020-12");
   assertValidSpecDocumentSync(schema07, "JSON Schema Draft 07");
 
   return [
-    `export const schema_draft2020 = ${JSON.stringify(schema2020, null, 2)};`,
-    `export const schema_draft07 = ${JSON.stringify(schema07, null, 2)};`,
+    `export const jsonSchema_draft2020 = ${JSON.stringify(schema2020, null, 2)};`,
+    `export const jsonSchema_draft07 = ${JSON.stringify(schema07, null, 2)};`,
+    `export const schema_draft2020 = jsonSchema_draft2020;`,
+    `export const schema_draft07 = jsonSchema_draft07;`,
+  ].join("\n");
+}
+
+export function generateJsonSchemasCode(
+  types: Array<{ name: string; ir: TypeIR }>
+): string {
+  const allNamedTypes = new Map<string, TypeIR>();
+  for (const { name, ir } of types) {
+    if (name && ir.kind !== "ref") allNamedTypes.set(name, ir);
+    for (const [tName, tIR] of collectNamedTypes(ir)) {
+      if (tIR.kind !== "ref") allNamedTypes.set(tName, tIR);
+    }
+  }
+
+  const defs2020: Record<string, unknown> = {};
+  for (const [name, namedIR] of allNamedTypes) {
+    defs2020[name] = irToJsonSchema(namedIR, "draft-2020-12");
+  }
+
+  const defs07: Record<string, unknown> = {};
+  for (const [name, namedIR] of allNamedTypes) {
+    defs07[name] = irToJsonSchema(namedIR, "draft-07");
+  }
+
+  const schemas2020 = {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    $defs: defs2020,
+  };
+
+  const schemas07 = {
+    $schema: "http://json-schema.org/draft-07/schema#",
+    definitions: defs07,
+  };
+
+  assertValidSpecDocumentSync(schemas2020, "JSON Schema Draft 2020-12");
+  assertValidSpecDocumentSync(schemas07, "JSON Schema Draft 07");
+
+  return [
+    `export const jsonSchemas_draft2020 = ${JSON.stringify(schemas2020, null, 2)};`,
+    `export const jsonSchemas_draft07 = ${JSON.stringify(schemas07, null, 2)};`,
   ].join("\n");
 }

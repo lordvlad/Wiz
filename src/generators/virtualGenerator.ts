@@ -1,6 +1,6 @@
 import type { TypeIR } from "../types.ts";
 import { generateKeysCode } from "./keys.ts";
-import { generateSchemaCode } from "./schema.ts";
+import { generateSchemaCode, generateJsonSchemasCode } from "./schema.ts";
 import { generateValidatorCode } from "./validator.ts";
 import { generateQueryParserCode } from "./query.ts";
 import { generateOpenApiSchemaCode } from "./openapi.ts";
@@ -33,6 +33,7 @@ export interface VirtualModuleOptions {
   avroSchemaTypes?: Array<{ name: string; ir: TypeIR }>;
   arrowSchemaTypes?: Array<{ name: string; ir: TypeIR }>;
   zod?: boolean;
+  jsonSchemasTypes?: Array<{ name: string; ir: TypeIR }>;
   /**
    * Whether to emit the Arrow codec.
    *
@@ -55,7 +56,12 @@ export interface VirtualModuleOptions {
 /** Which exports each generated section provides. */
 const SECTION_EXPORTS = {
   keys: ["keys", "requiredKeys", "optionalKeys", "deepKeys"],
-  schema: ["schema_draft2020", "schema_draft07"],
+  schema: [
+    "jsonSchema_draft2020",
+    "jsonSchema_draft07",
+    "jsonSchemas_draft2020",
+    "jsonSchemas_draft07",
+  ],
   validator: ["validate", "is", "assert"],
   queryParser: ["parseQuery"],
   openapi: ["openapiSchema"],
@@ -89,6 +95,9 @@ export function generateVirtualModuleCode(
 
   if (include("keys")) parts.push(generateKeysCode(ir));
   if (include("schema")) parts.push(generateSchemaCode(ir));
+  if (options?.jsonSchemasTypes?.length && include("schema")) {
+    parts.push(generateJsonSchemasCode(options.jsonSchemasTypes));
+  }
   if (include("validator")) parts.push(generateValidatorCode(ir));
   if (include("queryParser")) parts.push(generateQueryParserCode(ir));
   if (include("protobuf")) parts.push(generateProtobufCode(ir));

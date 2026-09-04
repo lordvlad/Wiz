@@ -14,7 +14,8 @@ import {
   optionalKeysOf,
   PluginInactiveError,
   requiredKeysOf,
-  schema,
+  jsonSchema,
+  jsonSchemas,
   validate,
 } from "../src/index.ts";
 
@@ -37,10 +38,10 @@ describe("wiz plugin inactive stubs", () => {
     expect(() => optionalKeysOf<User>()).toThrow(PluginInactiveError);
   });
 
-  test("schema throws PluginInactiveError when plugin is inactive", () => {
-    expect(() => schema<User>()).toThrow(PluginInactiveError);
+  test("jsonSchema and jsonSchemas throw PluginInactiveError when plugin is inactive", () => {
+    expect(() => jsonSchema<User>()).toThrow(PluginInactiveError);
+    expect(() => jsonSchemas<[User]>()).toThrow(PluginInactiveError);
   });
-
   test("validate throws PluginInactiveError when plugin is inactive", () => {
     expect(() => validate<User>({ id: "1", name: "Alice" })).toThrow(
       PluginInactiveError

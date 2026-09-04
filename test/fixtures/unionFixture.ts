@@ -1,4 +1,4 @@
-import { decodeProto, encodeProto, protobufSchema, schema } from "../../src/index.ts";
+import { decodeProto, encodeProto, jsonSchema, protobufSchema } from "../../src/index.ts";
 import type { Shape } from "./shapeTypes.ts";
 
 export interface Drawing {
@@ -11,7 +11,7 @@ export interface Drawing {
 }
 
 export const drawingProto = protobufSchema<[Drawing]>({ indent: "  " });
-export const drawingJsonSchema = schema<Drawing>();
+export const drawingJsonSchema = jsonSchema<Drawing>();
 
 export function encodeDrawing(value: Drawing, buf: Uint8Array): number {
   return encodeProto<Drawing>(value, buf);

@@ -53,7 +53,7 @@ function payloadKey(options: VirtualModuleOptions): string {
       g: namedTypesKey(options.grpcTypes),
       r: options.arrow ?? false,
       z: options.zod ?? false,
-      // `only` is deliberately absent: it is applied when the module is
+      j: namedTypesKey(options.jsonSchemasTypes),
       // emitted (`generateVirtualModuleCode(..., { only })`), never at
       // registration, so it cannot distinguish two registered modules.
     })

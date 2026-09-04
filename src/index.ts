@@ -71,11 +71,18 @@ export function deepKeysOf<T>(_options?: DeepKeysOptions): string[] {
   throw new PluginInactiveError("deepKeysOf");
 }
 
-export function schema<
+export function jsonSchema<
   T,
   V extends "draft-2020-12" | "draft-07" = "draft-2020-12"
 >(_version?: V): Record<string, unknown> {
-  throw new PluginInactiveError("schema");
+  throw new PluginInactiveError("jsonSchema");
+}
+
+export function jsonSchemas<
+  TTypes extends unknown[] = unknown[],
+  V extends "draft-2020-12" | "draft-07" = "draft-2020-12"
+>(_version?: V): Record<string, unknown> {
+  throw new PluginInactiveError("jsonSchemas");
 }
 
 /**

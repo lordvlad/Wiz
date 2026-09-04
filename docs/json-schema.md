@@ -1,9 +1,9 @@
 # JSON Schema Generation
 
-`wiz` generates standard JSON Schema documents at compile time directly from your TypeScript type definitions using `schema<T>()`.
+`wiz` generates standard JSON Schema documents at compile time directly from your TypeScript type definitions using `jsonSchema<T>()` and `jsonSchemas<[...T]>()`.
 
 ```ts
-import { schema } from "wiz";
+import { jsonSchema, jsonSchemas } from "wiz";
 
 type User = {
   id: string;
@@ -11,22 +11,45 @@ type User = {
   age?: number;
 };
 
-const userSchema = schema<User>();
+type Product = {
+  sku: string;
+  price: number;
+};
+
+// Single schema for one type
+const userSchema = jsonSchema<User>();
+
+// Metaschema document containing multiple types under $defs
+const allSchemas = jsonSchemas<[User, Product]>();
 ```
 
 ## Call Forms
 
-`schema<T>()` supports draft selection via type arguments or optional function arguments:
+### `jsonSchema<T>()`
+
+`jsonSchema<T>()` generates a single JSON Schema object for a type and supports draft selection via type arguments or optional function arguments:
 
 ```ts
 // Draft 2020-12 (default)
-const s1 = schema<User>();
-const s2 = schema<User, "draft-2020-12">();
-const s3 = schema<User>("draft-2020-12");
+const s1 = jsonSchema<User>();
+const s2 = jsonSchema<User, "draft-2020-12">();
+const s3 = jsonSchema<User>("draft-2020-12");
 
 // Draft 07
-const s4 = schema<User, "draft-07">();
-const s5 = schema<User>("draft-07");
+const s4 = jsonSchema<User, "draft-07">();
+const s5 = jsonSchema<User>("draft-07");
+```
+
+### `jsonSchemas<[...T]>()`
+
+`jsonSchemas<[...T]>()` generates a meta-schema document containing all named types under `$defs` (for Draft 2020-12) or `definitions` (for Draft 07):
+
+```ts
+// Draft 2020-12 (default: returns {$schema: "https://json-schema.org/draft/2020-12/schema", $defs: { User: {...}, Product: {...} }})
+const doc1 = jsonSchemas<[User, Product]>();
+
+// Draft 07 (returns {$schema: "http://json-schema.org/draft-07/schema#", definitions: { User: {...}, Product: {...} }})
+const doc2 = jsonSchemas<[User, Product]>("draft-07");
 ```
 
 The plugin inspects call arguments and emits static JSON Schema objects inline in the transpiled output.

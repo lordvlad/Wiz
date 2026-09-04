@@ -114,7 +114,7 @@ describe("virtual module identity", () => {
       export interface Doc {
         id: string;
       }
-      export const s = schema<Doc>();
+      export const s = jsonSchema<Doc>();
     `;
 
     const first = transform(source("first revision"));

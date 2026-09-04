@@ -1,9 +1,9 @@
-import { is, keysOf, schema, validate } from "../../src/index.ts";
+import { is, jsonSchema, keysOf, validate } from "../../src/index.ts";
 
 export type User = { id: string; name: string };
 
 export const userKeys = keysOf<User>();
-export const userSchema = schema<User>();
+export const userSchema = jsonSchema<User>();
 export const goodUser = is<User>({ id: "1", name: "Ada" });
 export const badUser = is<User>({ id: 1 });
 export const errors = validate<User>({ id: 1 });

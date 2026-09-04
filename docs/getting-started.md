@@ -211,12 +211,12 @@ Two files. The first uses wiz and knows nothing about plugins:
 
 ```ts
 // user.ts
-import { is, keysOf, schema, validate } from "wiz";
+import { is, jsonSchema, keysOf, validate } from "wiz";
 
 export type User = { id: string; name: string };
 
 export const userKeys = keysOf<User>();
-export const userSchema = schema<User>();
+export const userSchema = jsonSchema<User>();
 export const good = is<User>({ id: "1", name: "Ada" });
 export const bad = is<User>({ id: 1 });
 export const errors = validate<User>({ id: 1 });
@@ -245,7 +245,7 @@ bun main.ts
 ["id", "name"]
 ```
 
-`schema<User>()` is a draft-2020-12 document — pass `"draft-07"` for the older
+`jsonSchema<User>()` is a draft-2020-12 document — pass `"draft-07"` for the older
 dialect:
 
 ```json
@@ -348,7 +348,7 @@ pure cost:
 - [type-introspection](./type-introspection.md) — `keysOf`,
   `requiredKeysOf`, `optionalKeysOf`, `is`, `validate`, and what the
   extractor can and cannot see.
-- [json-schema](./json-schema.md) — `schema<T>()`, the two dialects, and how
+- [json-schema](./json-schema.md) — `jsonSchema<T>()`, `jsonSchemas<[...T]>()`, the two dialects, and how
   the validator and the schema stay in agreement.
 - [annotations](./annotations.md) — the JSDoc tags: constraints the validator
   enforces, annotations that only describe, and `@format`, which picks the

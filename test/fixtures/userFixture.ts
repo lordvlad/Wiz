@@ -7,7 +7,7 @@ import {
   optionalKeysOf,
   protobufSchema,
   requiredKeysOf,
-  schema,
+  jsonSchema,
   validate,
   type ValidationError,
 } from "../../src/index.ts";
@@ -45,7 +45,7 @@ export interface ProtoUser {
 export const userKeys = keysOf<User>();
 export const userReqKeys = requiredKeysOf<User>();
 export const userOptKeys = optionalKeysOf<User>();
-export const userSchema = schema<User>();
+export const userSchema = jsonSchema<User>();
 export const apiOpenApiSchema = openapiSchema<[User, Book], "3.0">({
   info: {
     title: "Library API",
