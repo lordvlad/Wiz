@@ -180,7 +180,10 @@ describe("AsyncAPI Spec Generator", () => {
       import { asyncapiSchema } from "wiz";
       export interface UserEvent { id: string }
       export interface EventService {
-        /** @channel users/signup */
+        /**
+         * @producer
+         * @channel users/signup
+         */
         signup(event: UserEvent): void;
       }
       export const doc = asyncapiSchema<[EventService]>();
@@ -188,6 +191,19 @@ describe("AsyncAPI Spec Generator", () => {
 
     const result = transformSource({ path: "app.ts", contents: source, logger: silentLogger });
     expect(result.code).toContain("asyncapiSchema as __wiz_asyncapiSchema_");
+
+    const module = [...result.modules.values()].find((m) =>
+      m.files["index.js"]?.includes("export function asyncapiSchema")
+    )!;
+    const doc = evalModule<{ asyncapiSchema(): any }>(
+      module.files["index.js"]!
+    ).asyncapiSchema();
+
+    expect(Object.values(doc.channels).map((c: any) => c.address)).toEqual([
+      "users/signup",
+    ]);
+    expect(Object.keys(doc.operations)).toEqual(["signup"]);
+    expect(doc.operations.signup.action).toBe("send");
   });
 
   test("a producer is a listener registration, and its payload the event", () => {

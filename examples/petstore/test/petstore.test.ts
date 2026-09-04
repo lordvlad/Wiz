@@ -204,6 +204,12 @@ describe("Petstore Full Stack & Protocol Suite", () => {
     expect(asyncapiRes.status).toBe(200);
     const asyncapiDoc = (await asyncapiRes.json()) as any;
     expect(asyncapiDoc.asyncapi).toBe("3.0.0");
+    // The document is harvested from `PetStore`, whose other members carry no
+    // direction tag: exactly the two event methods are channel operations.
+    expect(Object.keys(asyncapiDoc.operations).sort()).toEqual([
+      "applyChange",
+      "onChange",
+    ]);
 
     // 3. OpenRPC
     const openrpcRes = await fetch(`${baseUrl}/schemas/openrpc.json`);

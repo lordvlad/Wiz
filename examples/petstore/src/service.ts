@@ -1,9 +1,12 @@
 /**
  * The one implementation every document in this example is derived from.
  *
- * The contracts are declared here, next to the class that satisfies them, and
- * `PetStore implements PetApi, PetEvents` is what keeps them honest: a
+ * The request-response contract is declared here, next to the class that
+ * satisfies it, and `PetStore implements PetApi` is what keeps them honest: a
  * signature that drifts from the service is a type error, not a stale document.
+ * The event contract needs no second interface: `onChange` and `applyChange`
+ * carry their own `@producer`/`@consumer` tags, and a member without such a tag
+ * documents nothing.
  * REST, OpenRPC-over-WebSocket and the Kafka consumer all call these methods,
  * and the service itself knows nothing about HTTP, JSON-RPC, media types or
  * topics — which is what makes "three protocols, one behaviour" true rather
@@ -27,9 +30,10 @@ import type {
  * different things and neither needs a wrapper type: `@get`/`@post` supply the
  * verb and path template OpenAPI cannot infer, a parameter named in the path
  * template becomes a path parameter, one named `query` becomes query
- * parameters and one named `body` becomes the request body. OpenRPC asks for
- * none of that — a method is a name and its params — so the same declarations
- * become `Pets.list`, `Pets.get` and the rest.
+ * parameters and one named `body` becomes the request body. `@rpc` says the
+ * same method is dispatchable over JSON-RPC, where a method is a name and its
+ * params and nothing else is needed, giving `Pets.list`, `Pets.get` and the
+ * rest.
  *
  * @service Pets
  */
@@ -42,6 +46,7 @@ export interface PetApi {
    * one 200 with four `content` entries.
    *
    * @get /pets
+   * @rpc
    * @summary List pets
    * @response 200 application/json Pet[]
    * @response 200 application/yaml Pet[]
@@ -57,6 +62,7 @@ export interface PetApi {
    * from the same `@fieldNumber` declarations as `build/schemas/petstore.proto`.
    *
    * @get /pets/{id}
+   * @rpc
    * @summary Fetch a pet
    * @response 200 application/json Pet
    * @response 200 application/x-protobuf Pet
@@ -68,6 +74,7 @@ export interface PetApi {
    * Adds a pet to the store and publishes a change event.
    *
    * @post /pets
+   * @rpc
    * @summary Add a pet
    * @response 201 application/json Pet
    * @response 422 application/json Problem
@@ -78,6 +85,7 @@ export interface PetApi {
    * Sells a pet to an owner and publishes a change event.
    *
    * @post /pets/{id}/sale
+   * @rpc
    * @summary Sell a pet
    * @response 200 application/json Pet
    * @response 404 application/json Problem
@@ -89,41 +97,12 @@ export interface PetApi {
    * Removes a pet. No body, so no content.
    *
    * @delete /pets/{id}
+   * @rpc
    * @summary Remove a pet
    * @response 204
    * @response 404 application/json Problem
    */
   remove(id: number): Promise<void>;
-}
-
-/**
- * The event contract, implemented by the same class.
- *
- * An application produces events by handing them to a listener, so that is how
- * a producer is spelled: the channel's payload is what the listener receives,
- * and `onChange` is the registration the Kafka producer uses for real. The
- * consumer is the other direction and takes the payload straight.
- *
- * @service PetEvents
- */
-export interface PetEvents {
-  /**
-   * A pet was created, updated or sold.
-   *
-   * @producer
-   * @channel petstore.pets.changed
-   * @summary Pet changed
-   */
-  onChange(listener: ChangeListener): void;
-
-  /**
-   * Applied by the consumer to bring a projection back in step.
-   *
-   * @consumer
-   * @channel petstore.pets.changed
-   * @summary Pet changed, consumed
-   */
-  applyChange(event: PetChanged): { applied: boolean };
 }
 
 /** Thrown when a caller asks for a pet that is not there. */
@@ -154,12 +133,30 @@ export function problemOf(error: NotFoundError | InvalidError): Problem {
   return { status: error.status, detail: error.message };
 }
 
-export class PetStore implements PetApi, PetEvents {
+/**
+ * The store itself: one behaviour, five documents.
+ *
+ * `implements PetApi` ties every request-response operation to its declared
+ * contract. The two event members carry the AsyncAPI tags directly, so this
+ * class is what `asyncapiSchema` harvests: an untagged member such as `seed`
+ * or `list` is not a channel operation.
+ *
+ * @service Pets
+ */
+export class PetStore implements PetApi {
   #pets = new Map<number, Pet>();
   #nextId = 1;
   #listeners: ChangeListener[] = [];
 
-  /** Registers a sink for change events; the Kafka producer is one of these. */
+  /**
+   * A pet was created, updated or sold.
+   *
+   * Registers a sink for change events; the Kafka producer is one of these.
+   *
+   * @producer
+   * @channel petstore.pets.changed
+   * @summary Pet changed
+   */
   onChange(listener: ChangeListener): void {
     this.#listeners.push(listener);
   }
@@ -230,15 +227,20 @@ export class PetStore implements PetApi, PetEvents {
     this.#pets.delete(id);
   }
 
+  /** Every event id already applied, because a topic redelivers. */
+  #applied = new Set<string>();
+
   /**
-   * Where consumed change events land.
+   * Applied by the consumer to bring a projection back in step.
    *
    * Idempotent by `eventId`, because a topic redelivers. This is the method the
    * Kafka consumer forwards to, so the event round-trips: service → topic →
    * consumer → service.
+   *
+   * @consumer
+   * @channel petstore.pets.changed
+   * @summary Pet changed, consumed
    */
-  #applied = new Set<string>();
-
   applyChange(event: PetChanged): { applied: boolean } {
     if (this.#applied.has(event.eventId)) return { applied: false };
     this.#applied.add(event.eventId);

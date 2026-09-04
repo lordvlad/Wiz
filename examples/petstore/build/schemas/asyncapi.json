@@ -6,9 +6,9 @@
     "description": "Change events published to petstore.pets.changed, and consumed back off it by the projection."
   },
   "channels": {
-    "PetEvents.petstore.pets.changed": {
+    "Pets.petstore.pets.changed": {
       "address": "petstore.pets.changed",
-      "x-service": "PetEvents",
+      "x-service": "Pets",
       "messages": {
         "PetChanged": {
           "$ref": "#/components/messages/PetChanged"
@@ -20,20 +20,20 @@
     "onChange": {
       "action": "send",
       "channel": {
-        "$ref": "#/channels/PetEvents.petstore.pets.changed"
+        "$ref": "#/channels/Pets.petstore.pets.changed"
       },
       "summary": "Pet changed",
-      "description": "A pet was created, updated or sold.",
-      "x-service": "PetEvents"
+      "description": "A pet was created, updated or sold.\n\nRegisters a sink for change events; the Kafka producer is one of these.",
+      "x-service": "Pets"
     },
     "applyChange": {
       "action": "receive",
       "channel": {
-        "$ref": "#/channels/PetEvents.petstore.pets.changed"
+        "$ref": "#/channels/Pets.petstore.pets.changed"
       },
       "summary": "Pet changed, consumed",
-      "description": "Applied by the consumer to bring a projection back in step.",
-      "x-service": "PetEvents"
+      "description": "Applied by the consumer to bring a projection back in step.\n\nIdempotent by `eventId`, because a topic redelivers. This is the method the\nKafka consumer forwards to, so the event round-trips: service → topic →\nconsumer → service.",
+      "x-service": "Pets"
     }
   },
   "components": {

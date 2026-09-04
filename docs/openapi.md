@@ -93,6 +93,8 @@ export interface UserService {
 - `@get`, `@post`, `@put`, `@patch`, `@delete`, `@head`, `@options`, `@trace`:
   the HTTP verb and, after it, the path template (`@get /users/{id}`).
 - `@http GET /users/{id}`: the same thing spelled as one tag.
+- `@method GET` with `@path /users/{id}`: the verb and the path as separate
+  tags. A bare verb tag pairs with `@path` too (`@get` plus `@path /users`).
 - `@response STATUS [MEDIATYPE] [TYPE] [DESCRIPTION]`: one response.
   `@response 200 User`, `@response 200 application/pdf Blob`,
   `@response 404 Problem Not found`, `@response default Anything else`.
@@ -103,6 +105,13 @@ export interface UserService {
   to every method; on a method it wins for that method.
 - `@summary`, and the doc comment's prose as `description`; `@deprecated` marks
   the operation deprecated.
+
+An operation needs both a verb and a path, and neither is guessed: a member
+with no HTTP tag contributes nothing, so a class that also speaks AsyncAPI,
+JSON-RPC or nothing at all can be handed to `openapiSchema` directly. A type
+argument whose members yield no operation is reported as a warning naming the
+type. A `@method` value that is not one of the eight verbs is ignored, as if
+absent.
 
 ### Parameter slots
 

@@ -80,10 +80,16 @@ spellings the method uses: the parameter of a listener the method registers
 (`logout(event: E)`). `Promise` is unwrapped first, so a method that resolves
 to a stream reads the same as one that returns it.
 
+A channel operation needs an explicit direction, and it is never guessed: a
+member carrying neither `@producer`, `@consumer` nor a usable `@action` is not
+an operation, so a class whose other members serve HTTP or nothing at all can
+be handed to `asyncapiSchema` directly. A type argument whose members yield no
+operation is reported as a warning naming the type.
+
 A type passed to `asyncapiSchema` that has no callable members is a plain
 message type: it contributes a component schema and a message, and no channel.
-A service interface contributes channels and operations only — it is not itself
-a message.
+A service type contributes channels and operations only — it is not itself a
+message.
 
 ## 2. Client Generator (`asyncapiClient` / `tsClient`)
 

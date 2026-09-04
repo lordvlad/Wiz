@@ -573,6 +573,11 @@ function resolveTypeByName(
   return res;
 }
 
+/** The one message both `openapiSchema` harvest branches report. */
+function noHttpTagMessage(name: string): string {
+  return `no HTTP tag found on '${name}' for openapiSchema; an operation needs @get/@post/... with a path, @http VERB /path, or @method with @path`;
+}
+
 export function harvestOpenApiOperationsFromTypeArgs(
   typeArgs: readonly ts.Type[],
   checker: ts.TypeChecker,
@@ -589,6 +594,9 @@ export function harvestOpenApiOperationsFromTypeArgs(
       const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
       const method = parseOpenApiMethodFromSignature(sig, sym, jsDoc, checker, undefined, undefined, undefined, sourceFile);
       if (method) methods.push(method);
+      else if (logger) {
+        warnUndocumentable(logger, noHttpTagMessage(sym?.name ?? "signature"), node, sourceFile);
+      }
     } else {
       const objectMethods = extractMethodsFromObjectType(elemType, checker);
       const sym = elemType.aliasSymbol ?? elemType.symbol;
@@ -614,12 +622,19 @@ export function harvestOpenApiOperationsFromTypeArgs(
         continue;
       }
 
+      let documented = 0;
       for (const m of objectMethods) {
         const sig = m.signatures[0]!;
         const mSym = m.symbol;
         const jsDoc = extractJSDocInfo(mSym, checker);
         const method = parseOpenApiMethodFromSignature(sig, mSym, jsDoc, checker, pkg, svc, m.name, sourceFile);
-        if (method) methods.push(method);
+        if (method) {
+          methods.push(method);
+          documented++;
+        }
+      }
+      if (documented === 0 && logger) {
+        warnUndocumentable(logger, noHttpTagMessage(typeName), node, sourceFile);
       }
     }
   }
@@ -636,16 +651,13 @@ function parseOpenApiMethodFromSignature(
   defaultSvc: string | undefined,
   methodNameOverride?: string,
   sourceFile?: ts.SourceFile
-): HttpServiceMethodIR {
+): HttpServiceMethodIR | undefined {
   const rawName = jsDoc?.meta?.["name"]?.[0] ?? jsDoc?.meta?.["Name"]?.[0];
   const name = typeof rawName === "string" && rawName ? rawName : (methodNameOverride ?? sym?.name ?? "method");
   const pkgMeta = jsDoc?.meta?.["package"]?.[0] ?? jsDoc?.meta?.["Package"]?.[0];
   const svcMeta = jsDoc?.meta?.["service"]?.[0] ?? jsDoc?.meta?.["Service"]?.[0];
   const pkg = typeof pkgMeta === "string" ? pkgMeta : defaultPkg;
   const svc = typeof svcMeta === "string" ? svcMeta : defaultSvc;
-
-  let httpVerb: HttpMethodName = "GET";
-  let openApiPath = "/" + (name !== "method" ? toSnakeCase(name) : "");
 
   const verbTags: Array<[string, HttpMethodName]> = [
     ["get", "GET"],
@@ -658,39 +670,53 @@ function parseOpenApiMethodFromSignature(
     ["trace", "TRACE"],
   ];
 
-  let foundVerb = false;
-  if (jsDoc?.meta) {
+  // An operation is what the documentation says it is. Nothing is guessed from
+  // the member's name: a service type is free to carry members that speak
+  // another protocol, or none at all.
+  let httpVerb: HttpMethodName | undefined;
+  let rawPath: string | undefined;
+  const meta = jsDoc?.meta;
+  if (meta) {
     for (const [tag, verb] of verbTags) {
-      const val = jsDoc.meta[tag] ?? jsDoc.meta[tag.toUpperCase()];
+      const val = meta[tag] ?? meta[tag.toUpperCase()];
       if (val) {
         httpVerb = verb;
-        foundVerb = true;
-        if (typeof val[0] === "string" && val[0].length > 0) {
-          openApiPath = toOpenApiPath(val[0]);
-        }
+        // A bare `@get` stores `true`; only a string is a path.
+        if (typeof val[0] === "string" && val[0].length > 0) rawPath = val[0];
         break;
       }
     }
-    if (!foundVerb) {
-      const httpTag = jsDoc.meta["http"] ?? jsDoc.meta["HTTP"];
-      if (httpTag && typeof httpTag[0] === "string") {
-        const parts = httpTag[0].split(/\s+/);
-        if (parts[0] && HTTP_METHODS.has(parts[0].toLowerCase())) {
-          httpVerb = parts[0].toUpperCase() as HttpMethodName;
-          foundVerb = true;
-          if (parts[1]) openApiPath = toOpenApiPath(parts[1]);
-        }
+
+    const httpTag = meta["http"] ?? meta["HTTP"];
+    if (httpTag && typeof httpTag[0] === "string") {
+      const parts = httpTag[0].trim().split(/\s+/);
+      const verbWord = parts[0];
+      if (!httpVerb && verbWord && HTTP_METHODS.has(verbWord.toLowerCase())) {
+        httpVerb = verbWord.toUpperCase() as HttpMethodName;
       }
+      if (!rawPath && parts[1]) rawPath = parts[1];
+    }
+
+    if (!httpVerb) {
+      const methodTag = meta["method"] ?? meta["Method"];
+      const methodWord = methodTag?.[0];
+      // An unrecognised `@method` value is absent, not an error: the tag is
+      // generic enough that other tooling may already be using it.
+      if (typeof methodWord === "string" && HTTP_METHODS.has(methodWord.trim().toLowerCase())) {
+        httpVerb = methodWord.trim().toUpperCase() as HttpMethodName;
+      }
+    }
+
+    if (!rawPath) {
+      const pathTag = meta["path"] ?? meta["Path"];
+      if (typeof pathTag?.[0] === "string" && pathTag[0].length > 0) rawPath = pathTag[0];
     }
   }
 
-  if (!foundVerb && name) {
-    const lowerName = name.toLowerCase();
-    if (lowerName.startsWith("create") || lowerName.startsWith("post") || lowerName.startsWith("add")) httpVerb = "POST";
-    else if (lowerName.startsWith("update") || lowerName.startsWith("put")) httpVerb = "PUT";
-    else if (lowerName.startsWith("delete") || lowerName.startsWith("remove")) httpVerb = "DELETE";
-    else if (lowerName.startsWith("patch")) httpVerb = "PATCH";
-  }
+  if (!httpVerb || !rawPath) return undefined;
+
+  const normalized = toOpenApiPath(rawPath);
+  const openApiPath = normalized.startsWith("/") ? normalized : `/${normalized}`;
 
   const jsDocSummary = jsDoc?.meta?.["summary"]?.[0] ?? jsDoc?.meta?.["Summary"]?.[0];
   const summary = typeof jsDocSummary === "string" ? jsDocSummary : undefined;
@@ -894,6 +920,11 @@ function parseOpenApiMethodFromSignature(
   };
 }
 
+/** The one message both `asyncapiSchema` harvest branches report. */
+function noDirectionTagMessage(name: string): string {
+  return `no direction tag found on '${name}' for asyncapiSchema; a channel operation needs @producer or @consumer`;
+}
+
 export function harvestAsyncApiOperationsFromTypeArgs(
   typeArgs: readonly ts.Type[],
   checker: ts.TypeChecker,
@@ -910,6 +941,9 @@ export function harvestAsyncApiOperationsFromTypeArgs(
       const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
       const method = parseAsyncApiMethodFromSignature(sig, sym, jsDoc, checker, undefined, undefined);
       if (method) methods.push(method);
+      else if (logger) {
+        warnUndocumentable(logger, noDirectionTagMessage(sym?.name ?? "signature"), node, sourceFile);
+      }
     } else {
       const objectMethods = extractMethodsFromObjectType(elemType, checker);
       const sym = elemType.aliasSymbol ?? elemType.symbol;
@@ -934,12 +968,19 @@ export function harvestAsyncApiOperationsFromTypeArgs(
         continue;
       }
 
+      let documented = 0;
       for (const m of objectMethods) {
         const sig = m.signatures[0]!;
         const mSym = m.symbol;
         const jsDoc = extractJSDocInfo(mSym, checker);
         const method = parseAsyncApiMethodFromSignature(sig, mSym, jsDoc, checker, pkg, svc, m.name);
-        if (method) methods.push(method);
+        if (method) {
+          methods.push(method);
+          documented++;
+        }
+      }
+      if (documented === 0 && logger) {
+        warnUndocumentable(logger, noDirectionTagMessage(typeName), node, sourceFile);
       }
     }
   }
@@ -954,7 +995,7 @@ function parseAsyncApiMethodFromSignature(
   defaultPkg: string | undefined,
   defaultSvc: string | undefined,
   methodNameOverride?: string
-): AsyncApiServiceMethodIR {
+): AsyncApiServiceMethodIR | undefined {
   const rawName = jsDoc?.meta?.["name"]?.[0] ?? jsDoc?.meta?.["Name"]?.[0];
   const name = typeof rawName === "string" && rawName ? rawName : (methodNameOverride ?? sym?.name ?? "channel");
   const pkgMeta = jsDoc?.meta?.["package"]?.[0] ?? jsDoc?.meta?.["Package"]?.[0];
@@ -964,16 +1005,19 @@ function parseAsyncApiMethodFromSignature(
   const channelTag = jsDoc?.meta?.["channel"]?.[0] ?? jsDoc?.meta?.["Channel"]?.[0];
   const channel = typeof channelTag === "string" ? channelTag : name;
 
-  let action = "send";
+  // A channel operation says which way it runs, or it is not one. Defaulting to
+  // `send` would turn every ordinary method of a service into a channel.
+  let action: string | undefined;
   if (jsDoc?.meta?.["consumer"] || jsDoc?.meta?.["subscribe"] || jsDoc?.meta?.["receive"]) {
     action = "receive";
   } else if (jsDoc?.meta?.["producer"] || jsDoc?.meta?.["publish"] || jsDoc?.meta?.["send"]) {
     action = "send";
   } else if (jsDoc?.meta?.["action"]) {
-    const actTag = String(jsDoc.meta["action"][0]);
+    const actTag = String(jsDoc.meta["action"][0]).trim();
     if (actTag === "subscribe" || actTag === "receive") action = "receive";
-    else action = "send";
+    else if (actTag === "publish" || actTag === "send") action = "send";
   }
+  if (!action) return undefined;
 
   const jsDocSummary = jsDoc?.meta?.["summary"]?.[0] ?? jsDoc?.meta?.["Summary"]?.[0];
   const summary = typeof jsDocSummary === "string" ? jsDocSummary : undefined;
@@ -1025,6 +1069,11 @@ function parseAsyncApiMethodFromSignature(
   };
 }
 
+/** The one message both `openRPCSchema` harvest branches report. */
+function noRpcTagMessage(name: string): string {
+  return `no @rpc tag found on '${name}' for openRPCSchema; a JSON-RPC method needs @rpc, optionally carrying the method name`;
+}
+
 export function harvestOpenRpcOperationsFromTypeArgs(
   typeArgs: readonly ts.Type[],
   checker: ts.TypeChecker,
@@ -1043,9 +1092,18 @@ export function harvestOpenRpcOperationsFromTypeArgs(
         elemType.symbol ??
         (sig.declaration as any)?.symbol;
       const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
+      const rpcTag = jsDoc?.meta?.["rpc"] ?? jsDoc?.meta?.["RPC"];
+      if (!rpcTag) {
+        if (logger) {
+          warnUndocumentable(logger, noRpcTagMessage(sym?.name ?? "signature"), node, sourceFile);
+        }
+        continue;
+      }
+      const taggedName = typeof rpcTag[0] === "string" && rpcTag[0] ? rpcTag[0] : undefined;
       const rawName = jsDoc?.meta?.["name"]?.[0] ?? jsDoc?.meta?.["Name"]?.[0];
       const name =
         (typeof rawName === "string" && rawName ? rawName : undefined) ??
+        taggedName ??
         (sym && !sym.name.startsWith("__") ? sym.name : undefined) ??
         "method";
 
@@ -1133,13 +1191,26 @@ export function harvestOpenRpcOperationsFromTypeArgs(
         continue;
       }
 
+      let documented = 0;
       for (const m of objectMethods) {
         const sig = m.signatures[0]!;
         const mSym = m.symbol;
         const jsDoc = extractJSDocInfo(mSym, checker);
+        // A member is a JSON-RPC method because it says so. Everything else on
+        // the type - HTTP operations, event registrations, plain helpers - is
+        // not one.
+        const rpcTag = jsDoc.meta?.["rpc"] ?? jsDoc.meta?.["RPC"];
+        if (!rpcTag) continue;
+        documented++;
+
         const rawName = jsDoc.meta?.["name"]?.[0] ?? jsDoc.meta?.["Name"]?.[0];
-        const hasOverride = typeof rawName === "string" && rawName.length > 0;
-        const methodName = hasOverride ? rawName : m.name;
+        const taggedName = typeof rpcTag[0] === "string" && rpcTag[0] ? rpcTag[0] : undefined;
+        // An explicitly written method name is the whole name, so it is not
+        // namespaced again.
+        const explicitName =
+          (typeof rawName === "string" && rawName ? rawName : undefined) ?? taggedName;
+        const hasOverride = explicitName !== undefined;
+        const methodName = explicitName ?? m.name;
 
         const jsDocSummary = jsDoc.meta?.["summary"]?.[0] ?? jsDoc.meta?.["Summary"]?.[0];
         const summary = typeof jsDocSummary === "string" ? jsDocSummary : undefined;
@@ -1197,6 +1268,9 @@ export function harvestOpenRpcOperationsFromTypeArgs(
           ],
         };
         methods.push(methodIR);
+      }
+      if (documented === 0 && logger) {
+        warnUndocumentable(logger, noRpcTagMessage(typeName), node, sourceFile);
       }
     }
   }
@@ -1478,6 +1552,11 @@ function unwrapPromiseType(type: ts.Type): ts.Type {
   return type;
 }
 
+/** The one message both `grpcSchema` harvest branches report. */
+function noGrpcTagMessage(name: string): string {
+  return `no @grpc tag found on '${name}' for grpcSchema; an rpc needs @grpc, optionally carrying the rpc name`;
+}
+
 export function harvestGrpcOperationsFromTypeArgs(
   typeArgs: readonly ts.Type[],
   checker: ts.TypeChecker,
@@ -1496,9 +1575,19 @@ export function harvestGrpcOperationsFromTypeArgs(
         elemType.symbol ??
         (sig.declaration as any)?.symbol;
       const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
+      const grpcTag =
+        jsDoc?.meta?.["grpc"] ?? jsDoc?.meta?.["gRPC"] ?? jsDoc?.meta?.["GRPC"];
+      if (!grpcTag) {
+        if (logger) {
+          warnUndocumentable(logger, noGrpcTagMessage(sym?.name ?? "signature"), node, sourceFile);
+        }
+        continue;
+      }
+      const taggedName = typeof grpcTag[0] === "string" && grpcTag[0] ? grpcTag[0] : undefined;
       const rawName = jsDoc?.meta?.["name"]?.[0] ?? jsDoc?.meta?.["Name"]?.[0];
       const name =
         (typeof rawName === "string" && rawName ? rawName : undefined) ??
+        taggedName ??
         (sym && !sym.name.startsWith("__") ? sym.name : undefined) ??
         "method";
 
@@ -1580,13 +1669,24 @@ export function harvestGrpcOperationsFromTypeArgs(
         continue;
       }
 
+      let documented = 0;
       for (const m of objectMethods) {
         const sig = m.signatures[0]!;
         const mSym = m.symbol;
         const jsDoc = extractJSDocInfo(mSym, checker);
+        // A member is an rpc because it says so; the rest of the type is not
+        // part of the service block.
+        const grpcTag =
+          jsDoc.meta?.["grpc"] ?? jsDoc.meta?.["gRPC"] ?? jsDoc.meta?.["GRPC"];
+        if (!grpcTag) continue;
+        documented++;
+
         const rawName = jsDoc.meta?.["name"]?.[0] ?? jsDoc.meta?.["Name"]?.[0];
-        const hasOverride = typeof rawName === "string" && rawName.length > 0;
-        const methodName = hasOverride ? rawName : m.name;
+        const taggedName = typeof grpcTag[0] === "string" && grpcTag[0] ? grpcTag[0] : undefined;
+        const methodName =
+          (typeof rawName === "string" && rawName ? rawName : undefined) ??
+          taggedName ??
+          m.name;
 
         const mPkgMeta = jsDoc.meta?.["package"]?.[0] ?? jsDoc.meta?.["Package"]?.[0];
         const mSvcMeta = jsDoc.meta?.["service"]?.[0] ?? jsDoc.meta?.["Service"]?.[0];
@@ -1643,6 +1743,9 @@ export function harvestGrpcOperationsFromTypeArgs(
           ],
         };
         methods.push(methodIR);
+      }
+      if (documented === 0 && logger) {
+        warnUndocumentable(logger, noGrpcTagMessage(typeName), node, sourceFile);
       }
     }
   }

@@ -109,6 +109,7 @@ describe("OpenRPC Extractor & Generator", () => {
 
       /**
        * Get user by ID
+       * @rpc
        * @name get_user_op
        */
       function getUser(id: string): Promise<{ id: string; name: string }> {
@@ -139,8 +140,12 @@ describe("OpenRPC Extractor & Generator", () => {
       import { openRPCSchema } from "./src/index.ts";
 
       interface UserService {
+        /** @rpc */
         getUser(id: string): Promise<{ id: string }>;
-        /** @name search_users_override */
+        /**
+         * @rpc
+         * @name search_users_override
+         */
         searchUsers(query: string): Promise<Array<{ id: string }>>;
       }
 

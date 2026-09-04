@@ -45,10 +45,16 @@ const GREETER = `
    * @service Greeter
    */
   interface GreeterService {
-    /** Greets one caller. */
+    /**
+     * Greets one caller.
+     * @grpc
+     */
     sayHello(request: HelloRequest): Promise<HelloReply>;
+    /** @grpc */
     sayHelloStream(request: HelloRequest): AsyncIterable<HelloReply>;
+    /** @grpc */
     recordHellos(requests: AsyncIterable<HelloRequest>): Promise<HelloReply>;
+    /** @grpc */
     chat(requests: AsyncIterable<HelloRequest>): AsyncGenerator<HelloReply>;
   }
 
@@ -118,6 +124,7 @@ describe("grpcSchema harvesting", () => {
 
       interface HealthApi {
         /**
+         * @grpc
          * @name Check
          * @service Health
          */
@@ -139,6 +146,7 @@ describe("grpcSchema harvesting", () => {
       interface Empty {}
 
       /**
+       * @grpc
        * @package ops
        * @service Admin
        * @name Restart
@@ -158,6 +166,7 @@ describe("grpcSchema harvesting", () => {
       import { grpcSchema } from "./src/index.ts";
 
       interface Pinger {
+        /** @grpc */
         ping(): Promise<{
           /** @fieldNumber 1 */
           up: boolean;

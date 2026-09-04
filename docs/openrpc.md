@@ -10,13 +10,20 @@ The `openRPCSchema<[...]>()` macro harvests methods, parameter shapes, and retur
 import { openRPCSchema } from "wiz";
 
 // 1. Function signature type
+/** @rpc */
 type GetUser = (id: string) => Promise<User>;
 
 // 2. Service object type
 interface UserService {
-  /** @name user_search */
+  /**
+   * @rpc
+   * @name user_search
+   */
   searchUsers(query: string): Promise<User[]>;
+  /** @rpc */
   getUser(id: string): Promise<User>;
+  /** Not a JSON-RPC method: no `@rpc`. */
+  reindex(): Promise<void>;
 }
 
 export const schema = openRPCSchema<[GetUser, UserService]>();
@@ -24,9 +31,10 @@ export const schema = openRPCSchema<[GetUser, UserService]>();
 
 ### Harvester Behavior
 
-- **Function Types**: Extracted as single OpenRPC methods. Method names default to the type/symbol name (or JSDoc `@name` override).
-- **Service Object Types**: All callable property methods are extracted. Method names are namespaced as `${ServiceName}.${methodName}` (e.g. `UserService.getUser`). A JSDoc `@name` tag on a member overrides the namespaced name.
-- **0-Method Warning**: If an object type with 0 methods is passed to `openRPCSchema`, a compiler warning (`no methods found on object type '<TypeName>' for openRPCSchema`) is logged.
+- **`@rpc` is required**: a member is a JSON-RPC method because it carries `@rpc`, and nothing else on the type is one. That is what lets an implementation class that also serves HTTP, events or nothing at all be handed to `openRPCSchema` directly. `@rpc <name>` writes the method name (an explicit name is the whole name, so it is not namespaced); a bare `@rpc` keeps the namespace.
+- **Function Types**: Extracted as single OpenRPC methods. Method names default to the type/symbol name (or a JSDoc `@name`/`@rpc` override).
+- **Service Object Types**: Every `@rpc` member is extracted. Method names are namespaced as `${ServiceName}.${methodName}` (e.g. `UserService.getUser`). A JSDoc `@name` tag on a member overrides the namespaced name.
+- **Nothing-to-describe warnings**: an object type with 0 methods warns `no methods found on object type '<TypeName>' for openRPCSchema`; a type whose members carry no `@rpc` warns `no @rpc tag found on '<TypeName>' for openRPCSchema`.
 - **`@package` / `@service`**: `@service Users` renames the namespace, and `@package acme` prefixes it, so a method becomes `acme.Users.getUser`. Both are read from the interface (applying to every method) or from a single method.
 - **Other tags**: `@summary` and the doc comment's prose become the method's summary and description; `@deprecated` marks it deprecated.
 - **Payload types**: A service interface contributes methods only; it is not

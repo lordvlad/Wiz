@@ -1,11 +1,11 @@
 /**
  * The mocked Kafka broker, and the wiring that closes the loop.
  *
- * The event *contract* is not here: it is `PetEvents` in `src/service.ts`,
- * declared next to the class that implements it, because the producer is the
- * store's own `onChange` registration and the consumer its `applyChange`. This
- * file is a log and an array — enough to show the round trip without a
- * dependency.
+ * The event *contract* is not here: it is the `@producer`/`@consumer` tags on
+ * `PetStore` in `src/service.ts`, carried by the two members that satisfy them,
+ * because the producer is the store's own `onChange` registration and the
+ * consumer its `applyChange`. This file is a log and an array — enough to show
+ * the round trip without a dependency.
  *
  * The loop is: `PetStore` mutates → `publish` → topic → `startConsumer` →
  * `PetStore.applyChange`. The consumer's parameter type and the producer's

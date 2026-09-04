@@ -53,7 +53,10 @@ export interface Payload {
 }
 
 export interface PayloadApi {
-  /** @summary Reads one */
+  /**
+   * @rpc
+   * @summary Reads one
+   */
   read(id: string): Promise<Payload>;
 }
 

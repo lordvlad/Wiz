@@ -250,9 +250,15 @@ export interface HelloReply {
  * @service Greeter
  */
 export interface GreeterService {
-  /** Greets one caller. */
+  /**
+   * Greets one caller.
+   * @grpc
+   */
   sayHello(request: HelloRequest): Promise<HelloReply>;
+  /** @grpc */
   chat(requests: AsyncIterable<HelloRequest>): AsyncIterable<HelloReply>;
+  /** Not an rpc: no `@grpc`. */
+  reload(): Promise<void>;
 }
 
 export const proto = grpcSchema<[GreeterService]>({ indent: "  " });
@@ -282,13 +288,18 @@ Messages are the same protobuf mapping `protobufSchema` uses, `@fieldNumber`
 and all: see [protobuf](./protobuf.md) for widths, `oneof` and `NumberedUnion`.
 What this macro adds is the `service` block.
 
+An rpc is a member that says it is one: `@grpc` is required, and a member
+without it contributes nothing, so a class that also serves HTTP or JSON-RPC
+can be handed to `grpcSchema` directly. `@grpc <name>` writes the rpc's name,
+the same as `@name`.
+
 | written | read as |
 |---|---|
 | a first parameter of `AsyncIterable<T>` or `ReadableStream<T>` | `stream` on the request |
 | a return of `AsyncIterable<T>`, `AsyncGenerator<T>` or `ReadableStream<T>`, with or without `Promise` | `stream` on the response |
 | `@package` | the file's `package` declaration |
 | `@service` | the `service` block's name, defaulting to the interface's own |
-| `@name` | the rpc's name, defaulting to the member's own |
+| `@grpc <name>`, `@name` | the rpc's name, defaulting to the member's own |
 | a doc comment, `@summary` | comments above the rpc |
 | `@deprecated` | `option deprecated = true` in the rpc body |
 
@@ -298,7 +309,8 @@ given one: `ping(): Promise<{ up: boolean }>` emits `PingRequest` and
 than an import of `google/protobuf/empty.proto`, which would leave the file
 needing a resolver. A type argument with no callable members is a payload
 rather than a service: it contributes a message and no rpc, and warns, since
-`grpcSchema` describes nothing else.
+`grpcSchema` describes nothing else. A type whose members carry no `@grpc`
+warns the same way (`no @grpc tag found on '<TypeName>' for grpcSchema`).
 
 Two things are refused at compile time, by a callsite that throws when it runs:
 a payload that is not a message - a scalar, an array, an enum - because nothing
