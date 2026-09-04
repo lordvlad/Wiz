@@ -13,7 +13,7 @@
   "paths": {
     "/pets": {
       "get": {
-        "operationId": "listPets",
+        "operationId": "list",
         "x-service": "Pets",
         "tags": [
           "Pets"
@@ -26,7 +26,17 @@
             "in": "query",
             "required": false,
             "schema": {
-              "$ref": "#/components/schemas/PetStatus"
+              "anyOf": [
+                {
+                  "const": "available"
+                },
+                {
+                  "const": "pending"
+                },
+                {
+                  "const": "sold"
+                }
+              ]
             },
             "description": "Restrict to one status."
           },
@@ -89,7 +99,7 @@
         }
       },
       "post": {
-        "operationId": "addPet",
+        "operationId": "add",
         "x-service": "Pets",
         "tags": [
           "Pets"
@@ -132,7 +142,7 @@
     },
     "/pets/{id}": {
       "get": {
-        "operationId": "getPet",
+        "operationId": "get",
         "x-service": "Pets",
         "tags": [
           "Pets"
@@ -178,7 +188,7 @@
         }
       },
       "delete": {
-        "operationId": "removePet",
+        "operationId": "remove",
         "x-service": "Pets",
         "tags": [
           "Pets"
@@ -214,7 +224,7 @@
     },
     "/pets/{id}/sale": {
       "post": {
-        "operationId": "sellPet",
+        "operationId": "sell",
         "x-service": "Pets",
         "tags": [
           "Pets"
@@ -297,15 +307,6 @@
           "status"
         ]
       },
-      "PetStatus": {
-        "description": "Where a pet is in its journey through the store.",
-        "type": "number",
-        "enum": [
-          0,
-          1,
-          2
-        ]
-      },
       "Pet": {
         "type": "object",
         "properties": {
@@ -363,13 +364,34 @@
         ]
       },
       "Species": {
-        "description": "What kind of animal. Ordinals are the protobuf enum values.",
-        "type": "number",
-        "enum": [
-          0,
-          1,
-          2,
-          3
+        "description": "What kind of animal.\n\nA union of string literals rather than an `enum`: it is a type, so it costs\nnothing at runtime, and the value on the wire is the word itself in every\nformat - `\"dog\"` in JSON, YAML, XML, CSV and protobuf alike, where a numeric\nenum would be `1` in some and `Dog` in others.",
+        "anyOf": [
+          {
+            "const": "unknown"
+          },
+          {
+            "const": "dog"
+          },
+          {
+            "const": "cat"
+          },
+          {
+            "const": "bird"
+          }
+        ]
+      },
+      "PetStatus": {
+        "description": "Where a pet is in its journey through the store.",
+        "anyOf": [
+          {
+            "const": "available"
+          },
+          {
+            "const": "pending"
+          },
+          {
+            "const": "sold"
+          }
         ]
       },
       "Owner": {

@@ -8,11 +8,11 @@
  * 4. Static endpoints for all generated specs (OpenAPI, AsyncAPI, OpenRPC, .proto, JSON Schema).
  * 5. Kafka event producer and consumer round-tripping change events.
  */
-import { Hono } from "hono";
 import {
   decodeProto,
+  encodeJson,
   encodeProto,
-  openapiDocument,
+  is,
   openapiSchema,
   openRPCHandler,
 } from "wiz";
@@ -21,22 +21,17 @@ import {
   CSV_MIME,
   JSON_MIME,
   negotiate,
-  petToJson,
-  petsToCsv,
-  petsToJson,
-  petsToXml,
-  petsToYaml,
   PROTO_MIME,
   XML_MIME,
   YAML_MIME,
 } from "./media.ts";
-import type { NewPet, Pet, Sale } from "./model.ts";
+import type { NewPet, Pet, PetStatus, Sale } from "./model.ts";
 import { asyncapi } from "./schemas/asyncapi.ts";
 import { jsonschema } from "./schemas/jsonschema.ts";
 import { openapi } from "./schemas/openapi.ts";
 import { openrpc } from "./schemas/openrpc.ts";
 import { proto } from "./schemas/proto.ts";
-import { InvalidError, NotFoundError, store } from "./service.ts";
+import { InvalidError, NotFoundError, problemOf, store } from "./service.ts";
 startProducer(store);
 startConsumer(store);
 await store.seed();
@@ -53,33 +48,18 @@ function getIdFromUrl(req: Request): number {
   return NaN;
 }
 
-// OpenRPC handler over WebSocket
-const rpc = openRPCHandler({
-  services: { Pets: store },
-  methods: {
-    "Pets.getPet": (id: number) => store.get(id),
-    "Pets.listPets": (query: any) => store.list(query),
-    "Pets.addPet": (body: any) => store.add(body),
-    "Pets.sellPet": (id: number, sale: any) => store.sell(id, sale),
-  },
-});
+// OpenRPC over WebSocket. The store is registered as one service, so every
+// method it declares is dispatchable as `Pets.<method>` - the same names
+// `openRPCSchema<[PetApi]>` puts in the document, since both read `PetApi`.
+const rpc = openRPCHandler({ services: { Pets: store } });
 function handleResponse(
   fn: () => Response | Promise<Response>
 ): Promise<Response> {
   return Promise.resolve()
     .then(fn)
     .catch((err) => {
-      if (err instanceof NotFoundError) {
-        return Response.json(
-          { status: 404, detail: err.message },
-          { status: 404 }
-        );
-      }
-      if (err instanceof InvalidError) {
-        return Response.json(
-          { status: 422, detail: err.message, errors: err.errors },
-          { status: 422 }
-        );
+      if (err instanceof NotFoundError || err instanceof InvalidError) {
+        return Response.json(problemOf(err), { status: err.status });
       }
       console.error(err);
       return Response.json(
@@ -101,7 +81,10 @@ const routes = openapiSchema.bunRoutes(
           const q = url.searchParams.get("q") ?? undefined;
           const limitStr = url.searchParams.get("limit");
 
-          const status = statusStr !== null ? Number(statusStr) : undefined;
+          // A status is one of three words now, so it is checked structurally
+          // rather than parsed: `is<PetStatus>` is generated from the union.
+          const status =
+            statusStr !== null && is<PetStatus>(statusStr) ? statusStr : undefined;
           const limit = limitStr !== null ? Number(limitStr) : undefined;
 
           const pets = store.list({ status, q, limit });
@@ -116,7 +99,7 @@ const routes = openapiSchema.bunRoutes(
         handleResponse(async () => {
           const body = (await req.json()) as NewPet;
           const pet = await store.add(body);
-          return new Response(petToJson(pet), {
+          return new Response(encodeJson<Pet>(pet, 2), {
             status: 201,
             headers: { "content-type": JSON_MIME },
           });
@@ -138,7 +121,7 @@ const routes = openapiSchema.bunRoutes(
             });
           }
 
-          return new Response(petToJson(pet), {
+          return new Response(encodeJson<Pet>(pet, 2), {
             headers: { "content-type": JSON_MIME },
           });
         }),
@@ -157,7 +140,7 @@ const routes = openapiSchema.bunRoutes(
           const id = getIdFromUrl(req);
           const body = (await req.json()) as Sale;
           const pet = await store.sell(id, body);
-          return new Response(petToJson(pet), {
+          return new Response(encodeJson<Pet>(pet, 2), {
             headers: { "content-type": JSON_MIME },
           });
         }),

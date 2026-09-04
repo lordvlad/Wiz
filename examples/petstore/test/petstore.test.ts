@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { decodeProto, encodeProto } from "wiz";
 import { broker, TOPIC } from "../src/events.ts";
 import { CSV_MIME, PROTO_MIME, XML_MIME, YAML_MIME } from "../src/media.ts";
-import { Species, type Pet } from "../src/model.ts";
+import type { Pet } from "../src/model.ts";
 import { server } from "../src/server.ts";
 import { store } from "../src/service.ts";
 
@@ -30,7 +30,7 @@ describe("Petstore Full Stack & Protocol Suite", () => {
     expect(resYaml.headers.get("content-type")).toContain(YAML_MIME);
     const yamlText = await resYaml.text();
     expect(yamlText).toContain("name: Ada");
-    expect(yamlText).toContain("species: Dog");
+    expect(yamlText).toContain("species: dog");
 
     // 3. XML
     const resXml = await fetch(`${baseUrl}/pets`, {
@@ -40,7 +40,7 @@ describe("Petstore Full Stack & Protocol Suite", () => {
     expect(resXml.headers.get("content-type")).toContain(XML_MIME);
     const xmlText = await resXml.text();
     expect(xmlText).toContain("<name>Ada</name>");
-    expect(xmlText).toContain("<species>Dog</species>");
+    expect(xmlText).toContain("<species>dog</species>");
 
     // 4. CSV
     const resCsv = await fetch(`${baseUrl}/pets`, {
@@ -49,8 +49,33 @@ describe("Petstore Full Stack & Protocol Suite", () => {
     expect(resCsv.status).toBe(200);
     expect(resCsv.headers.get("content-type")).toContain(CSV_MIME);
     const csvText = await resCsv.text();
-    expect(csvText.startsWith("id,name,species,status,priceCents")).toBe(true);
+    // The header is `keysOf<Pet>()`, so it is the declared keys in order.
+    expect(csvText.split("\n")[0]).toBe(
+      "id,name,species,status,priceCents,tags,owner,addedAt"
+    );
     expect(csvText).toContain("Ada");
+    // A trailing newline, and no blank row before it.
+    expect(csvText.endsWith("\n")).toBe(true);
+    expect(csvText.endsWith("\n\n")).toBe(false);
+  });
+
+  test("REST list filters on the status word, and ignores a bogus one", async () => {
+    const available = (await (
+      await fetch(`${baseUrl}/pets?status=available`, {
+        headers: { accept: "application/json" },
+      })
+    ).json()) as Array<{ status: string }>;
+    expect(available.length).toBeGreaterThanOrEqual(3);
+    expect(available.every((pet) => pet.status === "available")).toBe(true);
+
+    // `is<PetStatus>` rejects it, so the filter is dropped rather than
+    // matching nothing.
+    const bogus = (await (
+      await fetch(`${baseUrl}/pets?status=parrot`, {
+        headers: { accept: "application/json" },
+      })
+    ).json()) as unknown[];
+    expect(bogus.length).toBe(available.length);
   });
 
   test("REST Protobuf binary codec endpoint", async () => {
@@ -67,7 +92,7 @@ describe("Petstore Full Stack & Protocol Suite", () => {
     const pet = decodeProto<Pet>(bytes);
     expect(pet.id).toBe(1);
     expect(pet.name).toBe("Ada");
-    expect(pet.species).toBe(Species.Dog);
+    expect(pet.species).toBe("dog");
     expect(pet.priceCents).toBe(42_000n);
 
     // POST /pets/1/codec/proto round-trip codec test
@@ -95,7 +120,7 @@ describe("Petstore Full Stack & Protocol Suite", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         name: "Bella",
-        species: Species.Dog,
+        species: "dog",
         priceCents: 15000,
         tags: ["puppy"],
       }),
@@ -119,7 +144,7 @@ describe("Petstore Full Stack & Protocol Suite", () => {
     });
     expect(sellRes.status).toBe(200);
     const soldPet = (await sellRes.json()) as any;
-    expect(soldPet.status).toBe(2); // PetStatus.Sold
+    expect(soldPet.status).toBe("sold");
     expect(soldPet.owner?.email).toBe("bob@example.com");
 
     // 3. Delete the pet
@@ -153,7 +178,7 @@ describe("Petstore Full Stack & Protocol Suite", () => {
       JSON.stringify({
         jsonrpc: "2.0",
         id: 42,
-        method: "Pets.getPet",
+        method: "Pets.get",
         params: [1],
       })
     );

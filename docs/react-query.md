@@ -57,6 +57,11 @@ For operations with read-only HTTP methods (`GET`, `HEAD`, `OPTIONS`), `queries.
 4. **Multi-Tenancy Factory `createHooks(client)`**:
    Combines `createQueries(client)` and `createMutations(client)` to provide full hook suite pre-bound to a tenant client instance.
 
+Every getter and hook takes the client as a trailing parameter, defaulting to
+`defaultClient()` from `api.ts` — the one instance `configure()` maintains.
+A default of `createClient()` would build a client per invocation, so a hook
+would render against a fresh client and never see `configure()`.
+
 ### Query Usage Example
 
 ```ts

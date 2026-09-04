@@ -1120,7 +1120,17 @@ function protoTypeDefs(
 ): ProtoTypeDef[] {
   const typeDefs: ProtoTypeDef[] = [];
 
+  // A named scalar, literal union, array or tuple is a field type rather than
+  // a message: `type Species = "dog" | "cat"` travels as a `string`, so an
+  // empty `message Species {}` beside it is noise nothing references.
+  const isMessageBody = (ir: TypeIR): boolean =>
+    ir.kind === "enum" ||
+    ir.kind === "object" ||
+    ir.kind === "intersection" ||
+    ir.kind === "ref";
+
   for (const [typeName, typeIR] of allNamedTypes.entries()) {
+    if (!isMessageBody(typeIR)) continue;
     if (typeIR.kind === "enum") {
       typeDefs.push({
         name: typeName,

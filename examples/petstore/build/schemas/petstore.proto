@@ -8,8 +8,8 @@ message Pet {
   // @minLength 1
   // @maxLength 80
   string name = 2;
-  Species species = 3;
-  PetStatus status = 4;
+  string species = 3;
+  string status = 4;
   // Retail price in minor units, so no float ever touches money.
   // @format int64
   int64 priceCents = 5;
@@ -18,21 +18,6 @@ message Pet {
   // Absent while the pet is still available.
   Owner owner = 7;
   int64 addedAt = 8;
-}
-
-// What kind of animal. Ordinals are the protobuf enum values.
-enum Species {
-  Unknown = 0;
-  Dog = 1;
-  Cat = 2;
-  Bird = 3;
-}
-
-// Where a pet is in its journey through the store.
-enum PetStatus {
-  Available = 0;
-  Pending = 1;
-  Sold = 2;
 }
 
 message Owner {
@@ -50,7 +35,7 @@ message NewPet {
   // @minLength 1
   // @maxLength 80
   string name = 1;
-  Species species = 2;
+  string species = 2;
   // @format int64
   int64 priceCents = 3;
   repeated string tags = 4;
@@ -73,17 +58,10 @@ message Sale {
 message PetChanged {
   // @format uuid
   string eventId = 1;
-  ChangeKind kind = 2;
+  string kind = 2;
   // @format int32
   int32 petId = 3;
   // The pet as it now stands.
   Pet pet = 4;
   int64 occurredAt = 5;
-}
-
-// What changed. The discriminant of {@link PetChanged}.
-enum ChangeKind {
-  Created = 0;
-  Updated = 1;
-  Sold = 2;
 }

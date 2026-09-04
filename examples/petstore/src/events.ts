@@ -1,41 +1,22 @@
 /**
- * The event contract, plus a mocked Kafka broker.
+ * The mocked Kafka broker, and the wiring that closes the loop.
  *
- * `PetEvents` is the AsyncAPI declaration: one channel, produced by the store
- * and consumed back off it. The broker below is a log and an array — enough to
- * show the round trip without a dependency.
+ * The event *contract* is not here: it is `PetEvents` in `src/service.ts`,
+ * declared next to the class that implements it, because the producer is the
+ * store's own `onChange` registration and the consumer its `applyChange`. This
+ * file is a log and an array — enough to show the round trip without a
+ * dependency.
  *
- * The loop closed here is: `PetStore` mutates → `publish` → topic →
- * `startConsumer` → `PetStore.applyChange`. The consumer's parameter type and
- * the producer's payload type are the same declaration, so a change to
- * `PetChanged` breaks both ends at compile time.
+ * The loop is: `PetStore` mutates → `publish` → topic → `startConsumer` →
+ * `PetStore.applyChange`. The consumer's parameter type and the producer's
+ * payload type are the same declaration, so a change to `PetChanged` breaks
+ * both ends at compile time.
  */
 import { decodeJson, encodeJson } from "wiz";
 import type { PetChanged } from "./model.ts";
 import type { PetStore } from "./service.ts";
 
 export const TOPIC = "petstore.pets.changed";
-
-/** @service PetEvents */
-export interface PetEvents {
-  /**
-   * A pet was created, updated or sold.
-   *
-   * @producer
-   * @channel petstore.pets.changed
-   * @summary Pet changed
-   */
-  petChanged(event: PetChanged): void;
-
-  /**
-   * Applied by the consumer to bring a projection back in step.
-   *
-   * @consumer
-   * @channel petstore.pets.changed
-   * @summary Pet changed, consumed
-   */
-  onPetChanged(event: PetChanged): void;
-}
 
 /** One partition, one offset counter, no network. */
 export class MockBroker {
@@ -86,11 +67,7 @@ export function startConsumer(store: PetStore): void {
     const event = decodeJson<PetChanged>(raw);
     const { applied } = store.applyChange(event);
     console.log(
-      `[kafka] ← ${TOPIC}@${offset} ${ChangeLabel(event)} applied=${applied}`
+      `[kafka] ← ${TOPIC}@${offset} ${event.kind}:${event.petId}(${event.pet.name}) applied=${applied}`
     );
   });
-}
-
-function ChangeLabel(event: PetChanged): string {
-  return `${event.kind}:${event.petId}(${event.pet.name})`;
 }

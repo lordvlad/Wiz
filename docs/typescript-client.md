@@ -167,6 +167,9 @@ export function configure(next: Partial<ClientConfig>): void {
 
 export function currentConfig(): ClientConfig { return defaults; }
 
+/** The client `configure()` maintains, which hooks and other consumers default to. */
+export function defaultClient(): Client { return client; }
+
 /** Every pet on file */
 export const listPets: Client["listPets"] = (options, callOptions) => client.listPets(options, callOptions);
 ```
@@ -175,6 +178,11 @@ The module-level functions are the common case: one process, one deployment, a
 base URL and a token set once at startup. They are typed *from* `Client`, so a
 delegate cannot drift from the method it forwards to, and they read `client` per
 call so a later `configure()` still applies.
+
+`defaultClient()` hands that same instance to code that needs the object rather
+than the functions — the generated React Query hooks take it as their default
+`client`, so a hook follows `configure()` instead of building a client of its
+own on every call.
 
 `createClient` is for the caller that is not that case — two tenants, two base
 URLs, two credentials. Nothing is shared between instances, and the

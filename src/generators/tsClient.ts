@@ -571,6 +571,14 @@ interface Operation {
   doc: string;
   /** `options: { … }`, `request: Msg`, or nothing at all. */
   parameter: string;
+  /**
+   * The parameter identifiers, in order, as the implementation names them.
+   *
+   * Kept beside `parameter` rather than parsed back out of it: a module-level
+   * delegate forwards these, and a parameter's own type can hold a comma -
+   * `Record<K, V>`, a function type - so the string is not something to split.
+   */
+  parameterNames: string[];
   returns: string;
   /** The method body, as a member of the object `createClient` returns. */
   implementation: string;
@@ -777,6 +785,8 @@ function httpOperation(
       ""
     ),
     parameter,
+    parameterNames:
+      slots.length === 0 ? ["callOptions"] : ["options", "callOptions"],
     returns: returns === "void" ? "Promise<void>" : `Promise<${returns}>`,
     // Parameters are left unannotated: the object literal is contextually typed
     // by `Client`, so the signature has exactly one source of truth.
@@ -808,7 +818,8 @@ function openRpcOperation(
     paramMembers.push(`${p.name}${p.required ? "" : "?"}: ${typeText(p.type, identifiers)}`);
   }
 
-  const parameter = paramMembers.length > 0 ? `params: { ${paramMembers.join("; ")} }` : "";
+  const hasParams = paramMembers.length > 0;
+  const parameter = `${hasParams ? `params: { ${paramMembers.join("; ")} }, ` : ""}callOptions?: HttpCallOptions`;
 
   const response0 = method.responses[0];
   const returnsType = response0?.result ? typeText(response0.result, identifiers) : "unknown";
@@ -829,27 +840,32 @@ function openRpcOperation(
     ""
   );
 
+  // A JSON-RPC call is one POST to the single endpoint the document describes,
+  // so it goes through the same `send` as an HTTP method and gains the same
+  // interceptors, deadline and body parsing. Only the envelope differs.
   const implementation = [
-    `    async ${name}(${parameter}): ${returns} {`,
-    `      const transport = config.openrpcTransport || config.transport || httpTransport({ url: config.baseUrl });`,
-    `      const res = await transport.call({`,
+    `    async ${name}(${hasParams ? "params, callOptions" : "callOptions"}) {`,
+    `      const body = JSON.stringify({`,
     `        jsonrpc: "2.0",`,
-    `        id: ++config.idSeq,`,
+    `        id: ++rpcId,`,
     `        method: ${JSON.stringify(methodName)},`,
-    `        params: ${params.length > 0 ? (method.request.paramsByName ? "params" : "Object.values(params ?? {})") : "{}"},`,
+    `        params: ${hasParams ? (method.request.paramsByName ? "params" : "Object.values(params ?? {})") : "{}"},`,
     `      });`,
-    `      if (res.error) {`,
-    `        const err = new Error(res.error.message);`,
-    `        (err as any).code = res.error.code;`,
-    `        throw err;`,
-    `      }`,
-    `      return res.result as ${returnsType};`,
+    `      const res = (await send(config, {`,
+    `        method: "POST",`,
+    `        url: config.baseUrl,`,
+    `        headers: { "content-type": "application/json" },`,
+    `        body,`,
+    `      }, callOptions)) as JsonRpcResponse;`,
+    `      if (res?.error) throw new RpcError(res.error);`,
+    `      return res?.result as ${returnsType};`,
     `    },`,
   ].join("\n");
 
   return {
     name,
     parameter,
+    parameterNames: hasParams ? ["params", "callOptions"] : ["callOptions"],
     returns,
     doc,
     implementation,
@@ -893,6 +909,7 @@ function grpcOperation(
       name,
       doc,
       parameter: "",
+      parameterNames: [],
       returns: "Promise<never>",
       implementation: `    async ${name}() {\n      throw new Error(${JSON.stringify(
         `[wiz] ${name} is not callable: ${reason}`
@@ -924,6 +941,7 @@ function grpcOperation(
       name,
       doc,
       parameter,
+      parameterNames: [streamsIn ? "requests" : "request", "options"],
       returns: `AsyncIterable<${responseIdentifier}>`,
       implementation: [
         `    async *${name}(${streamsIn ? "requests" : "request"}, options) {`,
@@ -939,6 +957,7 @@ function grpcOperation(
     name,
     doc,
     parameter,
+    parameterNames: [streamsIn ? "requests" : "request", "options"],
     returns: `Promise<${responseIdentifier}>`,
     implementation: streamsIn
       ? [
@@ -1147,51 +1166,7 @@ export class ApiError extends Error {
   }
 }
 
-function encodePath(value: string | number | boolean): string {
-  return encodeURIComponent(String(value));
-}
-
-function queryString(query: Record<string, unknown> | undefined): string {
-  if (!query) return "";
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined || value === null) continue;
-    // A repeated key is how every OpenAPI serialisation style spells an array.
-    if (Array.isArray(value)) {
-      for (const item of value) search.append(key, String(item));
-      continue;
-    }
-    search.append(key, String(value));
-  }
-  const text = search.toString();
-  return text ? \`?\${text}\` : "";
-}
-
-function headerRecord(
-  headers: Record<string, unknown> | undefined,
-  cookie: Record<string, unknown> | undefined,
-  contentType: string | undefined
-): Record<string, string> {
-  const record: Record<string, string> = {};
-  if (contentType) record["content-type"] = contentType;
-
-  for (const [key, value] of Object.entries(headers ?? {})) {
-    if (value === undefined || value === null) continue;
-    record[key] = String(value);
-  }
-
-  // Cookie parameters travel in one header, which is the only way HTTP has.
-  const crumbs = Object.entries(cookie ?? {}).filter(
-    ([, value]) => value !== undefined && value !== null
-  );
-  if (crumbs.length > 0) {
-    record["cookie"] = crumbs
-      .map(([key, value]) => \`\${key}=\${encodeURIComponent(String(value))}\`)
-      .join("; ");
-  }
-
-  return record;
-}
+__HTTP_ENCODING__
 
 async function parseBody(response: Response): Promise<unknown> {
   if (response.status === 204) return undefined;
@@ -1291,6 +1266,88 @@ async function send(
     throw new ApiError(settled.response.status, body, settled.response);
   }
   return body;
+}`;
+
+/**
+ * The URL and header encoding rules, which only an HTTP method calls.
+ *
+ * They are a segment of their own so a client that speaks only JSON-RPC - one
+ * POST, no path or query to build - does not carry three functions nothing in
+ * the file reads.
+ */
+const HTTP_ENCODING = `function encodePath(value: string | number | boolean): string {
+  return encodeURIComponent(String(value));
+}
+
+function queryString(query: Record<string, unknown> | undefined): string {
+  if (!query) return "";
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null) continue;
+    // A repeated key is how every OpenAPI serialisation style spells an array.
+    if (Array.isArray(value)) {
+      for (const item of value) search.append(key, String(item));
+      continue;
+    }
+    search.append(key, String(value));
+  }
+  const text = search.toString();
+  return text ? \`?\${text}\` : "";
+}
+
+function headerRecord(
+  headers: Record<string, unknown> | undefined,
+  cookie: Record<string, unknown> | undefined,
+  contentType: string | undefined
+): Record<string, string> {
+  const record: Record<string, string> = {};
+  if (contentType) record["content-type"] = contentType;
+
+  for (const [key, value] of Object.entries(headers ?? {})) {
+    if (value === undefined || value === null) continue;
+    record[key] = String(value);
+  }
+
+  // Cookie parameters travel in one header, which is the only way HTTP has.
+  const crumbs = Object.entries(cookie ?? {}).filter(
+    ([, value]) => value !== undefined && value !== null
+  );
+  if (crumbs.length > 0) {
+    record["cookie"] = crumbs
+      .map(([key, value]) => \`\${key}=\${encodeURIComponent(String(value))}\`)
+      .join("; ");
+  }
+
+  return record;
+}`;
+
+/**
+ * The JSON-RPC envelope, for a document that declares methods rather than
+ * paths. The call itself is an ordinary HTTP one, so nothing here duplicates
+ * `send`: only the reply shape and the error it raises are new.
+ */
+const OPENRPC_PRELUDE = `/** A reply, before \`result\` or \`error\` is unwrapped. */
+interface JsonRpcResponse {
+  jsonrpc: "2.0";
+  id: string | number | null;
+  result?: unknown;
+  error?: { code: number; message: string; data?: unknown };
+}
+
+/**
+ * A JSON-RPC \`error\` member. The transport succeeded, so there is no status to
+ * report; the code and \`data\` are kept, because that is where a server explains.
+ */
+export class RpcError extends Error {
+  readonly code: number;
+  readonly data?: unknown;
+
+  constructor(error: { code: number; message: string; data?: unknown }) {
+    super(error.message);
+    this.name = "RpcError";
+    this.code = error.code;
+    this.data = error.data;
+  }
 }`;
 
 /**
@@ -2159,6 +2216,12 @@ function emitFiles(
     " */",
     "export function createClient(overrides: Partial<ClientConfig> = {}): Client {",
     "  const config: ClientConfig = { ...DEFAULTS, ...overrides };",
+    ...(speaksOpenRpc
+      ? [
+          "  // A JSON-RPC id only has to be unique per connection, so it counts per client.",
+          "  let rpcId = 0;",
+        ]
+      : []),
     "",
     "  return {",
     operations.map((operation) => operation.implementation).join("\n"),
@@ -2183,21 +2246,21 @@ function emitFiles(
     "  return defaults;",
     "}",
     "",
+    "/** The client `configure()` maintains, which hooks and other consumers default to. */",
+    "export function defaultClient(): Client {",
+    "  return client;",
+    "}",
+    "",
     operations
       .map((operation) => {
         // Typed from `Client`, so a delegate cannot drift from the method it
-        // forwards to, and reads `client` per call so `configure` still applies.
-        // The names have to match the emitted signature, since the parameters
-        // are what the delegate forwards.
-        const cleanParamString = operation.parameter.replace(/\/\*[\s\S]*?\*\//g, "");
-        const parameters = cleanParamString
-          .split(",")
-          .map((part) => part.trim().split(/[?:]/)[0]!.trim())
-          .filter((name) => name.length > 0)
-          .join(", ");
+        // forwards to, and reads `client` per call so `configure` still
+        // applies. The names come from the operation rather than from its
+        // parameter text, which is a type and can hold anything.
+        const forwarded = operation.parameterNames.join(", ");
         return `${operation.doc}export const ${operation.name}: Client[${JSON.stringify(
           operation.name
-        )}] = (${parameters}) => client.${operation.name}(${parameters});`;
+        )}] = (${forwarded}) => client.${operation.name}(${forwarded});`;
       })
       .join("\n\n"),
   ].join("\n");
@@ -2277,9 +2340,11 @@ function emitFiles(
     : "";
 
   // A key per protocol the document speaks, so an interceptor array is never
-  // written into a slot nothing reads. Both are the same mechanism either way.
+  // written into a slot nothing reads. A JSON-RPC call is an HTTP one, so it
+  // is wrapped by the same `http` chain. Both are the same mechanism either way.
+  const usesHttpChain = speaksHttp || speaksOpenRpc;
   const interceptorKeys = [
-    ...(speaksHttp
+    ...(usesHttpChain
       ? [
           "  /** Outermost first: `[a, b]` runs a around b around the request. */",
           "  http?: HttpInterceptor[];",
@@ -2287,7 +2352,7 @@ function emitFiles(
       : []),
     ...(speaksGrpc
       ? [
-          speaksHttp
+          usesHttpChain
             ? "  /** Outermost first, exactly as `http`. */"
             : "  /** Outermost first: `[a, b]` runs a around b around the call. */",
           "  grpc?: GrpcInterceptor[];",
@@ -2392,9 +2457,14 @@ ${valHelpers.size > 0 ? `${[...valHelpers].join("\n\n")}\n` : ""}`
       .replace("__TRANSPORT_CONFIG__", transportConfig)
       .replace("__INTERCEPTOR_KEYS__", interceptorKeys)
       .replace(
+        "\n__HTTP_ENCODING__\n",
+        speaksHttp ? `\n${HTTP_ENCODING}\n` : ""
+      )
+      .replace(
         "__HTTP_CHAIN__",
-        speaksHttp ? "chain(config.interceptors?.http, invoke)" : "invoke"
+        usesHttpChain ? "chain(config.interceptors?.http, invoke)" : "invoke"
       )}\n`,
+    speaksOpenRpc ? `\n${OPENRPC_PRELUDE}\n` : "",
     grpcMethods.length > 0 ? `\n${GRPC_PRELUDE}\n` : "",
     operations.length > 0 ? `\n${declarations}\n` : "",
   ].join("");

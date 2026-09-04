@@ -581,6 +581,9 @@ export function transformSource(options: TransformOptions): TransformResult {
                 }
 
                 for (const elemType of typeArgs) {
+                  // A service interface describes channel operations, not a
+                  // message: its payloads come from the harvested methods.
+                  if (isServiceLikeType(elemType, checker)) continue;
                   const elemIR = extractTypeIR(elemType, checker);
                   const sym = elemType.aliasSymbol ?? elemType.symbol;
                   const name = sym && !sym.name.startsWith("__") ? sym.name : (elemIR.name ?? `Schema_${asyncApiTypes.length + 1}`);
@@ -619,6 +622,9 @@ export function transformSource(options: TransformOptions): TransformResult {
                 }
 
                 for (const elemType of typeArgs) {
+                  // A service interface describes methods, not a payload: its
+                  // params and results come from the harvested signatures.
+                  if (isServiceLikeType(elemType, checker)) continue;
                   const elemIR = extractTypeIR(elemType, checker);
                   const sym = elemType.aliasSymbol ?? elemType.symbol;
                   const name = sym && !sym.name.startsWith("__") ? sym.name : (elemIR.name ?? `Schema_${openRpcTypes.length + 1}`);

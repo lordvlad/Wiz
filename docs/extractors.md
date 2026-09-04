@@ -59,11 +59,11 @@ The type harvester (`src/harvest.ts`) extracts service methods, parameter shapes
 - **Function Signature Types**: Extract a single operation. Names derive from JSDoc `@name` if present, otherwise from the function/type name (`toSnakeCase` applied for MCP tools).
 - **Service Object Types**: Extract every callable member of an interface or class type.
   - `openapiSchema`: verb and path come from `@get`/`@post`/… or `@http`; responses from `@response STATUS [MEDIATYPE] [TYPE] [DESCRIPTION]`; `x-service`/`x-package` and the operation tag from `@service`/`@package`.
-  - `asyncapiSchema`: channel from `@channel`, direction from `@producer`/`@consumer`/`@action`; the channel key is prefixed with `@package`/`@service`.
+  - `asyncapiSchema`: channel from `@channel`, direction from `@producer`/`@consumer`/`@action`; the channel key is prefixed with `@package`/`@service`; the payload is the parameter of a listener the method registers, the element of an `AsyncIterable`/`AsyncIterator`/`AsyncGenerator`/`ReadableStream` it returns, or its first parameter.
   - `openRPCSchema`: namespaces methods as `${package}.${service}.${methodName}`, falling back to `${ServiceName}.${methodName}` (unless overridden by `@name` on member JSDoc).
   - `mcpSchema`: namespaces tool names as `${package}.${service}.${toSnakeCase(methodName)}` (unless overridden by `@name` on member JSDoc).
   - `grpcSchema`: one `service` block per `@service` (defaulting to the interface name), `package` from `@package`, rpc name from `@name`; `stream` on either side comes from an `AsyncIterable`/`AsyncGenerator`/`ReadableStream` parameter or return type.
-- **Payload Types**: A type argument with no callable members contributes a component schema and no operation. `openapiSchema` and `asyncapiSchema` accept these silently, since a components-only document is a normal use.
+- **Payload Types**: A type argument with no callable members contributes a component schema and no operation. `openapiSchema` and `asyncapiSchema` accept these silently, since a components-only document is a normal use. A service-like type argument contributes operations only: `openapiSchema`, `asyncapiSchema` and `openRPCSchema` keep it out of `components.schemas`, since an interface of methods is not a payload.
 - **0-Method Warning**: `openRPCSchema`, `mcpSchema` and `grpcSchema` log a diagnostic (`no methods found on object type '<typeName>' for openRPCSchema` / `mcpSchema` / `grpcSchema`) for an object type with no callable members, since those macros describe nothing else.
 
 ## Diagnostics (`ApiDiagnostic`)

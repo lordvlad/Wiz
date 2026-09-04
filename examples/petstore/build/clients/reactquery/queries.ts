@@ -2,7 +2,7 @@
 // React Query options getters and hooks for query operations. Edit the document, not this file.
 
 import { useQuery, type UseQueryOptions } from "@tanstack/react-query";
-import { createClient, type Client } from "./api.ts";
+import { defaultClient, type Client } from "./api.ts";
 import { createMutations } from "./mutations.ts";
 
 /**
@@ -14,32 +14,32 @@ import { createMutations } from "./mutations.ts";
  * tag adds a media type to the *same* response object, so the document says
  * one 200 with four `content` entries.
  */
-export function getListPetsQueryOptions<
-  TData = Awaited<ReturnType<Client["listPets"]>>,
+export function getListQueryOptions<
+  TData = Awaited<ReturnType<Client["list"]>>,
   TError = unknown
 >(
-  options?: Parameters<Client["listPets"]>[0],
-  queryOptions?: Omit<UseQueryOptions<Awaited<ReturnType<Client["listPets"]>>, TError, TData>, "queryKey" | "queryFn">,
-  client: Client = createClient()
+  options?: Parameters<Client["list"]>[0],
+  queryOptions?: Omit<UseQueryOptions<Awaited<ReturnType<Client["list"]>>, TError, TData>, "queryKey" | "queryFn">,
+  client: Client = defaultClient()
 ) {
   return {
     queryKey: ["/pets", options] as const,
     queryFn: ({ signal }: { signal?: AbortSignal }) =>
-      client.listPets(options as any, { signal }),
+      client.list(options as any, { signal }),
     ...queryOptions,
   };
 }
 
-/** React Query hook for `listPets`. */
-export function useListPets<
-  TData = Awaited<ReturnType<Client["listPets"]>>,
+/** React Query hook for `list`. */
+export function useList<
+  TData = Awaited<ReturnType<Client["list"]>>,
   TError = unknown
 >(
-  options?: Parameters<Client["listPets"]>[0],
-  queryOptions?: Omit<UseQueryOptions<Awaited<ReturnType<Client["listPets"]>>, TError, TData>, "queryKey" | "queryFn">,
-  client: Client = createClient()
+  options?: Parameters<Client["list"]>[0],
+  queryOptions?: Omit<UseQueryOptions<Awaited<ReturnType<Client["list"]>>, TError, TData>, "queryKey" | "queryFn">,
+  client: Client = defaultClient()
 ) {
-  return useQuery(getListPetsQueryOptions(options!, queryOptions, client));
+  return useQuery(getListQueryOptions(options!, queryOptions, client));
 }
 
 /**
@@ -50,58 +50,58 @@ export function useListPets<
  * The protobuf representation is encoded by `encodeProto<Pet>`, generated
  * from the same `@fieldNumber` declarations as `build/schemas/petstore.proto`.
  */
-export function getGetPetQueryOptions<
-  TData = Awaited<ReturnType<Client["getPet"]>>,
+export function getGetQueryOptions<
+  TData = Awaited<ReturnType<Client["get"]>>,
   TError = unknown
 >(
-  options: Parameters<Client["getPet"]>[0],
-  queryOptions?: Omit<UseQueryOptions<Awaited<ReturnType<Client["getPet"]>>, TError, TData>, "queryKey" | "queryFn">,
-  client: Client = createClient()
+  options: Parameters<Client["get"]>[0],
+  queryOptions?: Omit<UseQueryOptions<Awaited<ReturnType<Client["get"]>>, TError, TData>, "queryKey" | "queryFn">,
+  client: Client = defaultClient()
 ) {
   return {
     queryKey: ["/pets/{id}", options] as const,
     queryFn: ({ signal }: { signal?: AbortSignal }) =>
-      client.getPet(options as any, { signal }),
+      client.get(options as any, { signal }),
     ...queryOptions,
   };
 }
 
-/** React Query hook for `getPet`. */
-export function useGetPet<
-  TData = Awaited<ReturnType<Client["getPet"]>>,
+/** React Query hook for `get`. */
+export function useGet<
+  TData = Awaited<ReturnType<Client["get"]>>,
   TError = unknown
 >(
-  options: Parameters<Client["getPet"]>[0],
-  queryOptions?: Omit<UseQueryOptions<Awaited<ReturnType<Client["getPet"]>>, TError, TData>, "queryKey" | "queryFn">,
-  client: Client = createClient()
+  options: Parameters<Client["get"]>[0],
+  queryOptions?: Omit<UseQueryOptions<Awaited<ReturnType<Client["get"]>>, TError, TData>, "queryKey" | "queryFn">,
+  client: Client = defaultClient()
 ) {
-  return useQuery(getGetPetQueryOptions(options, queryOptions, client));
+  return useQuery(getGetQueryOptions(options, queryOptions, client));
 }
 
 /** Factory binding all query options getters and query hooks to a custom client instance. */
-export function createQueries(client: Client = createClient()) {
+export function createQueries(client: Client = defaultClient()) {
   return {
-    getListPetsQueryOptions: <TData = Awaited<ReturnType<Client["listPets"]>>, TError = unknown>(
-      options?: Parameters<Client["listPets"]>[0],
-      queryOptions?: Omit<UseQueryOptions<Awaited<ReturnType<Client["listPets"]>>, TError, TData>, "queryKey" | "queryFn">
-    ) => getListPetsQueryOptions<TData, TError>(options!, queryOptions, client),
-    useListPets: <TData = Awaited<ReturnType<Client["listPets"]>>, TError = unknown>(
-      options?: Parameters<Client["listPets"]>[0],
-      queryOptions?: Omit<UseQueryOptions<Awaited<ReturnType<Client["listPets"]>>, TError, TData>, "queryKey" | "queryFn">
-    ) => useListPets<TData, TError>(options!, queryOptions, client),
-    getGetPetQueryOptions: <TData = Awaited<ReturnType<Client["getPet"]>>, TError = unknown>(
-      options: Parameters<Client["getPet"]>[0],
-      queryOptions?: Omit<UseQueryOptions<Awaited<ReturnType<Client["getPet"]>>, TError, TData>, "queryKey" | "queryFn">
-    ) => getGetPetQueryOptions<TData, TError>(options, queryOptions, client),
-    useGetPet: <TData = Awaited<ReturnType<Client["getPet"]>>, TError = unknown>(
-      options: Parameters<Client["getPet"]>[0],
-      queryOptions?: Omit<UseQueryOptions<Awaited<ReturnType<Client["getPet"]>>, TError, TData>, "queryKey" | "queryFn">
-    ) => useGetPet<TData, TError>(options, queryOptions, client),
+    getListQueryOptions: <TData = Awaited<ReturnType<Client["list"]>>, TError = unknown>(
+      options?: Parameters<Client["list"]>[0],
+      queryOptions?: Omit<UseQueryOptions<Awaited<ReturnType<Client["list"]>>, TError, TData>, "queryKey" | "queryFn">
+    ) => getListQueryOptions<TData, TError>(options!, queryOptions, client),
+    useList: <TData = Awaited<ReturnType<Client["list"]>>, TError = unknown>(
+      options?: Parameters<Client["list"]>[0],
+      queryOptions?: Omit<UseQueryOptions<Awaited<ReturnType<Client["list"]>>, TError, TData>, "queryKey" | "queryFn">
+    ) => useList<TData, TError>(options!, queryOptions, client),
+    getGetQueryOptions: <TData = Awaited<ReturnType<Client["get"]>>, TError = unknown>(
+      options: Parameters<Client["get"]>[0],
+      queryOptions?: Omit<UseQueryOptions<Awaited<ReturnType<Client["get"]>>, TError, TData>, "queryKey" | "queryFn">
+    ) => getGetQueryOptions<TData, TError>(options, queryOptions, client),
+    useGet: <TData = Awaited<ReturnType<Client["get"]>>, TError = unknown>(
+      options: Parameters<Client["get"]>[0],
+      queryOptions?: Omit<UseQueryOptions<Awaited<ReturnType<Client["get"]>>, TError, TData>, "queryKey" | "queryFn">
+    ) => useGet<TData, TError>(options, queryOptions, client),
   };
 }
 
 /** Factory binding all query and mutation hooks to a custom client instance. */
-export function createHooks(client: Client = createClient()) {
+export function createHooks(client: Client = defaultClient()) {
   return {
     ...createQueries(client),
     ...createMutations(client),

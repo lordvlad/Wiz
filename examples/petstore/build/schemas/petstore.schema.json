@@ -12,12 +12,12 @@
           "maxLength": 80
         },
         "species": {
-          "description": "What kind of animal. Ordinals are the protobuf enum values.",
+          "description": "What kind of animal.\n\nA union of string literals rather than an `enum`: it is a type, so it costs\nnothing at runtime, and the value on the wire is the word itself in every\nformat - `\"dog\"` in JSON, YAML, XML, CSV and protobuf alike, where a numeric\nenum would be `1` in some and `Dog` in others.",
           "enum": [
-            0,
-            1,
-            2,
-            3
+            "unknown",
+            "dog",
+            "cat",
+            "bird"
           ]
         },
         "priceCents": {
@@ -50,9 +50,9 @@
         "kind": {
           "description": "What changed. The discriminant of {@link PetChanged}.",
           "enum": [
-            0,
-            1,
-            2
+            "created",
+            "updated",
+            "sold"
           ]
         },
         "petId": {
@@ -80,20 +80,20 @@
               ]
             },
             "species": {
-              "description": "What kind of animal. Ordinals are the protobuf enum values.",
+              "description": "What kind of animal.\n\nA union of string literals rather than an `enum`: it is a type, so it costs\nnothing at runtime, and the value on the wire is the word itself in every\nformat - `\"dog\"` in JSON, YAML, XML, CSV and protobuf alike, where a numeric\nenum would be `1` in some and `Dog` in others.",
               "enum": [
-                0,
-                1,
-                2,
-                3
+                "unknown",
+                "dog",
+                "cat",
+                "bird"
               ]
             },
             "status": {
               "description": "Where a pet is in its journey through the store.",
               "enum": [
-                0,
-                1,
-                2
+                "sold",
+                "available",
+                "pending"
               ]
             },
             "priceCents": {

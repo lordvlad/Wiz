@@ -189,4 +189,61 @@ describe("AsyncAPI Spec Generator", () => {
     const result = transformSource({ path: "app.ts", contents: source, logger: silentLogger });
     expect(result.code).toContain("asyncapiSchema as __wiz_asyncapiSchema_");
   });
+
+  test("a producer is a listener registration, and its payload the event", () => {
+    const source = `
+      import { asyncapiSchema } from "wiz";
+      export interface UserSignupEvent { id: string }
+      export interface UserLoginEvent { at: string }
+      /** @service UserEvents */
+      export interface Events {
+        /**
+         * @producer
+         * @channel user/signup
+         */
+        onSignup(listener: (event: UserSignupEvent) => void): void;
+
+        /**
+         * @producer
+         * @channel user/login
+         */
+        logins(): AsyncIterable<UserLoginEvent>;
+
+        /**
+         * @consumer
+         * @channel user/signup
+         */
+        applySignup(event: UserSignupEvent): void;
+      }
+      export const doc = asyncapiSchema<[Events]>();
+    `;
+
+    const result = transformSource({ path: "app.ts", contents: source, logger: silentLogger });
+    const module = [...result.modules.values()].find((m) =>
+      m.files["index.js"]?.includes("export function asyncapiSchema")
+    )!;
+    const doc = evalModule<{ asyncapiSchema(): any }>(
+      module.files["index.js"]!
+    ).asyncapiSchema();
+
+    const channel = (address: string) =>
+      Object.values(doc.channels).find((c: any) => c.address === address) as any;
+
+    // The listener's own parameter is the payload, not the function type.
+    expect(Object.keys(channel("user/signup").messages)).toEqual([
+      "UserSignupEvent",
+    ]);
+    expect(doc.components.schemas.UserSignupEvent.properties.id).toEqual({
+      type: "string",
+    });
+    // A returned stream says the same thing.
+    expect(Object.keys(channel("user/login").messages)).toEqual([
+      "UserLoginEvent",
+    ]);
+    expect(doc.operations.onSignup.action).toBe("send");
+    expect(doc.operations.logins.action).toBe("send");
+    expect(doc.operations.applySignup.action).toBe("receive");
+    // An interface of methods is not itself a message.
+    expect(doc.components.schemas.Events).toBeUndefined();
+  });
 });

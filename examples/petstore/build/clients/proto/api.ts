@@ -185,52 +185,6 @@ export class ApiError extends Error {
   }
 }
 
-function encodePath(value: string | number | boolean): string {
-  return encodeURIComponent(String(value));
-}
-
-function queryString(query: Record<string, unknown> | undefined): string {
-  if (!query) return "";
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined || value === null) continue;
-    // A repeated key is how every OpenAPI serialisation style spells an array.
-    if (Array.isArray(value)) {
-      for (const item of value) search.append(key, String(item));
-      continue;
-    }
-    search.append(key, String(value));
-  }
-  const text = search.toString();
-  return text ? `?${text}` : "";
-}
-
-function headerRecord(
-  headers: Record<string, unknown> | undefined,
-  cookie: Record<string, unknown> | undefined,
-  contentType: string | undefined
-): Record<string, string> {
-  const record: Record<string, string> = {};
-  if (contentType) record["content-type"] = contentType;
-
-  for (const [key, value] of Object.entries(headers ?? {})) {
-    if (value === undefined || value === null) continue;
-    record[key] = String(value);
-  }
-
-  // Cookie parameters travel in one header, which is the only way HTTP has.
-  const crumbs = Object.entries(cookie ?? {}).filter(
-    ([, value]) => value !== undefined && value !== null
-  );
-  if (crumbs.length > 0) {
-    record["cookie"] = crumbs
-      .map(([key, value]) => `${key}=${encodeURIComponent(String(value))}`)
-      .join("; ");
-  }
-
-  return record;
-}
-
 async function parseBody(response: Response): Promise<unknown> {
   if (response.status === 204) return undefined;
   const text = await response.text();

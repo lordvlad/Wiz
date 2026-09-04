@@ -112,7 +112,7 @@ function emitReactQueryFiles(
   const queryCode = [
     banner("React Query options getters and hooks for query operations."),
     'import { useQuery, type UseQueryOptions } from "@tanstack/react-query";',
-    'import { createClient, type Client } from "./api.ts";',
+    'import { defaultClient, type Client } from "./api.ts";',
     'import { createMutations } from "./mutations.ts";',
     "",
     ...queryOps.flatMap((op) => {
@@ -136,7 +136,7 @@ function emitReactQueryFiles(
         ">(",
         `  ${optParamDecl},`,
         `  queryOptions?: Omit<UseQueryOptions<Awaited<ReturnType<Client["${op.name}"]>>, TError, TData>, "queryKey" | "queryFn">,`,
-        "  client: Client = createClient()",
+        "  client: Client = defaultClient()",
         ") {",
         "  return {",
         `    queryKey: [${pathLit}, options] as const,`,
@@ -152,7 +152,7 @@ function emitReactQueryFiles(
         ">(",
         `  ${optParamDecl},`,
         `  queryOptions?: Omit<UseQueryOptions<Awaited<ReturnType<Client["${op.name}"]>>, TError, TData>, "queryKey" | "queryFn">,`,
-        "  client: Client = createClient()",
+        "  client: Client = defaultClient()",
         ") {",
         `  return useQuery(get${op.capitalName}QueryOptions(options${op.hasRequiredSlots ? "" : "!"}, queryOptions, client));`,
         "}",
@@ -160,7 +160,7 @@ function emitReactQueryFiles(
       ];
     }),
     "/** Factory binding all query options getters and query hooks to a custom client instance. */",
-    "export function createQueries(client: Client = createClient()) {",
+    "export function createQueries(client: Client = defaultClient()) {",
     "  return {",
     ...queryOps.map((op) => {
       const optParamDecl = op.hasRequiredSlots
@@ -181,7 +181,7 @@ function emitReactQueryFiles(
     "}",
     "",
     "/** Factory binding all query and mutation hooks to a custom client instance. */",
-    "export function createHooks(client: Client = createClient()) {",
+    "export function createHooks(client: Client = defaultClient()) {",
     "  return {",
     "    ...createQueries(client),",
     "    ...createMutations(client),",
@@ -193,7 +193,7 @@ function emitReactQueryFiles(
   const mutationCode = [
     banner("React Query options getters and hooks for mutation operations."),
     'import { useMutation, type UseMutationOptions } from "@tanstack/react-query";',
-    'import { createClient, type Client } from "./api.ts";',
+    'import { defaultClient, type Client } from "./api.ts";',
     "",
     ...mutationOps.flatMap((op) => {
       const pathLit = JSON.stringify(op.pathTemplate);
@@ -209,7 +209,7 @@ function emitReactQueryFiles(
         "  TError = unknown",
         ">(",
         `  mutationOptions?: Omit<UseMutationOptions<TData, TError, Parameters<Client["${op.name}"]>[0]>, "mutationFn">,`,
-        "  client: Client = createClient()",
+        "  client: Client = defaultClient()",
         ") {",
         "  return {",
         `    mutationKey: [${pathLit}, ${methodLit}] as const,`,
@@ -224,7 +224,7 @@ function emitReactQueryFiles(
         "  TError = unknown",
         ">(",
         `  mutationOptions?: Omit<UseMutationOptions<TData, TError, Parameters<Client["${op.name}"]>[0]>, "mutationFn">,`,
-        "  client: Client = createClient()",
+        "  client: Client = defaultClient()",
         ") {",
         `  return useMutation(get${op.capitalName}MutationOptions(mutationOptions, client));`,
         "}",
@@ -232,7 +232,7 @@ function emitReactQueryFiles(
       ];
     }),
     "/** Factory binding all mutation options getters and mutation hooks to a custom client instance. */",
-    "export function createMutations(client: Client = createClient()) {",
+    "export function createMutations(client: Client = defaultClient()) {",
     "  return {",
     ...mutationOps.map((op) => {
       return [

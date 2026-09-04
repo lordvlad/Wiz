@@ -4,10 +4,11 @@
  * These are hand-written on purpose: wiz derives the *contract* (which media
  * types an operation offers, and the schema of each payload), not the bytes for
  * every possible representation. JSON is structural, so `encodeJson<T>` is
- * generated; YAML comes from Bun; XML and CSV are rolled here.
+ * generated; YAML and XML come from Bun; CSV is rolled here, over the keys
+ * `keysOf<Pet>()` reports rather than a column list repeated by hand.
  */
-import { encodeJson } from "wiz";
-import { PetStatus, Species, type Pet } from "./model.ts";
+import { encodeJson, keysOf } from "wiz";
+import type { Pet } from "./model.ts";
 
 export const JSON_MIME = "application/json";
 export const YAML_MIME = "application/yaml";
@@ -15,115 +16,49 @@ export const XML_MIME = "application/xml";
 export const CSV_MIME = "text/csv";
 export const PROTO_MIME = "application/x-protobuf";
 
-/** `bigint` and `Date` have no JSON form, so the generated codec decides one. */
-export function petsToJson(pets: Pet[]): string {
-  return encodeJson<Pet[]>(pets, 2);
-}
+/** `Bun.XML.stringify` writes the element and nothing else, prolog included. */
+const XML_PROLOG = '<?xml version="1.0" encoding="UTF-8"?>\n';
 
-export function petToJson(pet: Pet): string {
-  return encodeJson<Pet>(pet, 2);
-}
+/** The CSV columns are the declared keys of `Pet`, in declaration order. */
+const CSV_COLUMNS = keysOf<Pet>();
 
-/** A plain object with every value YAML can carry directly. */
-function plain(pet: Pet): Record<string, unknown> {
-  return {
-    id: pet.id,
-    name: pet.name,
-    species: Species[pet.species],
-    status: PetStatus[pet.status],
-    priceCents: pet.priceCents.toString(),
-    tags: pet.tags,
-    owner: pet.owner ?? null,
-    addedAt: pet.addedAt.toISOString(),
-  };
-}
-
-export function petsToYaml(pets: Pet[]): string {
-  return Bun.YAML.stringify(pets.map(plain));
-}
-
-const XML_ESCAPES: Record<string, string> = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&apos;",
-};
-
-function xmlEscape(value: string): string {
-  return value.replace(/[&<>"']/g, (ch) => XML_ESCAPES[ch]!);
-}
-
-function petToXmlBody(pet: Pet, indent: string): string[] {
-  const lines: string[] = [];
-  for (const [key, value] of Object.entries(plain(pet))) {
-    if (value === null) continue;
-    if (Array.isArray(value)) {
-      lines.push(`${indent}<${key}>`);
-      for (const item of value) {
-        lines.push(`${indent}  <tag>${xmlEscape(String(item))}</tag>`);
-      }
-      lines.push(`${indent}</${key}>`);
-      continue;
-    }
-    if (typeof value === "object") {
-      lines.push(`${indent}<${key}>`);
-      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-        lines.push(`${indent}  <${k}>${xmlEscape(String(v))}</${k}>`);
-      }
-      lines.push(`${indent}</${key}>`);
-      continue;
-    }
-    lines.push(`${indent}<${key}>${xmlEscape(String(value))}</${key}>`);
-  }
-  return lines;
-}
-
-export function petsToXml(pets: Pet[]): string {
-  const lines = ['<?xml version="1.0" encoding="UTF-8"?>', "<pets>"];
-  for (const pet of pets) {
-    lines.push("  <pet>");
-    lines.push(...petToXmlBody(pet, "    "));
-    lines.push("  </pet>");
-  }
-  lines.push("</pets>");
-  return lines.join("\n");
+/**
+ * Pets with every value a text format can carry directly.
+ *
+ * `bigint` and `Date` have no JSON form, so the generated codec decides one — a
+ * decimal string for money, ISO 8601 for the timestamp — and YAML and CSV reuse
+ * that decision instead of inventing a second one. It has to go through the
+ * codec rather than a serializer hook because `Bun.YAML.stringify` refuses a
+ * `bigint` outright and takes no replacer to convert it ("YAML.stringify does
+ * not support the replacer argument", Bun 1.4). `Bun.XML.stringify` needs none
+ * of this: it writes a `bigint` as digits and a `Date` as its ISO string.
+ */
+function wireRows(pets: Pet[]): Array<Record<string, unknown>> {
+  return JSON.parse(encodeJson<Pet[]>(pets)) as Array<Record<string, unknown>>;
 }
 
 /** RFC 4180: double the quotes, and quote anything containing a delimiter. */
 function csvCell(value: unknown): string {
-  const text = String(value ?? "");
+  const text =
+    value === undefined || value === null
+      ? ""
+      : Array.isArray(value)
+        ? value.join(" ")
+        : typeof value === "object"
+          ? String((value as { email?: string }).email ?? "")
+          : String(value);
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-const CSV_COLUMNS = [
-  "id",
-  "name",
-  "species",
-  "status",
-  "priceCents",
-  "tags",
-  "owner",
-  "addedAt",
-] as const;
-
 export function petsToCsv(pets: Pet[]): string {
   const rows = [CSV_COLUMNS.join(",")];
-  for (const pet of pets) {
-    const flat = plain(pet);
-    rows.push(
-      CSV_COLUMNS.map((column) => {
-        const value = flat[column];
-        if (column === "tags") return csvCell((value as string[]).join(" "));
-        if (column === "owner") {
-          return csvCell(value === null ? "" : (value as { email: string }).email);
-        }
-        return csvCell(value);
-      }).join(",")
-    );
+  for (const row of wireRows(pets)) {
+    rows.push(CSV_COLUMNS.map((column) => csvCell(row[column])).join(","));
   }
-  // A trailing newline: `wc -l` and every CSV reader expect one.
-  return `${rows.join("\n")}\n`;
+  // A trailing newline: `wc -l` and every CSV reader expect one. Pushing an
+  // empty row is one join rather than a join and a concatenation.
+  rows.push("");
+  return rows.join("\n");
 }
 
 /** Media types `GET /pets` can answer in, best first for `Accept: * / *`. */
@@ -131,9 +66,15 @@ export const LIST_REPRESENTATIONS: Array<{
   mimetype: string;
   render(pets: Pet[]): string;
 }> = [
-  { mimetype: JSON_MIME, render: petsToJson },
-  { mimetype: YAML_MIME, render: petsToYaml },
-  { mimetype: XML_MIME, render: petsToXml },
+  { mimetype: JSON_MIME, render: (pets) => encodeJson<Pet[]>(pets, 2) },
+  {
+    mimetype: YAML_MIME,
+    render: (pets) => Bun.YAML.stringify(wireRows(pets), null, 2),
+  },
+  {
+    mimetype: XML_MIME,
+    render: (pets) => XML_PROLOG + Bun.XML.stringify({ pets: { pet: pets } }, null, 2),
+  },
   { mimetype: CSV_MIME, render: petsToCsv },
 ];
 

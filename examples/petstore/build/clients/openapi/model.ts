@@ -6,9 +6,6 @@ export interface Problem {
   status: number;
 }
 
-/** Where a pet is in its journey through the store. */
-export type PetStatus = 0 | 1 | 2;
-
 export interface Pet {
   id: number;
   name: string;
@@ -20,8 +17,18 @@ export interface Pet {
   addedAt: Date;
 }
 
-/** What kind of animal. Ordinals are the protobuf enum values. */
-export type Species = 0 | 1 | 2 | 3;
+/**
+ * What kind of animal.
+ * 
+ * A union of string literals rather than an `enum`: it is a type, so it costs
+ * nothing at runtime, and the value on the wire is the word itself in every
+ * format - `"dog"` in JSON, YAML, XML, CSV and protobuf alike, where a numeric
+ * enum would be `1` in some and `Dog` in others.
+ */
+export type Species = "unknown" | "dog" | "cat" | "bird";
+
+/** Where a pet is in its journey through the store. */
+export type PetStatus = "available" | "pending" | "sold";
 
 export interface Owner {
   id: string;

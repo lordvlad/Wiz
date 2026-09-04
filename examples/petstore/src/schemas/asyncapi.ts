@@ -1,11 +1,14 @@
 /**
  * The AsyncAPI document, derived from `PetEvents` at compile time.
  *
+ * `PetEvents` is implemented by `PetStore`, so the producer in the document is
+ * the store's own listener registration and the consumer its `applyChange`.
+ *
  * Run directly to print it: `bun run src/schemas/asyncapi.ts`.
  */
 import { asyncapiSchema } from "wiz";
-import type { PetEvents } from "../events.ts";
 import type { PetChanged } from "../model.ts";
+import type { PetEvents } from "../service.ts";
 
 export const asyncapi = asyncapiSchema<[PetEvents, PetChanged]>({
   info: {

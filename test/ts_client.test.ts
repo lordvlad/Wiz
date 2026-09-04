@@ -172,6 +172,9 @@ describe("emitted files", () => {
     // Four operations, four request bodies: the delegates forward, they do not
     // re-implement.
     expect(source.match(/send\(config, \{/g)).toHaveLength(4);
+    // The module-level client is reachable, so a hook or another generated file
+    // can default to the one `configure` maintains instead of building its own.
+    expect(source).toContain("export function defaultClient(): Client {");
   });
 
   test("summaries reach the emitted method", () => {

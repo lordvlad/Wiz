@@ -9,6 +9,7 @@ import type {
   ParameterIR,
   ServiceIR,
 } from "../ir/service.ts";
+import { jsonSchemaToIR as schemaToIR } from "./jsonSchema.ts";
 import { parseApiDocument, type ExtractApiOptions } from "./openapi.ts";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -24,101 +25,6 @@ interface Ctx {
   diagnostics: ApiDiagnostic[];
   strict: boolean;
   ids: number;
-}
-
-function nextId(ctx: Ctx): string {
-  return `o_${++ctx.ids}`;
-}
-
-const SCHEMAS_REF = "#/components/schemas/";
-
-function schemaToIR(raw: unknown, ctx: Ctx, pointer: string): TypeIR {
-  if (raw === undefined || raw === true) {
-    return { id: nextId(ctx), kind: "primitive", type: "unknown" };
-  }
-  if (raw === false) {
-    return { id: nextId(ctx), kind: "primitive", type: "never" };
-  }
-  if (!isObject(raw)) {
-    return { id: nextId(ctx), kind: "primitive", type: "unknown" };
-  }
-
-  if (typeof raw.$ref === "string") {
-    const ref = raw.$ref;
-    if (!ref.startsWith(SCHEMAS_REF) || ref.length === SCHEMAS_REF.length) {
-      return { id: nextId(ctx), kind: "primitive", type: "unknown" };
-    }
-    const name = ref.slice(SCHEMAS_REF.length);
-    return { id: nextId(ctx), kind: "ref", targetId: name, name };
-  }
-
-  const declared = raw.type;
-  const typeName = typeof declared === "string" ? declared : undefined;
-
-  if (typeName === "string") {
-    if (Array.isArray(raw.enum)) {
-      return {
-        id: nextId(ctx),
-        kind: "enum",
-        members: raw.enum.map((v) => ({ name: String(v), value: String(v) })),
-      };
-    }
-    return { id: nextId(ctx), kind: "primitive", type: "string" };
-  }
-  if (typeName === "integer" || typeName === "number") {
-    return { id: nextId(ctx), kind: "primitive", type: "number" };
-  }
-  if (typeName === "boolean") {
-    return { id: nextId(ctx), kind: "primitive", type: "boolean" };
-  }
-  if (typeName === "null") {
-    return { id: nextId(ctx), kind: "primitive", type: "null" };
-  }
-
-  if (typeName === "array" || Array.isArray(raw.items)) {
-    const itemSchema = isObject(raw.items) ? raw.items : {};
-    return {
-      id: nextId(ctx),
-      kind: "array",
-      element: schemaToIR(itemSchema, ctx, `${pointer}/items`),
-    };
-  }
-
-  if (typeName === "object" || isObject(raw.properties)) {
-    const propsObj = isObject(raw.properties) ? raw.properties : {};
-    const requiredList = Array.isArray(raw.required)
-      ? raw.required.filter((r): r is string => typeof r === "string")
-      : [];
-
-    const properties = Object.entries(propsObj).map(([propName, propRaw]) => {
-      const isReq = requiredList.includes(propName);
-      const propType = schemaToIR(propRaw, ctx, `${pointer}/properties/${token(propName)}`);
-      return {
-        name: propName,
-        type: propType,
-        optional: !isReq,
-        // Same source as the OpenAPI extractor reads it from.
-        readonly: isObject(propRaw) && propRaw.readOnly === true,
-        description: isObject(propRaw) && typeof propRaw.description === "string" ? propRaw.description : undefined,
-      };
-    });
-
-    return {
-      id: nextId(ctx),
-      kind: "object",
-      properties,
-    };
-  }
-
-  if (Array.isArray(raw.oneOf) || Array.isArray(raw.anyOf)) {
-    const membersRaw = (raw.oneOf || raw.anyOf) as unknown[];
-    const types = membersRaw.map((m, idx) =>
-      schemaToIR(m, ctx, `${pointer}/oneOf/${idx}`)
-    );
-    return { id: nextId(ctx), kind: "union", types };
-  }
-
-  return { id: nextId(ctx), kind: "primitive", type: "unknown" };
 }
 
 export function extractOpenRpcIR(
@@ -155,9 +61,9 @@ export function extractOpenRpcIR(
 
   for (const [schemaName, schemaRaw] of Object.entries(schemasObj)) {
     const ir = schemaToIR(schemaRaw, ctx, `#/components/schemas/${token(schemaName)}`);
-    if (ir.kind === "object" || ir.kind === "enum") {
-      ir.name = schemaName;
-    }
+    // Every component is a declaration a client can name, union of literals
+    // and scalar alias included; only a `$ref` already carries its own name.
+    if (ir.kind !== "ref") ir.name = schemaName;
     typesMap.set(schemaName, ir);
   }
 

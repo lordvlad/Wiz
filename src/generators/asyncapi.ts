@@ -26,14 +26,26 @@ export function generateAsyncApiSchemaCode(
   const schemas: Record<string, unknown> = {};
   const messages: Record<string, unknown> = {};
 
-  for (const { name, ir } of types) {
-    const schema = irToAsyncApiSchema(ir);
-    schemas[name] = schema;
+  const register = (name: string, ir: TypeIR): void => {
+    if (schemas[name]) return;
+    schemas[name] = irToAsyncApiSchema(ir);
     messages[name] = {
       name,
       title: name,
       payload: { $ref: `#/components/schemas/${name}` },
     };
+  };
+
+  for (const { name, ir } of types) register(name, ir);
+
+  // A channel refs `#/components/messages/<payload>`, so a payload that only a
+  // harvested method mentions has to be registered too: otherwise the document
+  // carries a ref to nothing, which is what `asyncapiSchema<[Events]>()` used
+  // to emit when the message type was not also passed by hand.
+  for (const method of service?.methods ?? []) {
+    if (!isAsyncApiMethod(method)) continue;
+    const payload = method.request.body?.[0]?.content;
+    if (payload?.name) register(payload.name, payload);
   }
 
   const document: Record<string, unknown> = {};

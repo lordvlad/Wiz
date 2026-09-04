@@ -17,6 +17,11 @@ export interface UserSignupEvent {
   timestamp: Date;
 }
 
+export interface UserLoginEvent {
+  userId: string;
+  at: Date;
+}
+
 export interface UserLogoutEvent {
   userId: string;
 }
@@ -24,12 +29,26 @@ export interface UserLogoutEvent {
 /** @service UserEvents */
 export interface UserEvents {
   /**
+   * The application produces these, and a producer is a listener
+   * registration: what the listener receives is the channel's payload.
+   *
    * @producer
    * @channel user/signup
    */
-  signup(event: UserSignupEvent): void;
+  onSignup(listener: (event: UserSignupEvent) => void): void;
 
   /**
+   * A stream says the same thing, for a producer that is pulled rather than
+   * pushed.
+   *
+   * @producer
+   * @channel user/login
+   */
+  logins(): AsyncIterable<UserLoginEvent>;
+
+  /**
+   * A consumer is the other direction, so it takes the payload straight.
+   *
    * @consumer
    * @channel user/logout
    */
@@ -53,10 +72,18 @@ export const document = asyncapiSchema<[UserEvents]>({
   (`package.service.channel`, or `service.channel` when there is no package).
 - `@summary`, and the doc comment's prose as `description`.
 
-The message payload is the first parameter's type, or the return type for a
-method that takes none. A type passed to `asyncapiSchema` that has no callable
-members is a plain message type: it contributes a component schema and a
-message, and no channel.
+The message payload is read off the signature, in whichever of the three
+spellings the method uses: the parameter of a listener the method registers
+(`onSignup(listener: (event: E) => void)`), the element of an `AsyncIterable`,
+`AsyncIterator`, `AsyncGenerator` or `ReadableStream` the method returns
+(`logins(): AsyncIterable<E>`), or the first parameter itself
+(`logout(event: E)`). `Promise` is unwrapped first, so a method that resolves
+to a stream reads the same as one that returns it.
+
+A type passed to `asyncapiSchema` that has no callable members is a plain
+message type: it contributes a component schema and a message, and no channel.
+A service interface contributes channels and operations only — it is not itself
+a message.
 
 ## 2. Client Generator (`asyncapiClient` / `tsClient`)
 

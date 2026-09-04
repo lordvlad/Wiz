@@ -7,9 +7,9 @@
   },
   "methods": [
     {
-      "name": "Pets.listPets",
+      "name": "Pets.list",
       "summary": "List pets",
-      "description": "Lists pets, filtered and capped.",
+      "description": "Lists pets, filtered and capped.\n\nThe one operation offered in four representations. Each `@response 200`\ntag adds a media type to the *same* response object, so the document says\none 200 with four `content` entries.",
       "params": [
         {
           "name": "query",
@@ -31,9 +31,9 @@
       }
     },
     {
-      "name": "Pets.getPet",
+      "name": "Pets.get",
       "summary": "Fetch a pet",
-      "description": "Fetches one pet by id.",
+      "description": "Fetches one pet as JSON or as protobuf.\n\nThe protobuf representation is encoded by `encodeProto<Pet>`, generated\nfrom the same `@fieldNumber` declarations as `build/schemas/petstore.proto`.",
       "params": [
         {
           "name": "id",
@@ -52,12 +52,12 @@
       }
     },
     {
-      "name": "Pets.addPet",
+      "name": "Pets.add",
       "summary": "Add a pet",
-      "description": "Adds a pet to the store.",
+      "description": "Adds a pet to the store and publishes a change event.",
       "params": [
         {
-          "name": "pet",
+          "name": "body",
           "required": true,
           "schema": {
             "$ref": "#/components/schemas/NewPet"
@@ -73,9 +73,9 @@
       }
     },
     {
-      "name": "Pets.sellPet",
+      "name": "Pets.sell",
       "summary": "Sell a pet",
-      "description": "Sells a pet to an owner.",
+      "description": "Sells a pet to an owner and publishes a change event.",
       "params": [
         {
           "name": "id",
@@ -85,7 +85,7 @@
           }
         },
         {
-          "name": "sale",
+          "name": "body",
           "required": true,
           "schema": {
             "$ref": "#/components/schemas/Sale"
@@ -98,6 +98,25 @@
         "schema": {
           "$ref": "#/components/schemas/Pet"
         }
+      }
+    },
+    {
+      "name": "Pets.remove",
+      "summary": "Remove a pet",
+      "description": "Removes a pet. No body, so no content.",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "number"
+          }
+        }
+      ],
+      "paramStructure": "by-name",
+      "result": {
+        "name": "result",
+        "schema": {}
       }
     },
     {
@@ -114,58 +133,21 @@
   ],
   "components": {
     "schemas": {
-      "PetRpcApi": {
-        "type": "object",
-        "properties": {
-          "listPets": {
-            "$ref": "#/components/schemas/listPets",
-            "description": "Lists pets, filtered and capped."
-          },
-          "getPet": {
-            "$ref": "#/components/schemas/getPet",
-            "description": "Fetches one pet by id."
-          },
-          "addPet": {
-            "$ref": "#/components/schemas/addPet",
-            "description": "Adds a pet to the store."
-          },
-          "sellPet": {
-            "$ref": "#/components/schemas/sellPet",
-            "description": "Sells a pet to an owner."
-          }
-        },
-        "required": [
-          "listPets",
-          "getPet",
-          "addPet",
-          "sellPet"
-        ]
-      },
-      "listPets": {
-        "description": "Lists pets, filtered and capped.",
-        "type": "object",
-        "properties": {}
-      },
-      "getPet": {
-        "description": "Fetches one pet by id.",
-        "type": "object",
-        "properties": {}
-      },
-      "addPet": {
-        "description": "Adds a pet to the store.",
-        "type": "object",
-        "properties": {}
-      },
-      "sellPet": {
-        "description": "Sells a pet to an owner.",
-        "type": "object",
-        "properties": {}
-      },
       "PetQuery": {
         "type": "object",
         "properties": {
           "status": {
-            "$ref": "#/components/schemas/PetStatus",
+            "anyOf": [
+              {
+                "const": "available"
+              },
+              {
+                "const": "pending"
+              },
+              {
+                "const": "sold"
+              }
+            ],
             "description": "Restrict to one status."
           },
           "q": {
@@ -179,15 +161,6 @@
             "default": 20
           }
         }
-      },
-      "PetStatus": {
-        "description": "Where a pet is in its journey through the store.",
-        "type": "number",
-        "enum": [
-          0,
-          1,
-          2
-        ]
       },
       "Pet": {
         "type": "object",
@@ -246,13 +219,34 @@
         ]
       },
       "Species": {
-        "description": "What kind of animal. Ordinals are the protobuf enum values.",
-        "type": "number",
-        "enum": [
-          0,
-          1,
-          2,
-          3
+        "description": "What kind of animal.\n\nA union of string literals rather than an `enum`: it is a type, so it costs\nnothing at runtime, and the value on the wire is the word itself in every\nformat - `\"dog\"` in JSON, YAML, XML, CSV and protobuf alike, where a numeric\nenum would be `1` in some and `Dog` in others.",
+        "anyOf": [
+          {
+            "const": "unknown"
+          },
+          {
+            "const": "dog"
+          },
+          {
+            "const": "cat"
+          },
+          {
+            "const": "bird"
+          }
+        ]
+      },
+      "PetStatus": {
+        "description": "Where a pet is in its journey through the store.",
+        "anyOf": [
+          {
+            "const": "available"
+          },
+          {
+            "const": "pending"
+          },
+          {
+            "const": "sold"
+          }
         ]
       },
       "Owner": {

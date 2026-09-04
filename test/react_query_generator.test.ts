@@ -201,11 +201,28 @@ describe("Multi-tenancy & query options verification", () => {
     const queries = files["queries.ts"]!;
     const mutations = files["mutations.ts"]!;
 
-    expect(queries).toContain("export function createQueries(client: Client = createClient())");
-    expect(mutations).toContain("export function createMutations(client: Client = createClient())");
-    expect(queries).toContain("export function createHooks(client: Client = createClient())");
+    expect(queries).toContain("export function createQueries(client: Client = defaultClient())");
+    expect(mutations).toContain("export function createMutations(client: Client = defaultClient())");
+    expect(queries).toContain("export function createHooks(client: Client = defaultClient())");
     expect(queries).toContain("...createQueries(client)");
     expect(queries).toContain("...createMutations(client)");
+  });
+
+  /**
+   * A default of `createClient()` built a client per invocation, so `configure()`
+   * on the module-level one never reached a hook.
+   */
+  test("every client default is the module-level client, not a fresh one", () => {
+    const queries = files["queries.ts"]!;
+    const mutations = files["mutations.ts"]!;
+
+    for (const source of [queries, mutations]) {
+      expect(source).toContain('import { defaultClient, type Client } from "./api.ts";');
+      expect(source).toContain("client: Client = defaultClient()");
+      expect(source).not.toContain("createClient()");
+    }
+
+    expect(files["api.ts"]!).toContain("export function defaultClient(): Client {");
   });
 });
 

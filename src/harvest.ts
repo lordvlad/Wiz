@@ -1171,16 +1171,29 @@ function parseAsyncApiMethodFromSignature(
   const jsDocSummary = jsDoc?.meta?.["summary"]?.[0] ?? jsDoc?.meta?.["Summary"]?.[0];
   const summary = typeof jsDocSummary === "string" ? jsDocSummary : undefined;
   const params = sig.getParameters();
-  let msgType = params[0]
-    ? checker.getTypeOfSymbolAtLocation(params[0], params[0].valueDeclaration ?? params[0].declarations?.[0]!)
+  const first = params[0];
+  let msgType = first
+    ? checker.getTypeOfSymbolAtLocation(first, first.valueDeclaration ?? first.declarations?.[0]!)
     : sig.getReturnType();
 
-  if (
-    (msgType.symbol?.name === "Promise" || msgType.aliasSymbol?.name === "Promise") &&
-    (msgType as ts.TypeReference).typeArguments?.length
-  ) {
-    msgType = (msgType as ts.TypeReference).typeArguments![0]!;
+  // An application produces events by handing them to a listener, so the
+  // payload of `onPetChanged(listener: (event: E) => void)` is `E`: the
+  // listener's own parameter, not the function type it is declared as.
+  const listener = msgType.getCallSignatures()[0];
+  if (listener) {
+    const handled = listener.getParameters()[0];
+    msgType = handled
+      ? checker.getTypeOfSymbolAtLocation(
+          handled,
+          handled.valueDeclaration ?? handled.declarations?.[0]!
+        )
+      : listener.getReturnType();
   }
+
+  // `petChangedEvents(): AsyncIterable<E>` says the same thing as a stream of
+  // one payload rather than a callback, and both spellings mean the channel
+  // carries `E`.
+  msgType = unwrapStreamingType(unwrapPromiseType(msgType)).type;
   const msgIR = extractTypeIR(msgType, checker);
 
   return {
@@ -1624,12 +1637,20 @@ export function harvestMcpOperationsFromTypeArgs(
 
   return methods;
 }
+
+/**
+ * A stream of `T` unwrapped to `T`, in every spelling TypeScript offers for
+ * one: this is how a `stream` rpc side and an event channel's payload are
+ * both read off a signature.
+ */
 function unwrapStreamingType(type: ts.Type): { streaming: boolean; type: ts.Type } {
   const symName = type.aliasSymbol?.name ?? type.symbol?.name;
   if (
     symName === "AsyncIterable" ||
-    symName === "ReadableStream" ||
-    symName === "AsyncGenerator"
+    symName === "AsyncIterator" ||
+    symName === "AsyncIterableIterator" ||
+    symName === "AsyncGenerator" ||
+    symName === "ReadableStream"
   ) {
     const typeArgs = (type as ts.TypeReference).typeArguments;
     if (typeArgs && typeArgs.length > 0) {
