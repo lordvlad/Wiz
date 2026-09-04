@@ -3,7 +3,6 @@ import ts from "typescript";
 import { extractTypeIR } from "./extractors/typescript.ts";
 import {
   collectOperations,
-  collectRouteOperations,
   COMPILER_OPTIONS,
   harvestAsyncApiOperationsFromTypeArgs,
   harvestDocument,
@@ -199,7 +198,7 @@ export interface TransformOptions {
   /**
    * Refuse anything that cannot be answered from this file alone.
    *
-   * `openapiDocument()` reads every route reachable from the module, so a
+   * `openapiDocument()` reads every service reachable from the module, so a
    * single-file eject cannot honour it; better to say so than to emit a
    * document silently missing most of the program.
    */
@@ -307,8 +306,8 @@ export function transformSource(options: TransformOptions): TransformResult {
           if (isolated) {
             throw new Error(
               `[wiz] ${path} calls openapiDocument(), which is built from every ` +
-                `route reachable from the module. That needs the whole program, ` +
-                `so eject it as a project rather than a single file.`
+                `document reachable from the module. That needs the whole ` +
+                `program, so eject it as a project rather than a single file.`
             );
           }
           modified = true;
@@ -316,31 +315,6 @@ export function transformSource(options: TransformOptions): TransformResult {
             context.factory,
             harvestDocument(path, logger)
           );
-        }
-        const adapter =
-          fnName === "bunRoutes"
-            ? { base: 0, routes: 1 }
-            : fnName === "honoRoutes"
-              ? { base: 1, routes: 2 }
-              : undefined;
-        if (adapter && ts.isPropertyAccessExpression(expression)) {
-          const routesArg = node.arguments[adapter.routes];
-          if (!routesArg) return ts.visitEachChild(node, visitor, context);
-
-          // Descriptors reach the document through `harvestDocument`,
-          // straight from the program, so nothing is registered here.
-          // This pass runs for its diagnostics alone: a route that cannot
-          // be documented is reported against the file declaring it,
-          // whether or not anything asks for the document.
-          collectRouteOperations(routesArg, checker, sourceFile, logger);
-          modified = true;
-
-          // Bun: the call collapses to the routes literal, which Bun.serve
-          // consumes directly. Hono: the call must survive, because it is
-          // what mounts the handlers onto the app.
-          return fnName === "bunRoutes"
-            ? (ts.visitNode(routesArg, visitor) as ts.Expression)
-            : (ts.visitEachChild(node, visitor, context) as ts.Expression);
         }
 
         if (fnName && HELPER_FUNCTIONS.has(fnName)) {

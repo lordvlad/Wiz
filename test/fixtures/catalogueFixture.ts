@@ -53,19 +53,5 @@ export const schema = openapiSchema<[ProductService]>({
   info: { title: "Catalogue", version: "2.0.0" },
 });
 
-export const routes = openapiSchema.bunRoutes(
-  { openapi: "3.1.0", info: { title: "Catalogue", version: "2.0.0" } },
-  {
-    "/products": {
-      GET: () => Response.json([]),
-      POST: () => Response.json({}, { status: 201 }),
-    },
-    "/products/:id": {
-      GET: () => Response.json({}),
-      DELETE: () => new Response(null, { status: 204 }),
-    },
-  }
-);
-
 /** Resolved at build time; the test reads it from here. */
 export const document = openapiDocument();

@@ -56,7 +56,7 @@ wiz/
 ├── src/
 │   ├── index.ts            # Public API exported functions & stubs
 │   ├── plugin.ts           # Bun macro/plugin transformer and callsite rewrites
-│   ├── harvest.ts          # TypeScript AST/type harvesting (openapiSchema, asyncapiSchema, openRPCSchema, mcpSchema, grpcSchema, Bun/Hono routes)
+│   ├── harvest.ts          # TypeScript AST/type harvesting (openapiSchema, asyncapiSchema, openRPCSchema, mcpSchema, grpcSchema, openapiDocument merging)
 │   ├── registry.ts         # Structural type key hash computation & module registry
 │   ├── types.ts            # TypeIR definitions and utility re-exports
 │   ├── openapiDialect.ts   # OpenAPI JSDoc annotation and constraint mappings

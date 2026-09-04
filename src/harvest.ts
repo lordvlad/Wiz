@@ -23,13 +23,13 @@ import { silentLogger, type WizLogger } from "./logger.ts";
 import { flattenObjectProperties, isUserNamedType, type TypeIR } from "./types.ts";
 
 /**
- * Reading routes out of source: `op<{ … }>` descriptors, Bun and Hono route
- * maps, and the merged document `openapiDocument()` is replaced with.
+ * Reading declarations out of source: the operations a spec macro's type
+ * arguments describe, and the merged document `openapiDocument()` is replaced
+ * with.
  *
- * Everything here is a read. Nothing is registered, nothing is rewritten, and
- * the routes value the user wrote reaches the router untouched — the plugin
- * calls in, gets `ServiceMethodIR`s or a finished document back, and does the
- * rewriting itself.
+ * Everything here is a read. Nothing is registered and nothing is rewritten -
+ * the plugin calls in, gets `ServiceMethodIR`s or a finished document back,
+ * and does the rewriting itself.
  */
 
 const HTTP_METHODS = new Set([
@@ -214,158 +214,6 @@ export function collectOperations(
   return methods;
 }
 
-interface OperationSpec {
-  request: HttpRequestIR;
-  responses: HttpResponseIR[];
-}
-
-/**
- * Reads the single named-member type argument of `op<{ query: Q; … }>()` into
- * the request/response halves of a service method. Named slots beat positional
- * generics: callers omit what they do not use and new slots can be added
- * without shifting anyone's arguments.
- */
-
-/**
- * Harvests path descriptors from a Bun `routes` object literal. Purely a read:
- * the routes value is handed back to `Bun.serve` untouched.
- *
- * Recognised values per Bun's `Routes` type:
- *   "/p": op<S>(handler)                 -> single operation, defaults to GET
- *   "/p": { GET: op<S>(h), POST: … }     -> one operation per method key
- *   "/p": new Response(…) | handler      -> documented as a bare GET 200
- */
-export function collectRouteOperations(
-  arg: ts.Expression | undefined,
-  checker: ts.TypeChecker,
-  sourceFile: ts.SourceFile,
-  logger: WizLogger
-): HttpServiceMethodIR[] {
-  if (!arg) return [];
-  if (!ts.isObjectLiteralExpression(arg)) {
-    warnUndocumentable(
-      logger,
-      "routes must be an inline object literal to be documented; " +
-        "this value is only known at runtime, so no paths were collected",
-      arg,
-      sourceFile
-    );
-    return [];
-  }
-
-  const methods: HttpServiceMethodIR[] = [];
-
-  const push = (
-    path: string,
-    httpMethod: string,
-    value: ts.Expression | undefined
-  ) => {
-    const request: HttpRequestIR = { protocol: "http" };
-    const responses: HttpResponseIR[] = [{ protocol: "http", status: 204 }];
-    const method = httpMethodIR(
-      httpMethod,
-      path,
-      request,
-      responses,
-      undefined
-    );
-    logger.trace(
-      `[wiz] documented ${method.address.method} ${method.address.path}`
-    );
-    methods.push(method);
-  };
-
-  for (const property of arg.properties) {
-    if (ts.isSpreadAssignment(property)) {
-      warnUndocumentable(
-        logger,
-        "spread routes are resolved at runtime and cannot be documented; " +
-          "declare these paths inline to include them",
-        property,
-        sourceFile
-      );
-      continue;
-    }
-
-    if (!ts.isPropertyAssignment(property)) {
-      warnUndocumentable(
-        logger,
-        "only `\"/path\": value` entries can be documented",
-        property,
-        sourceFile
-      );
-      continue;
-    }
-
-    if (!ts.isStringLiteralLike(property.name)) {
-      warnUndocumentable(
-        logger,
-        "route keys must be string literals to be documented; " +
-          "a computed key has no statically known path",
-        property.name,
-        sourceFile
-      );
-      continue;
-    }
-
-    const path = property.name.text;
-    const value = property.initializer;
-
-    // Method map: every key that names an HTTP verb becomes its own operation.
-    if (ts.isObjectLiteralExpression(value)) {
-      for (const methodProperty of value.properties) {
-        if (!ts.isPropertyAssignment(methodProperty)) {
-          warnUndocumentable(
-            logger,
-            `route "${path}" has a method entry that cannot be documented`,
-            methodProperty,
-            sourceFile
-          );
-          continue;
-        }
-        const methodName = ts.isIdentifier(methodProperty.name)
-          ? methodProperty.name.text
-          : ts.isStringLiteralLike(methodProperty.name)
-            ? methodProperty.name.text
-            : undefined;
-        if (!methodName || !HTTP_METHODS.has(methodName.toLowerCase())) {
-          warnUndocumentable(
-            logger,
-            `route "${path}" has an entry that is not an HTTP method`,
-            methodProperty.name,
-            sourceFile
-          );
-          continue;
-        }
-        push(path, methodName.toLowerCase(), methodProperty.initializer);
-      }
-      continue;
-    }
-
-    // A referenced value that is not callable is almost certainly a method map
-    // held in a variable; documenting it as a bare GET would be a lie.
-    if (ts.isIdentifier(value) || ts.isPropertyAccessExpression(value)) {
-      const valueType = checker.getTypeAtLocation(value);
-      const callable = valueType.getCallSignatures().length > 0;
-      const isResponse = valueType.symbol?.name === "Response";
-      if (!callable && !isResponse) {
-        warnUndocumentable(
-          logger,
-          `route "${path}" refers to a value that cannot be introspected; ` +
-            "inline the handler or method map to document it",
-          value,
-          sourceFile
-        );
-        continue;
-      }
-    }
-
-    push(path, "get", value);
-  }
-
-  return methods;
-}
-
 /** Reads `"3.0"` / `3.0` from the second type argument; defaults to 3.1. */
 export function readOpenApiVersion(call: ts.CallExpression): "3.0" | "3.1" {
   const versionNode = call.typeArguments?.[1];
@@ -401,9 +249,9 @@ function readVersionFromBase(base: ts.Expression | undefined): "3.0" | "3.1" {
 /**
  * The value of a literal expression, or undefined if it is not one.
  *
- * The base document handed to `bunRoutes` has to be known at build time now
- * that the merge happens there. Anything computed at runtime cannot be, and is
- * reported rather than guessed at.
+ * A base document that `openapiDocument()` has to merge is read at build time,
+ * so it has to be a literal. Anything computed at runtime cannot be read here,
+ * and is left out rather than guessed at.
  */
 function staticValue(node: ts.Expression | undefined): unknown {
   if (!node) return undefined;
@@ -470,24 +318,8 @@ function runGeneratedDocument(
   return factory()(base) as OpenApiDocument;
 }
 
-/** `openapiSchema.bunRoutes(base, routes)` / `.honoRoutes(app, base, routes)`. */
-function routeAdapterFor(node: ts.Node):
-  | { call: ts.CallExpression; base: ts.Expression | undefined; routes: ts.Expression }
-  | undefined {
-  if (!ts.isCallExpression(node)) return undefined;
-  if (!ts.isPropertyAccessExpression(node.expression)) return undefined;
-
-  const name = node.expression.name.text;
-  const offset = name === "bunRoutes" ? 0 : name === "honoRoutes" ? 1 : undefined;
-  if (offset === undefined) return undefined;
-
-  const routes = node.arguments[offset + 1];
-  if (!routes) return undefined;
-  return { call: node, base: node.arguments[offset], routes };
-}
-
 /**
- * Every route reachable from this module, merged into one document.
+ * Every document reachable from this module, merged into one.
  *
  * `openapiDocument()` is answered at compile time, and a per-file transform
  * cannot know whether the file it is looking at is the first or the last, so
@@ -495,8 +327,8 @@ function routeAdapterFor(node: ts.Node):
  * not depend on Bun's load order.
  *
  * The scope is the import graph rather than every file in the project, because
- * that is the program being built: a module nobody imports contributes no
- * routes at runtime and should contribute none to the document either.
+ * that is the program being built: a module nobody imports declares nothing at
+ * runtime and should contribute nothing to the document either.
  */
 const harvestCache = new Map<string, OpenApiDocument>();
 
@@ -529,33 +361,7 @@ export function harvestDocument(
     if (sourceFile.fileName.includes("node_modules")) continue;
 
     const visit = (node: ts.Node): void => {
-      const adapter = routeAdapterFor(node);
-      if (adapter) {
-        const { base, routes } = adapter;
-        const methods = collectRouteOperations(routes, checker, sourceFile, silentLogger);
-        if (methods.length > 0) {
-          const baseValue = base ? staticValue(base) : {};
-          if (baseValue === undefined) {
-            warnUndocumentable(
-              logger,
-              "the base document is computed at runtime, so it cannot be merged " +
-                "into openapiDocument(); declare it as a literal",
-              base!,
-              sourceFile
-            );
-          }
-          const code = generateOpenApiSchemaCode([], readVersionFromBase(base), {
-            kind: "service",
-            methods,
-          });
-          fragments.push(
-            runGeneratedDocument(
-              code,
-              (baseValue as Record<string, unknown>) ?? {}
-            )
-          );
-        }
-      } else if (ts.isCallExpression(node)) {
+      if (ts.isCallExpression(node)) {
         const callee = node.expression;
         const fnName = ts.isIdentifier(callee)
           ? callee.text
@@ -606,8 +412,8 @@ export function harvestDocument(
 
   if (fragments.length === 0) {
     logger.warn(
-      `[wiz] openapiDocument() found no routes reachable from ${entryPath}; ` +
-        `a module declaring routes has to be imported to be documented`
+      `[wiz] openapiDocument() found no operations reachable from ${entryPath}; ` +
+        `a module declaring a service has to be imported to be documented`
     );
   }
 
@@ -615,6 +421,7 @@ export function harvestDocument(
   harvestCache.set(entryPath, document);
   return document;
 }
+
 function parseAudience(val: unknown): Array<"user" | "assistant"> | undefined {
   if (Array.isArray(val)) {
     const list = val.filter((v) => v === "user" || v === "assistant") as Array<"user" | "assistant">;

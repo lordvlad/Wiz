@@ -144,11 +144,13 @@ describe("generated documents satisfy the OpenAPI schemas", () => {
   }
 });
 
-describe("harvested route documents validate", () => {
+describe("harvested documents validate", () => {
   let doc: Record<string, any>;
 
   beforeAll(async () => {
-    doc = (await import("./fixtures/interopRoutesFixture.ts")).document as Record<string, any>;
+    // Deferred on purpose: a static import is hoisted above the `plugin()`
+    // call that installs the transform, so the fixture would load untransformed.
+    doc = (await import("./fixtures/catalogueFixture.ts")).document as Record<string, any>;
   });
 
   test("a harvested 3.1 document is valid OpenAPI", async () => {

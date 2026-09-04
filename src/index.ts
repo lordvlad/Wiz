@@ -166,69 +166,6 @@ export interface OpenApiSchemaBuilder {
   head: OperationBuilder;
   options: OperationBuilder;
   trace: OperationBuilder;
-  /**
-   * Declares a Bun `routes` map to the document generator and returns it
-   * **verbatim** — runtime behaviour is identical to passing the literal
-   * straight to `Bun.serve`. The document is collected at compile time and
-   * read back through {@link openapiDocument}.
-   */
-  bunRoutes<TRoutes>(
-    baseSchema: Record<string, unknown>,
-    routes: TRoutes
-  ): TRoutes;
-  /**
-   * Mounts a route map onto any Hono-compatible app and returns the **app**
-   * verbatim. Handlers reach the router untouched; only registration is done
-   * here, so what is documented and what is mounted cannot drift.
-   */
-  honoRoutes<TApp>(
-    app: TApp,
-    baseSchema: Record<string, unknown>,
-    routes: RouteMap
-  ): TApp;
-}
-
-/** A route value is either a handler/response, or a map of method -> handler. */
-export type RouteMap = Record<string, unknown>;
-
-/**
- * Minimal structural view of a router. Hono's own `on` signature is generic
- * over env/path/schema in ways that cannot be restated here, so the app is
- * narrowed to the one method the adapter actually calls.
- */
-interface RouteRegistrar {
-  on(method: string, path: string, handler: unknown): unknown;
-}
-
-const HTTP_METHOD_NAMES = new Set([
-  "GET",
-  "POST",
-  "PUT",
-  "PATCH",
-  "DELETE",
-  "HEAD",
-  "OPTIONS",
-  "TRACE",
-]);
-
-function mountRoutes(app: unknown, routes: RouteMap): void {
-  const registrar = app as unknown as RouteRegistrar;
-  if (typeof registrar?.on !== "function") return;
-
-  for (const [path, value] of Object.entries(routes)) {
-    if (typeof value === "function") {
-      // Bare handler: mounted as GET, matching how it is documented.
-      registrar.on("GET", path, value);
-      continue;
-    }
-    if (value === null || typeof value !== "object") continue;
-
-    for (const [method, handler] of Object.entries(value)) {
-      if (!HTTP_METHOD_NAMES.has(method.toUpperCase())) continue;
-      if (typeof handler !== "function") continue;
-      registrar.on(method.toUpperCase(), path, handler);
-    }
-  }
 }
 
 function operationStub(method: HttpMethod): OperationBuilder {
@@ -250,20 +187,6 @@ export const openapiSchema: OpenApiSchemaBuilder = Object.assign(
     head: operationStub("head"),
     options: operationStub("options"),
     trace: operationStub("trace"),
-    // Identity by design: the plugin harvests descriptors from the callsite and
-    // never rewrites the routes value, so servers behave the same either way.
-    bunRoutes: <TRoutes>(
-      _baseSchema: Record<string, unknown>,
-      routes: TRoutes
-    ): TRoutes => routes,
-    honoRoutes: <TApp>(
-      app: TApp,
-      _baseSchema: Record<string, unknown>,
-      routes: RouteMap
-    ): TApp => {
-      mountRoutes(app, routes);
-      return app;
-    },
   }
 );
 export function openRPCSchema<TTypes extends unknown[] = unknown[]>(

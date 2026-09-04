@@ -139,25 +139,29 @@ describe("ejecting a project", () => {
       `export interface User {\n  /** @minLength 2 */\n  name: string;\n}\n`
     );
     await Bun.write(
-      join(dir, "src", "routes.ts"),
-      `import { openapiSchema } from "wiz";
-import type { User } from "./types.ts";
+      join(dir, "src", "api.ts"),
+      `import type { User } from "./types.ts";
 
-export const routes = openapiSchema.bunRoutes(
-  { openapi: "3.1.0", info: { title: "Demo", version: "1.0.0" } },
-  { "/users": { GET: () => Response.json([]) } }
-);
+export interface UserApi {
+  /**
+   * @get /users
+   * @response 200 User[]
+   */
+  getUsers(): Promise<User[]>;
+}
 `
     );
     await Bun.write(
       join(dir, "src", "main.ts"),
       `import { is, openapiDocument } from "wiz";
 import type { User } from "./types.ts";
-import { routes } from "./routes.ts";
+import type { UserApi } from "./api.ts";
 
-export const document = openapiDocument();
+export const document = openapiDocument<[UserApi]>({
+  openapi: "3.1.0",
+  info: { title: "Demo", version: "1.0.0" },
+});
 export const ok = is<User>({ name: "Ada" });
-export { routes };
 `
     );
     return dir;
@@ -168,9 +172,10 @@ export { routes };
     const out = join(dir, "out");
     await writeEjected(out, ejectProject(dir));
 
+    // Deferred on purpose: the path is a temp directory created by this test,
+    // so no static specifier can name it.
     const main = await import(pathToFileURL(join(out, "src", "main.ts")).href);
     expect(main.ok).toBe(true);
-    expect(Object.keys(main.routes)).toEqual(["/users"]);
     // The document is data by now, resolved across the whole program.
     expect(main.document.info).toEqual({ title: "Demo", version: "1.0.0" });
     expect(Object.keys(main.document.paths)).toEqual(["/users"]);
@@ -181,7 +186,7 @@ export { routes };
     const paths = ejectProject(dir).map((file) => file.path);
 
     expect(paths).toContain("src/main.ts");
-    expect(paths).toContain("src/routes.ts");
+    expect(paths).toContain("src/api.ts");
     // Untouched, but still copied, or the tree would not run.
     expect(paths).toContain("src/types.ts");
   });
@@ -196,14 +201,14 @@ export { routes };
     expect(generated[0]).toMatch(/^src\/wiz-User-[0-9a-f]+\/index\.js$/);
   });
 
-  test("route declarations collapse to the value they always stood for", async () => {
+  test("the document is inlined, so nothing imports wiz at runtime", async () => {
     const dir = await project();
-    const routes = ejectProject(dir).find((file) => file.path === "src/routes.ts")!;
+    const main = ejectProject(dir).find((file) => file.path === "src/main.ts")!;
 
-    expect(routes.contents).not.toContain("bunRoutes");
-    expect(routes.contents).not.toContain("op(");
-    expect(routes.contents).not.toMatch(/from\s+"wiz"/);
-    expect(routes.contents).toContain("Response.json");
+    expect(main.contents).not.toContain("openapiDocument");
+    expect(main.contents).not.toMatch(/from\s+"wiz"/);
+    // The paths are a literal in the file now, not a call that rebuilds them.
+    expect(main.contents).toContain('"/users"');
   });
 
   test("a directory without a tsconfig is refused", async () => {

@@ -16,7 +16,7 @@
 
 ### Schemas & Web APIs
 - **[JSON Schema](./json-schema.md)** — `schema<T>()`, Draft 2020-12 and Draft 07 support, keyword mapping, and draft selection.
-- **[OpenAPI & Routes](./openapi.md)** — `openapiSchema`, service-interface operation declarations, route mounting for Bun (`Bun.serve`) and Hono, and `openapiDocument()`.
+- **[OpenAPI](./openapi.md)** — `openapiSchema`, service-interface operation declarations, `openapiDocument()`, and why a router is never part of the document.
 - **[AsyncAPI & Events](./asyncapi.md)** — `asyncapiSchema`, `@producer`/`@consumer` channel declarations, 2.6 and 3.0 support, and model/codec generation.
 - **[OpenRPC](./openrpc.md)** — `openRPCSchema`, method harvesting from signatures and service interfaces, and namespacing.
 - **[MCP](./mcp.md)** — `mcpSchema`, tool harvesting, input/output JSON schemas, and tool annotations.

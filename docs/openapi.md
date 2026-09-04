@@ -122,48 +122,43 @@ object-typed parameter is flattened into query parameters.
 When no `@response` tag is present, the return type is the 200 response, and a
 `void`/`never` return is a bodiless 204.
 
-## Mounting Routes (Bun and Hono)
+## Routers are not documented
 
-`openapiSchema.bunRoutes` and `openapiSchema.honoRoutes` mount a route map and
-hand the value back verbatim, so runtime behaviour is identical to passing the
-literal straight to `Bun.serve` or the Hono app. The document itself comes from
-the service declarations, not from the route map: the two are kept apart so a
-handler can be a plain function.
-
-### Bun.serve
+A document comes from declarations, never from a router: `wiz` has no route
+adapter, so a `Bun.serve({ routes })` literal or a Hono app is written exactly
+as its framework documents it, and the OpenAPI document is derived from the
+service interface the handlers implement.
 
 ```ts
-import { openapiSchema, openapiDocument } from "wiz";
-
-export const routes = openapiSchema.bunRoutes(
-  { openapi: "3.1.0", info: { title: "Users", version: "1.0.0" } },
-  {
-    "/users/:id": {
-      GET: () => Response.json({ id: "1", name: "Alice" }),
-    },
-  }
-);
-
-Bun.serve({ routes });
-
-export const apiDoc = openapiDocument();
-```
-
-Route keys are rewritten from Bun's `:id` form to OpenAPI's `{id}` template
-form, and a path that no service documents is recorded as a bare operation.
-
-### Hono
-
-```ts
-import { Hono } from "hono";
 import { openapiSchema } from "wiz";
 
-export const app = openapiSchema.honoRoutes(
-  new Hono(),
-  { openapi: "3.1.0", info: { title: "Hono API", version: "1.0.0" } },
-  { "/users/:id": { GET: (c: any) => c.json({ id: "1" }) } }
-);
+/** @service Users */
+export interface UserApi {
+  /**
+   * @get /users/{id}
+   * @summary Fetch a user
+   * @response 200 application/json User
+   */
+  getUser(id: string): Promise<User>;
+}
+
+export const document = openapiSchema<[UserApi]>({
+  openapi: "3.1.0",
+  info: { title: "Users", version: "1.0.0" },
+});
+
+// The router is plain Bun; nothing here is transformed.
+Bun.serve({
+  routes: {
+    "/users/:id": { GET: () => Response.json({ id: "1", name: "Alice" }) },
+  },
+});
 ```
+
+Keeping them apart is what lets a handler be a plain function: the types say
+what the operation is, and the router says where it is mounted. `UserApi` is
+worth implementing (`class Users implements UserApi`) so a document that
+promises an operation and a server that serves it cannot drift.
 
 ## Program-Wide Document with `openapiDocument()`
 
@@ -190,7 +185,7 @@ export const document = openapiDocument<[UserService]>({
 
 ### Merging Rules
 
-When merging multiple routes into a single document (`src/document.ts`):
+When merging several documents into one (`src/document.ts`):
 1. **Paths**: Merged by route path. Methods (`GET`, `POST`, etc.) under the same path are combined.
 2. **Components**: `components.schemas`, `components.parameters`, `components.responses`, and `components.headers` are merged by name. Identical component definitions are deduplicated.
 3. **Tags**: Tag lists across all operations are concatenated and deduplicated.

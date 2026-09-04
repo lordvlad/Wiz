@@ -13,7 +13,6 @@ import {
   encodeJson,
   encodeProto,
   is,
-  openapiSchema,
   openRPCHandler,
 } from "wiz";
 import { startConsumer, startProducer } from "./events.ts";
@@ -69,113 +68,112 @@ function handleResponse(
     });
 }
 
-// REST route map wrapped with openapiSchema.bunRoutes
-const routes = openapiSchema.bunRoutes(
-  { openapi: "3.1.0", info: { title: "Petstore", version: "1.0.0" } },
-  {
-    "/pets": {
-      GET: (req: Request) =>
-        handleResponse(() => {
-          const url = new URL(req.url);
-          const statusStr = url.searchParams.get("status");
-          const q = url.searchParams.get("q") ?? undefined;
-          const limitStr = url.searchParams.get("limit");
+// The REST route map, handed straight to `Bun.serve`. The OpenAPI document is
+// derived from `PetApi` in `src/schemas/openapi.ts`, not from this literal:
+// paths are what the router needs, and types are what a document needs.
+const routes = {
+  "/pets": {
+    GET: (req: Request) =>
+      handleResponse(() => {
+        const url = new URL(req.url);
+        const statusStr = url.searchParams.get("status");
+        const q = url.searchParams.get("q") ?? undefined;
+        const limitStr = url.searchParams.get("limit");
 
-          // A status is one of three words now, so it is checked structurally
-          // rather than parsed: `is<PetStatus>` is generated from the union.
-          const status =
-            statusStr !== null && is<PetStatus>(statusStr) ? statusStr : undefined;
-          const limit = limitStr !== null ? Number(limitStr) : undefined;
+        // A status is one of three words now, so it is checked structurally
+        // rather than parsed: `is<PetStatus>` is generated from the union.
+        const status =
+          statusStr !== null && is<PetStatus>(statusStr) ? statusStr : undefined;
+        const limit = limitStr !== null ? Number(limitStr) : undefined;
 
-          const pets = store.list({ status, q, limit });
-          const rep = negotiate(req.headers.get("accept"));
+        const pets = store.list({ status, q, limit });
+        const rep = negotiate(req.headers.get("accept"));
 
-          return new Response(rep.render(pets), {
-            headers: { "content-type": rep.mimetype },
-          });
-        }),
+        return new Response(rep.render(pets), {
+          headers: { "content-type": rep.mimetype },
+        });
+      }),
 
-      POST: (req: Request) =>
-        handleResponse(async () => {
-          const body = (await req.json()) as NewPet;
-          const pet = await store.add(body);
-          return new Response(encodeJson<Pet>(pet, 2), {
-            status: 201,
-            headers: { "content-type": JSON_MIME },
-          });
-        }),
-    },
+    POST: (req: Request) =>
+      handleResponse(async () => {
+        const body = (await req.json()) as NewPet;
+        const pet = await store.add(body);
+        return new Response(encodeJson<Pet>(pet, 2), {
+          status: 201,
+          headers: { "content-type": JSON_MIME },
+        });
+      }),
+  },
 
-    "/pets/:id": {
-      GET: (req: Request, server: any) =>
-        handleResponse(() => {
-          const id = getIdFromUrl(req);
-          const pet = store.get(id);
+  "/pets/:id": {
+    GET: (req: Request, server: any) =>
+      handleResponse(() => {
+        const id = getIdFromUrl(req);
+        const pet = store.get(id);
 
-          const accept = req.headers.get("accept") ?? "";
-          if (accept.includes(PROTO_MIME)) {
-            const buf = new Uint8Array(512);
-            const len = encodeProto<Pet>(pet, buf);
-            return new Response(buf.subarray(0, len), {
-              headers: { "content-type": PROTO_MIME },
-            });
-          }
-
-          return new Response(encodeJson<Pet>(pet, 2), {
-            headers: { "content-type": JSON_MIME },
-          });
-        }),
-
-      DELETE: (req: Request, server: any) =>
-        handleResponse(async () => {
-          const id = getIdFromUrl(req);
-          await store.remove(id);
-          return new Response(null, { status: 204 });
-        }),
-    },
-
-    "/pets/:id/sale": {
-      POST: (req: Request, server: any) =>
-        handleResponse(async () => {
-          const id = getIdFromUrl(req);
-          const body = (await req.json()) as Sale;
-          const pet = await store.sell(id, body);
-          return new Response(encodeJson<Pet>(pet, 2), {
-            headers: { "content-type": JSON_MIME },
-          });
-        }),
-    },
-
-    "/pets/:id/codec/proto": {
-      POST: (req: Request) =>
-        handleResponse(async () => {
-          const raw = new Uint8Array(await req.arrayBuffer());
-          const decoded = decodeProto<Pet>(raw);
-          const out = new Uint8Array(512);
-          const len = encodeProto<Pet>(decoded, out);
-          return new Response(out.subarray(0, len), {
+        const accept = req.headers.get("accept") ?? "";
+        if (accept.includes(PROTO_MIME)) {
+          const buf = new Uint8Array(512);
+          const len = encodeProto<Pet>(pet, buf);
+          return new Response(buf.subarray(0, len), {
             headers: { "content-type": PROTO_MIME },
           });
-        }),
-    },
+        }
 
-    // Serve all 5 generated specs
-    "/schemas/openapi.json": () =>
-      Response.json(openapi, { headers: { "content-type": JSON_MIME } }),
-    "/schemas/asyncapi.json": () =>
-      Response.json(asyncapi, { headers: { "content-type": JSON_MIME } }),
-    "/schemas/openrpc.json": () =>
-      Response.json(openrpc, { headers: { "content-type": JSON_MIME } }),
-    "/schemas/petstore.proto": () =>
-      new Response(proto, { headers: { "content-type": "text/plain" } }),
-    "/schemas/petstore.schema.json": () =>
-      Response.json(jsonschema, { headers: { "content-type": JSON_MIME } }),
-    "/rpc": (req: Request, srv: any) => {
-      if (srv.upgrade(req)) return;
-      return new Response("Upgrade failed", { status: 400 });
-    },
-  }
-);
+        return new Response(encodeJson<Pet>(pet, 2), {
+          headers: { "content-type": JSON_MIME },
+        });
+      }),
+
+    DELETE: (req: Request, server: any) =>
+      handleResponse(async () => {
+        const id = getIdFromUrl(req);
+        await store.remove(id);
+        return new Response(null, { status: 204 });
+      }),
+  },
+
+  "/pets/:id/sale": {
+    POST: (req: Request, server: any) =>
+      handleResponse(async () => {
+        const id = getIdFromUrl(req);
+        const body = (await req.json()) as Sale;
+        const pet = await store.sell(id, body);
+        return new Response(encodeJson<Pet>(pet, 2), {
+          headers: { "content-type": JSON_MIME },
+        });
+      }),
+  },
+
+  "/pets/:id/codec/proto": {
+    POST: (req: Request) =>
+      handleResponse(async () => {
+        const raw = new Uint8Array(await req.arrayBuffer());
+        const decoded = decodeProto<Pet>(raw);
+        const out = new Uint8Array(512);
+        const len = encodeProto<Pet>(decoded, out);
+        return new Response(out.subarray(0, len), {
+          headers: { "content-type": PROTO_MIME },
+        });
+      }),
+  },
+
+  // Serve all 5 generated specs
+  "/schemas/openapi.json": () =>
+    Response.json(openapi, { headers: { "content-type": JSON_MIME } }),
+  "/schemas/asyncapi.json": () =>
+    Response.json(asyncapi, { headers: { "content-type": JSON_MIME } }),
+  "/schemas/openrpc.json": () =>
+    Response.json(openrpc, { headers: { "content-type": JSON_MIME } }),
+  "/schemas/petstore.proto": () =>
+    new Response(proto, { headers: { "content-type": "text/plain" } }),
+  "/schemas/petstore.schema.json": () =>
+    Response.json(jsonschema, { headers: { "content-type": JSON_MIME } }),
+  "/rpc": (req: Request, srv: any) => {
+    if (srv.upgrade(req)) return;
+    return new Response("Upgrade failed", { status: 400 });
+  },
+};
 
 export const server = Bun.serve({
   port: Number(process.env.PORT ?? 0),

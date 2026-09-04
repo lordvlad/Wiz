@@ -302,7 +302,7 @@ harvested last time may describe source that is already gone.
 **4. Finding callsites.** One `ts.Visitor` walks every node. On a
 `CallExpression` it reads the callee name — from an `Identifier` or the
 `.name` of a `PropertyAccessExpression`, so `openapiSchema.get(…)` is seen too
-— and dispatches. Four cases are not type-driven at all:
+— and dispatches. Two cases are not type-driven at all:
 
 - `openapiDocument()` with no arguments is answered from the whole program by
   `harvestDocument` and inlined as an AST literal by `jsonToExpression`, so no
@@ -310,16 +310,10 @@ harvested last time may describe source that is already gone.
   single-file eject — it throws instead, naming the project form as the fix.
 - `openapiSchema<[Service]>(base)` collapses to a call into the virtual module
   that holds the finished document.
-- `openapiSchema.bunRoutes(base, routes)` collapses to the routes literal,
-  which `Bun.serve` consumes directly.
-- `honoRoutes(app, base, routes)` survives, because the call itself is what
-  mounts the handlers onto the app.
 
-The route adapters register nothing — descriptors reach the document through
-`harvestDocument`, straight from the program. That pass runs for its
-diagnostics alone, so a route wiz cannot document is reported against the file
-declaring it whether or not anything asks for the document. See
-[openapi](./openapi.md).
+There is no route adapter: a router is written as its framework documents it,
+and a document is derived from the service declarations the handlers implement.
+See [openapi](./openapi.md).
 
 **5. Type argument to IR.** For the remaining helpers the first type argument
 is resolved with `checker.getTypeFromTypeNode`; with no type argument the type
