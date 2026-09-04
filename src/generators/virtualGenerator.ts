@@ -5,8 +5,9 @@ import { generateValidatorCode } from "./validator.ts";
 import { generateQueryParserCode } from "./query.ts";
 import { generateOpenApiSchemaCode } from "./openapi.ts";
 import { generateOpenRpcSchemaCode } from "./openrpc.ts";
-import type { ServiceIR } from "../ir/service.ts";
+import { isGrpcMethod, type ServiceIR } from "../ir/service.ts";
 import {
+  generateGrpcSchemaCode,
   generateProtobufCode,
   generateProtobufSchemaCode,
 } from "./protobuf.ts";
@@ -24,6 +25,7 @@ export interface VirtualModuleOptions {
   openRpcTypes?: Array<{ name: string; ir: TypeIR }>;
   asyncApiTypes?: Array<{ name: string; ir: TypeIR }>;
   mcpTypes?: Array<{ name: string; ir: TypeIR }>;
+  grpcTypes?: Array<{ name: string; ir: TypeIR }>;
   openApiVersion?: "3.0" | "3.1";
   asyncApiVersion?: AsyncApiVersion;
   service?: ServiceIR;
@@ -70,6 +72,7 @@ const SECTION_EXPORTS = {
   erlangBinary: ["encodeErlangBinary", "decodeErlangBinary"],
   asyncapi: ["asyncapiSchema"],
   mcp: ["mcpSchema"],
+  grpcSchema: ["grpcSchema"],
 } as const;
 
 export function generateVirtualModuleCode(
@@ -129,6 +132,13 @@ export function generateVirtualModuleCode(
         options.service
       )
     );
+  }
+  if (
+    (options?.grpcTypes ||
+      options?.service?.methods.some(isGrpcMethod)) &&
+    include("grpcSchema")
+  ) {
+    parts.push(generateGrpcSchemaCode(options.grpcTypes ?? [], options.service));
   }
 
 

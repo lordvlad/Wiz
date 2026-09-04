@@ -49,6 +49,7 @@ in [getting-started.md](./docs/getting-started.md).
 | `openRPCSchema<[S]>(base?)` | OpenRPC 1.3 document | [openrpc](./docs/openrpc.md) |
 | `mcpSchema<[T]>(base?)` | MCP tool specifications | [mcp](./docs/mcp.md) |
 | `protobufSchema<[A, B]>()` / `encodeProto` / `decodeProto` | `.proto` text and binary codec | [protobuf](./docs/protobuf.md) |
+| `grpcSchema<[S]>()` | `.proto` text with `service` blocks, from a service interface | [grpc](./docs/grpc.md) |
 | `avroSchema<[A, B]>()` / `encodeAvro` / `decodeAvro` | `.avsc` text and binary codec | [avro-and-arrow](./docs/avro-and-arrow.md) |
 | `arrowSchema<[A, B]>()` / `encodeArrow` / `decodeArrow` | Arrow IPC stream binary codec | [avro-and-arrow](./docs/avro-and-arrow.md) |
 | `encodeJson<T>` / `decodeJson<T>` | JSON codec with `bigint`, `Date`, `bytes` handling | [json-codec](./docs/json-codec.md) |

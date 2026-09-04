@@ -38,13 +38,14 @@ Welcome to `wiz`. This document provides technical context, architecture princip
    - `ServiceIR`: Operation definitions (`HttpServiceMethodIR`, `GrpcServiceMethodIR`, `OpenRpcServiceMethodIR`, `McpServiceMethodIR`, AsyncAPI methods).
    - `ApiIR`: Document root combining `types`, `components`, and `service`.
 3. **Generators** (`src/generators/`): Code generators that turn IR into executable JavaScript / TypeScript code, virtual module definitions, or schema JSON.
-4. **Plugin Transformer** (`src/plugin.ts`, `src/harvest.ts`): Bun build/runtime plugin (`wizPlugin()`) that harvests AST callsites (`keysOf`, `is`, `validate`, `schema`, `openapiSchema`, `openRPCSchema`, `asyncapiSchema`, `mcpSchema`, `encodeJson`, `encodeErlangText`, `encodeErlangBinary`, etc.) and rewrites them into imports from virtual modules mounted on `wiz-virtual/<hash>/index.js`.
-   - **Signature & Service Harvesters**: Every spec macro (`openapiSchema`, `asyncapiSchema`, `openRPCSchema`, `mcpSchema`) harvests its operations from its generic type arguments — either a function signature type or an interface/class whose members are callable. There are no builder functions; JSDoc tags carry what the types cannot:
+4. **Plugin Transformer** (`src/plugin.ts`, `src/harvest.ts`): Bun build/runtime plugin (`wizPlugin()`) that harvests AST callsites (`keysOf`, `is`, `validate`, `schema`, `openapiSchema`, `openRPCSchema`, `asyncapiSchema`, `mcpSchema`, `grpcSchema`, `encodeJson`, `encodeErlangText`, `encodeErlangBinary`, etc.) and rewrites them into imports from virtual modules mounted on `wiz-virtual/<hash>/index.js`.
+   - **Signature & Service Harvesters**: Every spec macro (`openapiSchema`, `asyncapiSchema`, `openRPCSchema`, `mcpSchema`, `grpcSchema`) harvests its operations from its generic type arguments — either a function signature type or an interface/class whose members are callable. There are no builder functions; JSDoc tags carry what the types cannot:
      - OpenAPI: `@get`/`@post`/`@put`/`@patch`/`@delete`/`@head`/`@options`/`@trace` (verb + path template), `@http VERB /path`, `@response STATUS [MEDIATYPE] [TYPE] [DESCRIPTION]`.
      - AsyncAPI: `@producer`/`@consumer`/`@action`, `@channel`.
      - Global: `@name` (operation id / method name override), `@package`, `@service`, `@summary`, `@title`, `@audience`, `@priority`.
+     - gRPC: `@package`, `@service`, `@name`; `stream` on either side is read from an `AsyncIterable`/`AsyncGenerator`/`ReadableStream` parameter or return type.
    - **Assembly rules**: OpenAPI sets `operationId` and attaches `x-package`/`x-service` plus a `service` tag; AsyncAPI attaches `x-package`/`x-service` and prefixes the channel key; OpenRPC names methods `package.service.method`; MCP names tools `package.service.snake_case_method`. gRPC binds directly to `GrpcAddressIR.package`/`service`.
-   - A type argument with no callable members is a payload type: it contributes a component schema and no operation. `openRPCSchema` and `mcpSchema` emit a `warnUndocumentable` diagnostic for an object type with zero methods, since those macros describe nothing else.
+   - A type argument with no callable members is a payload type: it contributes a component schema and no operation. `openRPCSchema`, `mcpSchema` and `grpcSchema` emit a `warnUndocumentable` diagnostic for an object type with zero methods, since those macros describe nothing else.
 ---
 
 ## 2. Directory Layout & Key Modules
@@ -55,7 +56,7 @@ wiz/
 ├── src/
 │   ├── index.ts            # Public API exported functions & stubs
 │   ├── plugin.ts           # Bun macro/plugin transformer and callsite rewrites
-│   ├── harvest.ts          # TypeScript AST/type harvesting (openapiSchema, asyncapiSchema, openRPCSchema, mcpSchema, grpc, Bun/Hono routes)
+│   ├── harvest.ts          # TypeScript AST/type harvesting (openapiSchema, asyncapiSchema, openRPCSchema, mcpSchema, grpcSchema, Bun/Hono routes)
 │   ├── registry.ts         # Structural type key hash computation & module registry
 │   ├── types.ts            # TypeIR definitions and utility re-exports
 │   ├── openapiDialect.ts   # OpenAPI JSDoc annotation and constraint mappings

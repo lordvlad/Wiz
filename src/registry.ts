@@ -50,6 +50,7 @@ function payloadKey(options: VirtualModuleOptions): string {
       p: namedTypesKey(options.protobufSchemaTypes),
       a: namedTypesKey(options.avroSchemaTypes),
       w: namedTypesKey(options.arrowSchemaTypes),
+      g: namedTypesKey(options.grpcTypes),
       r: options.arrow ?? false,
       z: options.zod ?? false,
       // `only` is deliberately absent: it is applied when the module is

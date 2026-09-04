@@ -7,6 +7,7 @@ import {
   COMPILER_OPTIONS,
   harvestAsyncApiOperationsFromTypeArgs,
   harvestDocument,
+  harvestGrpcOperationsFromTypeArgs,
   harvestMcpOperationsFromTypeArgs,
   harvestOpenApiOperationsFromTypeArgs,
   harvestOpenRpcOperationsFromTypeArgs,
@@ -41,6 +42,7 @@ const HELPER_FUNCTIONS = new Set([
   "openRPCSchema",
   "asyncapiSchema",
   "mcpSchema",
+  "grpcSchema",
   "encodeProto",
   "decodeProto",
   "protobufSchema",
@@ -142,6 +144,7 @@ export const VIRTUAL_EXPORTS: Record<string, string> = {
   openRPCSchema: "__wiz_openRPCSchema",
   asyncapiSchema: "__wiz_asyncapiSchema",
   mcpSchema: "__wiz_mcpSchema",
+  grpcSchema: "__wiz_grpcSchema",
   encodeProto: "__wiz_encodeProto",
   decodeProto: "__wiz_decodeProto",
   protobufSchema: "__wiz_protobufSchema",
@@ -681,6 +684,45 @@ export function transformSource(options: TransformOptions): TransformResult {
                   context.factory.createIdentifier(`__wiz_mcpSchema_${key}`),
                   undefined,
                   baseArg ? [baseArg] : []
+                );
+              }
+              case "grpcSchema": {
+                const grpcTypes: Array<{ name: string; ir: TypeIR }> = [];
+                let typeArgs: readonly ts.Type[] = [];
+                if (checker.isTupleType(tsType)) {
+                  typeArgs = checker.getTypeArguments(tsType as ts.TypeReference);
+                } else if (tsType) {
+                  typeArgs = [tsType];
+                }
+
+                for (const elemType of typeArgs) {
+                  // A service interface describes rpcs, not a message: its
+                  // payloads come from the harvested method signatures.
+                  if (isServiceLikeType(elemType, checker)) continue;
+                  const elemIR = extractTypeIR(elemType, checker);
+                  const sym = elemType.aliasSymbol ?? elemType.symbol;
+                  const name = sym && !sym.name.startsWith("__") ? sym.name : (elemIR.name ?? `Message_${grpcTypes.length + 1}`);
+                  grpcTypes.push({ name, ir: elemIR });
+                }
+
+                const serviceMethods = harvestGrpcOperationsFromTypeArgs(
+                  typeArgs,
+                  checker,
+                  sourceFile,
+                  node,
+                  logger
+                );
+
+                const key = registerPayload("grpcSchema", {
+                  grpcTypes,
+                  service: { kind: "service", methods: serviceMethods },
+                });
+
+                const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
+                return context.factory.createCallExpression(
+                  context.factory.createIdentifier(`__wiz_grpcSchema_${key}`),
+                  undefined,
+                  visitedArgs
                 );
               }
               case "encodeProto": {

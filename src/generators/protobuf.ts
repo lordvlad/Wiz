@@ -2,6 +2,7 @@ import {
   collectNamedTypes,
   declaredFormat,
   flattenObjectProperties,
+  isUserNamedType,
   walkTypeIR,
   type Annotated,
   type PropertyIR,
@@ -1027,24 +1028,74 @@ function variantFieldName(ir: TypeIR, index: number): string {
   return base.charAt(0).toLowerCase() + base.slice(1);
 }
 
-export function generateProtobufSchemaCode(
+/** One `message` or `enum`, flattened into what the emitter prints. */
+interface ProtoTypeDef {
+  name: string;
+  isEnum: boolean;
+  description?: string;
+  entries: Array<{
+    name: string;
+    type: string;
+    fieldNumber: number;
+    comments: string[];
+    options: string[];
+    /** Set when this entry belongs to a `oneof` of that name. */
+    oneof?: string;
+  }>;
+}
+
+/** One `service` block, with its rpcs in declaration order. */
+interface ProtoServiceDef {
+  name: string;
+  rpcs: Array<{
+    name: string;
+    requestType: string;
+    requestStream: boolean;
+    responseType: string;
+    responseStream: boolean;
+    comments: string[];
+    options: string[];
+  }>;
+}
+
+/**
+ * Every named message and enum reachable from `types`, roots first.
+ *
+ * A recursive type reaches itself as a `ref`, which carries the name but no
+ * body, so a definition always beats a reference no matter which order they
+ * were walked in: otherwise the message is emitted empty.
+ */
+function collectProtoNamedTypes(
   types: Array<{ name: string; ir: TypeIR }>
-): string {
+): Map<string, TypeIR> {
   const allNamedTypes = new Map<string, TypeIR>();
 
-  for (const { name, ir } of types) {
-    if (!allNamedTypes.has(name)) {
+  const offer = (name: string, ir: TypeIR): void => {
+    const existing = allNamedTypes.get(name);
+    if (!existing || (existing.kind === "ref" && ir.kind !== "ref")) {
       allNamedTypes.set(name, ir);
     }
-    const transitives = collectNamedTypes(ir);
-    for (const [transitiveName, transitiveIR] of transitives.entries()) {
-      if (!allNamedTypes.has(transitiveName)) {
-        allNamedTypes.set(transitiveName, transitiveIR);
-      }
+  };
+
+  for (const { name, ir } of types) {
+    offer(name, ir);
+    for (const [transitiveName, transitiveIR] of collectNamedTypes(ir)) {
+      offer(transitiveName, transitiveIR);
     }
   }
 
-  // Every property must be numbered, whether directly or through its variants.
+  return allNamedTypes;
+}
+
+/**
+ * Why these types cannot be written as protobuf, if they cannot.
+ *
+ * Every property must be numbered, whether directly or through its variants:
+ * a field number is the wire identity, and protobuf has no way to derive one.
+ */
+function protoFieldBlocker(
+  allNamedTypes: ReadonlyMap<string, TypeIR>
+): string | undefined {
   for (const [typeName, typeIR] of allNamedTypes.entries()) {
     for (const prop of flattenObjectProperties(typeIR)) {
       const oneof = oneofFor(prop.type);
@@ -1057,30 +1108,17 @@ export function generateProtobufSchemaCode(
           ? `[wiz] Property '${prop.name}' on type '${typeName}' is missing required '@fieldNumber <N>' JSDoc tag for protobuf schema generation.`
           : undefined);
 
-      if (blocker) {
-        return [
-          `export function protobufSchema(options = {}) {`,
-          `  throw new Error(${JSON.stringify(blocker)});`,
-          `}`,
-        ].join("\n");
-      }
+      if (blocker) return blocker;
     }
   }
+  return undefined;
+}
 
-  const typeDefs: Array<{
-    name: string;
-    isEnum: boolean;
-    description?: string;
-    entries: Array<{
-      name: string;
-      type: string;
-      fieldNumber: number;
-      comments: string[];
-      options: string[];
-      /** Set when this entry belongs to a `oneof` of that name. */
-      oneof?: string;
-    }>;
-  }> = [];
+/** The named types as message and enum definitions, in field-number order. */
+function protoTypeDefs(
+  allNamedTypes: ReadonlyMap<string, TypeIR>
+): ProtoTypeDef[] {
+  const typeDefs: ProtoTypeDef[] = [];
 
   for (const [typeName, typeIR] of allNamedTypes.entries()) {
     if (typeIR.kind === "enum") {
@@ -1151,11 +1189,39 @@ export function generateProtobufSchemaCode(
     }
   }
 
+  return typeDefs;
+}
+
+/** A module exporting `name`, which throws whatever stopped generation. */
+function protoBlockedModuleCode(name: string, blocker: string): string {
   return [
-    `export function protobufSchema(options = {}) {`,
+    `export function ${name}(options = {}) {`,
+    `  throw new Error(${JSON.stringify(blocker)});`,
+    `}`,
+  ].join("\n");
+}
+
+/**
+ * A module whose one export renders these definitions as `.proto` text.
+ *
+ * The definitions are frozen into the module as data rather than as a string,
+ * so `indent` stays a runtime option: the caller picks the layout, not the
+ * build. `package` and `services` are empty for a payload-only schema.
+ */
+function protoModuleCode(
+  name: string,
+  typeDefs: ProtoTypeDef[],
+  pkg: string | undefined,
+  services: ProtoServiceDef[]
+): string {
+  return [
+    `export function ${name}(options = {}) {`,
     `  const indent = options.indent ?? "  ";`,
     `  const typeDefs = ${JSON.stringify(typeDefs, null, 2)};`,
+    `  const serviceDefs = ${JSON.stringify(services, null, 2)};`,
+    `  const pkg = ${JSON.stringify(pkg ?? null)};`,
     `  const lines = ['syntax = "proto3";', ''];`,
+    `  if (pkg) lines.push('package ' + pkg + ';', '');`,
     `  for (const def of typeDefs) {`,
     `    if (def.description) {`,
     `      for (const line of def.description.split("\\n")) {`,
@@ -1197,9 +1263,176 @@ export function generateProtobufSchemaCode(
     `    }`,
     `    lines.push('');`,
     `  }`,
+    `  for (const svc of serviceDefs) {`,
+    `    lines.push('service ' + svc.name + ' {');`,
+    `    for (const rpc of svc.rpcs) {`,
+    `      for (const c of rpc.comments) {`,
+    `        lines.push(indent + '// ' + c);`,
+    `      }`,
+    `      const req = (rpc.requestStream ? 'stream ' : '') + rpc.requestType;`,
+    `      const res = (rpc.responseStream ? 'stream ' : '') + rpc.responseType;`,
+    `      const decl = indent + 'rpc ' + rpc.name + ' (' + req + ') returns (' + res + ')';`,
+    `      if (rpc.options.length > 0) {`,
+    `        lines.push(decl + ' {');`,
+    `        for (const opt of rpc.options) lines.push(indent + indent + 'option ' + opt + ';');`,
+    `        lines.push(indent + '}');`,
+    `      } else {`,
+    `        lines.push(decl + ';');`,
+    `      }`,
+    `    }`,
+    `    lines.push('}');`,
+    `    lines.push('');`,
+    `  }`,
     `  return lines.join('\\n').trim();`,
     `}`,
   ].join("\n");
+}
+
+export function generateProtobufSchemaCode(
+  types: Array<{ name: string; ir: TypeIR }>
+): string {
+  const allNamedTypes = collectProtoNamedTypes(types);
+
+  const blocker = protoFieldBlocker(allNamedTypes);
+  if (blocker) return protoBlockedModuleCode("protobufSchema", blocker);
+
+  return protoModuleCode(
+    "protobufSchema",
+    protoTypeDefs(allNamedTypes),
+    undefined,
+    []
+  );
+}
+
+/** `never`/`void`/`undefined` in a payload slot means "no message at all". */
+function isAbsentIR(ir: TypeIR | undefined): boolean {
+  if (!ir) return true;
+  return (
+    ir.kind === "primitive" &&
+    (ir.type === "never" || ir.type === "void" || ir.type === "undefined")
+  );
+}
+
+/** `sayHello` → `SayHello`, for a message name derived from an rpc name. */
+function upperFirst(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * A `.proto` file for these types and gRPC methods: messages plus `service`
+ * blocks.
+ *
+ * Every rpc names a message, so an anonymous or absent payload is given one:
+ * `sayHello(req: { … })` becomes `SayHelloRequest`, and a method with no
+ * parameter gets an empty `SayHelloRequest` rather than an import of
+ * `google/protobuf/empty.proto`, which would make the file need a resolver.
+ */
+export function generateGrpcSchemaCode(
+  types: Array<{ name: string; ir: TypeIR }>,
+  service: ServiceIR = emptyService()
+): string {
+  const roots: Array<{ name: string; ir: TypeIR }> = [...types];
+  const services = new Map<string, ProtoServiceDef>();
+  let pkg: string | undefined;
+  let blocker: string | undefined;
+
+  /** The message name for one rpc slot, defining it when the type has none. */
+  const messageFor = (
+    ir: TypeIR | undefined,
+    fallback: string,
+    slot: string
+  ): string => {
+    if (isAbsentIR(ir)) {
+      roots.push({
+        name: fallback,
+        ir: { id: `wiz:grpc:${fallback}`, kind: "object", name: fallback, properties: [] },
+      });
+      return fallback;
+    }
+    const payload = ir!;
+    if (isUserNamedType(payload.name)) {
+      roots.push({ name: payload.name!, ir: payload });
+      return payload.name!;
+    }
+    if (payload.kind === "object" || payload.kind === "intersection") {
+      roots.push({ name: fallback, ir: payload });
+      return fallback;
+    }
+    blocker ??=
+      `[wiz] The ${slot} is '${payload.kind}', but a gRPC rpc carries a message: ` +
+      `declare it as an interface or object type.`;
+    return fallback;
+  };
+
+  for (const method of service.methods) {
+    if (!isGrpcMethod(method)) continue;
+
+    const declaredPkg = method.address.package;
+    if (declaredPkg) {
+      if (pkg === undefined) {
+        pkg = declaredPkg;
+      } else if (pkg !== declaredPkg) {
+        return protoBlockedModuleCode(
+          "grpcSchema",
+          `[wiz] Methods declare conflicting proto packages '${pkg}' and '${declaredPkg}', ` +
+            `but a .proto file declares exactly one. Use one '@package' for the whole schema.`
+        );
+      }
+    }
+
+    const rpcName = method.address.method;
+    const label = `${method.address.service}.${rpcName}`;
+    const response = method.responses[0];
+
+    const comments: string[] = [];
+    for (const text of [method.summary, method.description]) {
+      if (!text) continue;
+      for (const line of text.split("\n")) {
+        if (line.trim()) comments.push(line.trim());
+      }
+    }
+
+    const rpc = {
+      name: rpcName,
+      requestType: messageFor(
+        method.request.message,
+        `${upperFirst(rpcName)}Request`,
+        `request of rpc '${label}'`
+      ),
+      requestStream: method.request.streaming,
+      responseType: messageFor(
+        response?.message,
+        `${upperFirst(rpcName)}Response`,
+        `response of rpc '${label}'`
+      ),
+      responseStream: response?.streaming ?? false,
+      comments,
+      options: method.deprecated ? ["deprecated = true"] : [],
+    };
+
+    const existing = services.get(method.address.service);
+    if (existing) {
+      existing.rpcs.push(rpc);
+    } else {
+      services.set(method.address.service, {
+        name: method.address.service,
+        rpcs: [rpc],
+      });
+    }
+  }
+
+  if (blocker) return protoBlockedModuleCode("grpcSchema", blocker);
+
+  const allNamedTypes = collectProtoNamedTypes(roots);
+  const fieldBlocker = protoFieldBlocker(allNamedTypes);
+  if (fieldBlocker) return protoBlockedModuleCode("grpcSchema", fieldBlocker);
+
+  return protoModuleCode(
+    "grpcSchema",
+    protoTypeDefs(allNamedTypes),
+    pkg,
+    [...services.values()]
+  );
 }
 
 /**

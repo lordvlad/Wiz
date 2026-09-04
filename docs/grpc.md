@@ -225,6 +225,86 @@ wiz generate: dropped 'extend' at odd.proto: dropped 'extend'; the IR has no slo
   out/transport.ts
 ```
 
+## The other direction: `grpcSchema`
+
+`grpcSchema<[S]>()` is the front end read backwards. Where the proto front end
+turns a `.proto` into TypeScript, this turns a TypeScript service interface into
+`.proto` text at compile time, so the service definition lives with the code
+that implements it instead of in a file kept in sync by hand.
+
+```ts
+import { grpcSchema } from "wiz";
+
+export interface HelloRequest {
+  /** @fieldNumber 1 */
+  name: string;
+}
+
+export interface HelloReply {
+  /** @fieldNumber 1 */
+  message: string;
+}
+
+/**
+ * @package helloworld
+ * @service Greeter
+ */
+export interface GreeterService {
+  /** Greets one caller. */
+  sayHello(request: HelloRequest): Promise<HelloReply>;
+  chat(requests: AsyncIterable<HelloRequest>): AsyncIterable<HelloReply>;
+}
+
+export const proto = grpcSchema<[GreeterService]>({ indent: "  " });
+```
+
+```proto
+syntax = "proto3";
+
+package helloworld;
+
+message HelloRequest {
+  string name = 1;
+}
+
+message HelloReply {
+  string message = 1;
+}
+
+service Greeter {
+  // Greets one caller.
+  rpc sayHello (HelloRequest) returns (HelloReply);
+  rpc chat (stream HelloRequest) returns (stream HelloReply);
+}
+```
+
+Messages are the same protobuf mapping `protobufSchema` uses, `@fieldNumber`
+and all: see [protobuf](./protobuf.md) for widths, `oneof` and `NumberedUnion`.
+What this macro adds is the `service` block.
+
+| written | read as |
+|---|---|
+| a first parameter of `AsyncIterable<T>` or `ReadableStream<T>` | `stream` on the request |
+| a return of `AsyncIterable<T>`, `AsyncGenerator<T>` or `ReadableStream<T>`, with or without `Promise` | `stream` on the response |
+| `@package` | the file's `package` declaration |
+| `@service` | the `service` block's name, defaulting to the interface's own |
+| `@name` | the rpc's name, defaulting to the member's own |
+| a doc comment, `@summary` | comments above the rpc |
+| `@deprecated` | `option deprecated = true` in the rpc body |
+
+An rpc always names a message, so a payload that has no name of its own is
+given one: `ping(): Promise<{ up: boolean }>` emits `PingRequest` and
+`PingResponse`, and a parameterless method gets an empty `PingRequest` rather
+than an import of `google/protobuf/empty.proto`, which would leave the file
+needing a resolver. A type argument with no callable members is a payload
+rather than a service: it contributes a message and no rpc, and warns, since
+`grpcSchema` describes nothing else.
+
+Two things are refused at compile time, by a callsite that throws when it runs:
+a payload that is not a message - a scalar, an array, an enum - because nothing
+else is addressable on the wire, and two different `@package` values in one
+call, because a `.proto` file declares exactly one.
+
 ## The four directions
 
 Each `rpc` becomes a method addressed by package, service and name; the

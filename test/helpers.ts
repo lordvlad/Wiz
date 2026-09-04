@@ -169,6 +169,7 @@ export function evalModule<T>(code: string): T {
     "decodeErlangBinary",
     "asyncapiSchema",
     "mcpSchema",
+    "grpcSchema",
   ];
 
   const collected = exportNames
