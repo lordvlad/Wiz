@@ -1,13 +1,13 @@
 /**
- * The OpenAPI document, derived from `PetApi` at compile time.
+ * The OpenAPI document, derived from `PetStore` at compile time.
  *
  * Run directly to print it: `bun run src/schemas/openapi.ts`.
  */
 import { openapiSchema } from "wiz";
 import type { Problem } from "../model.ts";
-import type { PetApi } from "../service.ts";
+import type { PetStore } from "../service.ts";
 
-export const openapi = openapiSchema<[PetApi, Problem]>({
+export const openapi = openapiSchema<[PetStore, Problem]>({
   openapi: "3.1.0",
   info: {
     title: "Petstore",

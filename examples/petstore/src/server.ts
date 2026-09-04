@@ -49,7 +49,7 @@ function getIdFromUrl(req: Request): number {
 
 // OpenRPC over WebSocket. The store is registered as one service, so every
 // method it declares is dispatchable as `Pets.<method>` - the same names
-// `openRPCSchema<[PetApi]>` puts in the document, since both read `PetApi`.
+// `openRPCSchema<[PetStore]>` puts in the document, since both read `PetStore`.
 const rpc = openRPCHandler({ services: { Pets: store } });
 function handleResponse(
   fn: () => Response | Promise<Response>
@@ -69,7 +69,7 @@ function handleResponse(
 }
 
 // The REST route map, handed straight to `Bun.serve`. The OpenAPI document is
-// derived from `PetApi` in `src/schemas/openapi.ts`, not from this literal:
+// derived from `PetStore` in `src/schemas/openapi.ts`, not from this literal:
 // paths are what the router needs, and types are what a document needs.
 const routes = {
   "/pets": {

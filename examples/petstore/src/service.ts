@@ -1,12 +1,11 @@
 /**
  * The one implementation every document in this example is derived from.
  *
- * The request-response contract is declared here, next to the class that
- * satisfies it, and `PetStore implements PetApi` is what keeps them honest: a
- * signature that drifts from the service is a type error, not a stale document.
- * The event contract needs no second interface: `onChange` and `applyChange`
- * carry their own `@producer`/`@consumer` tags, and a member without such a tag
- * documents nothing.
+ * The contracts live on `PetStore` itself: `@get`/`@post`/`@delete` declare the
+ * REST operations, `@rpc` the JSON-RPC methods, and `@producer`/`@consumer` the
+ * event channels. Because spec macros harvest only tagged members, one class
+ * generates all five spec documents without separate interface definitions or
+ * leaky methods.
  * REST, OpenRPC-over-WebSocket and the Kafka consumer all call these methods,
  * and the service itself knows nothing about HTTP, JSON-RPC, media types or
  * topics — which is what makes "three protocols, one behaviour" true rather
@@ -22,88 +21,6 @@ import type {
   Problem,
   Sale,
 } from "./model.ts";
-
-/**
- * Every request-response operation the store offers, once.
- *
- * One set of signatures serves REST and JSON-RPC both, because the two need
- * different things and neither needs a wrapper type: `@get`/`@post` supply the
- * verb and path template OpenAPI cannot infer, a parameter named in the path
- * template becomes a path parameter, one named `query` becomes query
- * parameters and one named `body` becomes the request body. `@rpc` says the
- * same method is dispatchable over JSON-RPC, where a method is a name and its
- * params and nothing else is needed, giving `Pets.list`, `Pets.get` and the
- * rest.
- *
- * @service Pets
- */
-export interface PetApi {
-  /**
-   * Lists pets, filtered and capped.
-   *
-   * The one operation offered in four representations. Each `@response 200`
-   * tag adds a media type to the *same* response object, so the document says
-   * one 200 with four `content` entries.
-   *
-   * @get /pets
-   * @rpc
-   * @summary List pets
-   * @response 200 application/json Pet[]
-   * @response 200 application/yaml Pet[]
-   * @response 200 application/xml Pet[]
-   * @response 200 text/csv Pet[]
-   */
-  list(query: PetQuery): Pet[];
-
-  /**
-   * Fetches one pet as JSON or as protobuf.
-   *
-   * The protobuf representation is encoded by `encodeProto<Pet>`, generated
-   * from the same `@fieldNumber` declarations as `build/schemas/petstore.proto`.
-   *
-   * @get /pets/{id}
-   * @rpc
-   * @summary Fetch a pet
-   * @response 200 application/json Pet
-   * @response 200 application/x-protobuf Pet
-   * @response 404 application/json Problem
-   */
-  get(id: number): Pet;
-
-  /**
-   * Adds a pet to the store and publishes a change event.
-   *
-   * @post /pets
-   * @rpc
-   * @summary Add a pet
-   * @response 201 application/json Pet
-   * @response 422 application/json Problem
-   */
-  add(body: NewPet): Promise<Pet>;
-
-  /**
-   * Sells a pet to an owner and publishes a change event.
-   *
-   * @post /pets/{id}/sale
-   * @rpc
-   * @summary Sell a pet
-   * @response 200 application/json Pet
-   * @response 404 application/json Problem
-   * @response 422 application/json Problem
-   */
-  sell(id: number, body: Sale): Promise<Pet>;
-
-  /**
-   * Removes a pet. No body, so no content.
-   *
-   * @delete /pets/{id}
-   * @rpc
-   * @summary Remove a pet
-   * @response 204
-   * @response 404 application/json Problem
-   */
-  remove(id: number): Promise<void>;
-}
 
 /** Thrown when a caller asks for a pet that is not there. */
 export class NotFoundError extends Error {
@@ -134,16 +51,14 @@ export function problemOf(error: NotFoundError | InvalidError): Problem {
 }
 
 /**
- * The store itself: one behaviour, five documents.
+ * The store itself: one implementation class, five spec documents.
  *
- * `implements PetApi` ties every request-response operation to its declared
- * contract. The two event members carry the AsyncAPI tags directly, so this
- * class is what `asyncapiSchema` harvests: an untagged member such as `seed`
- * or `list` is not a channel operation.
+ * REST, JSON-RPC, AsyncAPI and Protobuf schemas are all derived from this class.
+ * Each macro harvests only the members carrying tags for its protocol.
  *
  * @service Pets
  */
-export class PetStore implements PetApi {
+export class PetStore {
   #pets = new Map<number, Pet>();
   #nextId = 1;
   #listeners: ChangeListener[] = [];
@@ -172,6 +87,21 @@ export class PetStore implements PetApi {
     for (const listener of this.#listeners) await listener(event);
   }
 
+  /**
+   * Lists pets, filtered and capped.
+   *
+   * The one operation offered in four representations. Each `@response 200`
+   * tag adds a media type to the *same* response object, so the document says
+   * one 200 with four `content` entries.
+   *
+   * @get /pets
+   * @rpc
+   * @summary List pets
+   * @response 200 application/json Pet[]
+   * @response 200 application/yaml Pet[]
+   * @response 200 application/xml Pet[]
+   * @response 200 text/csv Pet[]
+   */
   list(query: PetQuery = {}): Pet[] {
     const limit = query.limit ?? 20;
     const needle = query.q?.toLowerCase();
@@ -182,12 +112,34 @@ export class PetStore implements PetApi {
       .slice(0, limit);
   }
 
+  /**
+   * Fetches one pet as JSON or as protobuf.
+   *
+   * The protobuf representation is encoded by `encodeProto<Pet>`, generated
+   * from the same `@fieldNumber` declarations as `build/schemas/petstore.proto`.
+   *
+   * @get /pets/{id}
+   * @rpc
+   * @summary Fetch a pet
+   * @response 200 application/json Pet
+   * @response 200 application/x-protobuf Pet
+   * @response 404 application/json Problem
+   */
   get(id: number): Pet {
     const pet = this.#pets.get(id);
     if (!pet) throw new NotFoundError(id);
     return pet;
   }
 
+  /**
+   * Adds a pet to the store and publishes a change event.
+   *
+   * @post /pets
+   * @rpc
+   * @summary Add a pet
+   * @response 201 application/json Pet
+   * @response 422 application/json Problem
+   */
   async add(body: NewPet): Promise<Pet> {
     if (typeof (body as any).priceCents === "number") {
       (body as any).priceCents = BigInt((body as any).priceCents);
@@ -208,6 +160,16 @@ export class PetStore implements PetApi {
     return pet;
   }
 
+  /**
+   * Sells a pet to an owner and publishes a change event.
+   *
+   * @post /pets/{id}/sale
+   * @rpc
+   * @summary Sell a pet
+   * @response 200 application/json Pet
+   * @response 404 application/json Problem
+   * @response 422 application/json Problem
+   */
   async sell(id: number, body: Sale): Promise<Pet> {
     if (!is<Sale>(body)) throw new InvalidError("invalid Sale");
 
@@ -222,6 +184,15 @@ export class PetStore implements PetApi {
     return sold;
   }
 
+  /**
+   * Removes a pet. No body, so no content.
+   *
+   * @delete /pets/{id}
+   * @rpc
+   * @summary Remove a pet
+   * @response 204
+   * @response 404 application/json Problem
+   */
   async remove(id: number): Promise<void> {
     this.get(id);
     this.#pets.delete(id);
