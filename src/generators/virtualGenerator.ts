@@ -16,6 +16,7 @@ import { generateArrowCode, generateArrowSchemaCode } from "./arrow.ts";
 import { generateJsonCode } from "./json.ts";
 import { generateZodSchemaCode } from "./zod.ts";
 import { generateErlangTextCode, generateErlangBinaryCode } from "./erlang.ts";
+import { generateCborCode } from "./cbor.ts";
 import { generateAsyncApiSchemaCode, type AsyncApiVersion } from "./asyncapi.ts";
 import { generateMcpSchemaCode } from "./mcp.ts";
 import type { Generator } from "./generator.ts";
@@ -76,6 +77,7 @@ const SECTION_EXPORTS = {
   openrpc: ["openRPCSchema"],
   erlangText: ["encodeErlangText", "decodeErlangText"],
   erlangBinary: ["encodeErlangBinary", "decodeErlangBinary"],
+  cbor: ["encodeCbor", "decodeCbor"],
   asyncapi: ["asyncapiSchema"],
   mcp: ["mcpSchema"],
   grpcSchema: ["grpcSchema"],
@@ -105,6 +107,7 @@ export function generateVirtualModuleCode(
   if (include("json")) parts.push(generateJsonCode(ir));
   if (include("erlangText")) parts.push(generateErlangTextCode(ir));
   if (include("erlangBinary")) parts.push(generateErlangBinaryCode(ir));
+  if (include("cbor")) parts.push(generateCborCode(ir));
 
   // An empty `openApiTypes` array is still a request for an OpenAPI document:
   // `openapiSchema<[]>(base, [...ops])` carries all its content in methods.

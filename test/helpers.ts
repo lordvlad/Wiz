@@ -173,6 +173,8 @@ export function evalModule<T>(code: string): T {
     "decodeErlangText",
     "encodeErlangBinary",
     "decodeErlangBinary",
+    "encodeCbor",
+    "decodeCbor",
     "asyncapiSchema",
     "mcpSchema",
     "grpcSchema",

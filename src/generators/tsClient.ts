@@ -17,6 +17,7 @@ import type { GeneratedFiles, Generator, GeneratorContext } from "./generator.ts
 import { generateProtobufCodecCode } from "./protobuf.ts";
 import { generateJsonCodecCode } from "./json.ts";
 import { generateErlangTextCode, generateErlangBinaryCode } from "./erlang.ts";
+import { generateCborCode } from "./cbor.ts";
 import { generateValidationBlock, helpersFor } from "./validator.ts";
 import { docComment, tsDeclarations, typeIdentifiers, typeText } from "./tsTypes.ts";
 
@@ -49,6 +50,7 @@ export type MediaType =
   | "erlangText"
   | "erlangBinary"
   | "erlang"
+  | "cbor"
   | "yaml";
 
 export interface TsClientOptions {
@@ -266,6 +268,9 @@ function isMimetypeSupported(mimetype: string, mediaTypes?: string[] | "all"): b
   if (norm.includes("html")) {
     return has("html") || has("xml+html");
   }
+  if (norm.includes("cbor")) {
+    return has("cbor");
+  }
   if (norm.includes("erlang-binary") || norm.includes("x-erlang-binary") || norm.includes("etf")) {
     return has("erlangbinary") || has("erlang-binary");
   }
@@ -327,6 +332,9 @@ function bodySerializer(mimetype: string, access: string, encode?: string): stri
   }
   if (norm.includes("html")) {
     return `typeof ${access}.body === "string" ? ${access}.body : ((globalThis as any).Bun?.escapeHTML ? (globalThis as any).Bun.escapeHTML(String(${access}.body)) : String(${access}.body))`;
+  }
+  if (norm.includes("cbor")) {
+    return `encodeCbor(${access}.body)`;
   }
   if (norm.includes("erlang-binary") || norm.includes("x-erlang-binary") || norm.includes("etf")) {
     return `encodeErlangBinary(${access}.body)`;
@@ -1205,6 +1213,14 @@ async function parseBody(response: Response): Promise<unknown> {
   if (ct.includes("xml")) {
     try {
       return (bun?.XML ?? { parse: (t: string) => t }).parse(text);
+    } catch {
+      return text;
+    }
+  }
+  if (ct.includes("cbor")) {
+    try {
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      return typeof (globalThis as any).decodeCbor === "function" ? (globalThis as any).decodeCbor(bytes) : bytes;
     } catch {
       return text;
     }
@@ -2298,6 +2314,17 @@ function emitFiles(
     return isErlangBinary(reqMime) || isErlangBinary(respMime);
   });
 
+  const speaksCbor = service.methods.some((m) => {
+    if (!isHttpMethod(m)) return false;
+    const http = m as HttpServiceMethodIR;
+    const reqBody = selectBody(http.request.body, context.options, () => {});
+    const respBody = selectBody(http.responses[0]?.body, context.options, () => {});
+    const reqMime = reqBody?.mimetype.toLowerCase() ?? "";
+    const respMime = respBody?.mimetype.toLowerCase() ?? "";
+    const isCbor = (mime: string) => mime.includes("cbor");
+    return isCbor(reqMime) || isCbor(respMime);
+  });
+
   const codecImports = [...new Set([
     ...codecTypes.flatMap(({ name }) => {
       const identifier = identifiers.get(name);
@@ -2307,8 +2334,9 @@ function emitFiles(
     }),
     ...(speaksErlangText ? ["encodeErlangText", "decodeErlangText"] : []),
     ...(speaksErlangBinary ? ["encodeErlangBinary", "decodeErlangBinary"] : []),
+    ...(speaksCbor ? ["encodeCbor", "decodeCbor"] : []),
   ])]
-    .filter((fn) => new RegExp(`\\b${fn}\\b`).test(declarations) || speaksErlangText || speaksErlangBinary)
+    .filter((fn) => new RegExp(`\\b${fn}\\b`).test(declarations) || speaksErlangText || speaksErlangBinary || speaksCbor)
     .sort();
   // The gRPC fields only exist on a client that has rpcs to make, so the shared
   // configuration carries them conditionally rather than always.
@@ -2482,6 +2510,9 @@ ${valHelpers.size > 0 ? `${[...valHelpers].join("\n\n")}\n` : ""}`
   }
   if (speaksErlangBinary) {
     parts.push(generateErlangBinaryCode(emptyIR));
+  }
+  if (speaksCbor) {
+    parts.push(generateCborCode(emptyIR));
   }
 
   const codecContent = `${banner("Wire encoders and decoders.")}\n${parts.join("\n\n")}\n`;

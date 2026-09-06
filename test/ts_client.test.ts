@@ -747,4 +747,41 @@ describe("mediaTypes option support in tsClient", () => {
     expect(files["api.ts"]).toContain('"application/x-etf"');
     expect(files["codec.ts"]).toContain("encodeErlangBinary");
   });
+
+  test("emits client with CBOR support when mediaTypes includes cbor", () => {
+    const doc = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "CborApi", version: "1.0.0" },
+      paths: {
+        "/items": {
+          post: {
+            operationId: "sendItem",
+            requestBody: {
+              content: {
+                "application/cbor": {
+                  schema: { type: "object", properties: { data: { type: "string" } } },
+                },
+              },
+            },
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/cbor": {
+                    schema: { type: "object", properties: { id: { type: "string" } } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const ir = extractApiIR(doc, { format: "json" });
+    const files = generate(ir, tsClientGenerator, { mediaTypes: ["cbor"] }, silentLogger);
+
+    expect(files["api.ts"]).toContain('"application/cbor"');
+    expect(files["codec.ts"]).toContain("encodeCbor");
+  });
 });

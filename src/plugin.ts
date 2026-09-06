@@ -60,6 +60,8 @@ const HELPER_FUNCTIONS = new Set([
   "decodeErlangText",
   "encodeErlangBinary",
   "decodeErlangBinary",
+  "encodeCbor",
+  "decodeCbor",
 ]);
 
 /**
@@ -166,6 +168,8 @@ export const VIRTUAL_EXPORTS: Record<string, string> = {
   decodeErlangText: "__wiz_decodeErlangText",
   encodeErlangBinary: "__wiz_encodeErlangBinary",
   decodeErlangBinary: "__wiz_decodeErlangBinary",
+  encodeCbor: "__wiz_encodeCbor",
+  decodeCbor: "__wiz_decodeCbor",
 };
 
 export function localAlias(exportName: string, hash: string): string {
@@ -833,6 +837,24 @@ export function transformSource(options: TransformOptions): TransformResult {
                 const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
                 return context.factory.createCallExpression(
                   context.factory.createIdentifier(`__wiz_decodeErlangBinary_${hash}`),
+                  undefined,
+                  visitedArgs
+                );
+              }
+              case "encodeCbor": {
+                wantExport("encodeCbor");
+                const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
+                return context.factory.createCallExpression(
+                  context.factory.createIdentifier(`__wiz_encodeCbor_${hash}`),
+                  undefined,
+                  visitedArgs
+                );
+              }
+              case "decodeCbor": {
+                wantExport("decodeCbor");
+                const visitedArgs = node.arguments.map((arg) => ts.visitNode(arg, visitor) as ts.Expression);
+                return context.factory.createCallExpression(
+                  context.factory.createIdentifier(`__wiz_decodeCbor_${hash}`),
                   undefined,
                   visitedArgs
                 );

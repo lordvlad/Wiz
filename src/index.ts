@@ -332,6 +332,20 @@ export function decodeErlangBinary<T>(_raw: Uint8Array): T {
 }
 
 /**
+ * Encodes a value into CBOR (RFC 8949) binary.
+ */
+export function encodeCbor<T>(_val: T): Uint8Array {
+  throw new PluginInactiveError("encodeCbor");
+}
+
+/**
+ * Decodes CBOR (RFC 8949) binary into a value.
+ */
+export function decodeCbor<T>(_raw: Uint8Array): T {
+  throw new PluginInactiveError("decodeCbor");
+}
+
+/**
  * The part of a zod schema a caller reaches for first.
  *
  * Declared structurally so wiz never imports zod itself: zod is an optional
