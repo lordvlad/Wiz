@@ -40,7 +40,11 @@ cat openapi.yaml | wiz generate -g node_modules/wiz/src/generators/tsClient.ts |
 ```
 
 The rest of the flags — `--format`, `--lenient`, `--media-types`, stdin and outdir handling — are
-in [cli](./cli.md). `--media-types` specifies additional supported payload formats (`jsonl`, `jsonc`, `json5`, `xml`, `html`, `grpc`, `erlangText`, `erlangBinary`, `yaml`, or `all`).
+in [cli](./cli.md). `--media-types` specifies additional supported payload formats (`jsonl`, `jsonc`, `json5`, `xml`, `html`, `grpc`, `erlangText`, `erlangBinary`, `cbor`, `yaml`, or `all`).
+
+With `cbor` enabled, an `application/cbor` body is serialised with `encodeCbor`
+and an `application/cbor` response is parsed with `decodeCbor`; both land in the
+generated `codec.ts`. See [cbor](./cbor.md).
 
 ## What comes out
 

@@ -3,9 +3,12 @@
 `wiz` uses front-end extractors to convert source code, schemas, and API specifications into a unified Intermediate Representation (IR).
 
 ```
-TypeScript types   ──┐
-OpenAPI documents  ──┼──> [ Extractor ] ──> TypeIR / ServiceIR / ApiIR
-.proto files       ──┘
+TypeScript types    ──┐
+OpenAPI documents   ──┤
+AsyncAPI documents  ──┼──> [ Extractor ] ──> TypeIR / ServiceIR / ApiIR
+OpenRPC documents   ──┤
+JSON Schema         ──┤
+.proto files        ──┘
 ```
 
 Because extractors and generators meet at the IR boundary, any generator can read the output of any extractor.

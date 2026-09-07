@@ -79,7 +79,7 @@ wiz generate -g wiz/generators/tsClient.ts openapi.yaml --outdir src/api
 | `--outdir <dir>` | `-o` | Output directory. If omitted, JSON record is printed to stdout. |
 | `--format <fmt>` | `-f` | Override input format inference (`openapi`, `proto`, `jsonschema`). |
 | `--lenient` | | Widen parameter shapes in client generators. |
-| `--media-types <list\|all>` | | Additional media types to support in `tsClient` / `reactQuery` (`jsonl`, `jsonc`, `json5`, `xml`, `html`, `xml+html`, `grpc`, `erlangText`, `erlangBinary`, `yaml`, or `all`). `json` is always enabled. |
+| `--media-types <list\|all>` | | Additional media types to support in `tsClient` / `reactQuery` (`jsonl`, `jsonc`, `json5`, `xml`, `html`, `xml+html`, `grpc`, `erlangText`, `erlangBinary`, `cbor`, `yaml`, or `all`). `json` is always enabled. |
 | `--validate [parts]` | | Emit runtime checks in client generators. Bare = every part; otherwise a comma-separated list of `path`, `query`, `headers`, `body`, `response`. |
 ### Built-in Emitter Shortcuts
 

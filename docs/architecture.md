@@ -11,8 +11,9 @@ registry and the virtual-module mount.
 There are two kinds of component and one thing between them. An *extractor* is
 a front end: it reads some external description of types and produces IR. A
 *generator* is a back end: it reads IR and produces files. Today there are
-three extractors — `src/extractors/typescript.ts`, `src/extractors/openapi.ts`,
-`src/extractors/proto.ts` — and a dozen generators under `src/generators/`.
+six extractors under `src/extractors/` — `typescript.ts`, `openapi.ts`,
+`asyncapi.ts`, `openrpc.ts`, `jsonSchema.ts`, `proto.ts` — and twenty
+generators under `src/generators/`.
 
 The shape matters more than the count. A generator's entire interface is three
 optional methods, each addressed by an IR root:
@@ -284,8 +285,8 @@ CommonJS dependency as ESM and lose its default export.
 
 **2. The text gate.** Before any compiler work, `transformSource` bails on two
 substring checks — the file contains `@wiz-ignore`, or it contains none of the
-nineteen names in `HELPER_FUNCTIONS`. A gate on raw text rather than on the AST
-because building a `ts.Program` is the expensive part and most files in a
+thirty-five names in `HELPER_FUNCTIONS`. A gate on raw text rather than on the
+AST because building a `ts.Program` is the expensive part and most files in a
 project mention nothing. When it fires, the *original* text is returned
 unchanged; the printer never touches a file wiz has no business in.
 
@@ -300,9 +301,8 @@ second transform of one path means the build is running again, so a document
 harvested last time may describe source that is already gone.
 
 **4. Finding callsites.** One `ts.Visitor` walks every node. On a
-`CallExpression` it reads the callee name — from an `Identifier` or the
-`.name` of a `PropertyAccessExpression`, so `openapiSchema.get(…)` is seen too
-— and dispatches. Two cases are not type-driven at all:
+`CallExpression` it reads the callee name from an `Identifier` and dispatches.
+Two cases are not type-driven at all:
 
 - `openapiDocument()` with no arguments is answered from the whole program by
   `harvestDocument` and inlined as an AST literal by `jsonToExpression`, so no
@@ -429,9 +429,10 @@ const key = options ? `${typeHash}_${payloadKey(options)}` : typeHash;
 
 `payloadKey` hashes every field of `VirtualModuleOptions` that changes the
 emitted code: the OpenAPI types and version, the normalised service methods,
-the protobuf/Avro/Arrow schema type lists, and the `arrow` and `zod` flags.
-Named type lists go through `namedTypesKey`, which normalises *with* names,
-since those names become `components.schemas` keys and `$ref` targets.
+the protobuf/Avro/Arrow/gRPC schema type lists, the `jsonSchemas` type list,
+and the `arrow` and `zod` flags. Named type lists go through `namedTypesKey`,
+which normalises *with* names, since those names become `components.schemas`
+keys and `$ref` targets.
 
 One field is deliberately absent, with a comment saying so: `only` is applied
 when the module is emitted, never at registration, so it cannot distinguish two

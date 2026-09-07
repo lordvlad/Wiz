@@ -4,9 +4,12 @@
 
 ## 1. Spec Generator (`asyncapiSchema`)
 
-Symmetric to OpenAPI's `openapiSchema`, `wiz` builds AsyncAPI 2.6 and 3.0
-documents from TypeScript types and service interfaces. Channels and their
-direction are declared with JSDoc on the interface's methods.
+Symmetric to OpenAPI's `openapiSchema`, `wiz` builds AsyncAPI documents from
+TypeScript types and service interfaces. Channels and their direction are
+declared with JSDoc on the interface's methods. The macro emits AsyncAPI
+**3.0**; 2.6 is supported on the input side, where `extractAsyncApiIR` detects
+the declared version, and by `generateAsyncApiSchemaCode(types, "2.6", service)`
+when a 2.6 document is wanted from a generator of your own.
 
 ```ts
 import { asyncapiSchema } from "wiz";

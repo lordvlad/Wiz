@@ -42,10 +42,10 @@ in [getting-started.md](./docs/getting-started.md).
 | `validate<T>(value, options?)` | `ValidationError[]` | [type-introspection](./docs/type-introspection.md) |
 | `assert<T>(value, options?)` | `asserts value is T`, throws `AssertError` | [type-introspection](./docs/type-introspection.md) |
 | `parseQuery<T>(input, options?)` | `T`, coerced from a query string | [type-introspection](./docs/type-introspection.md) |
-| `schema<T>(version?)` | JSON Schema (`draft-2020-12` or `draft-07`) | [json-schema](./docs/json-schema.md) |
+| `jsonSchema<T>(version?)` / `jsonSchemas<[A, B]>(version?)` | JSON Schema (`draft-2020-12` or `draft-07`) | [json-schema](./docs/json-schema.md) |
 | `zodSchema<T>()` | `Promise<ZodSchema>`, from the same IR | [zod](./docs/zod.md) |
 | `openapiSchema<[A, B]>(base?)` / `openapiDocument<[S]>(base?)` | OpenAPI 3.0 or 3.1 document | [openapi](./docs/openapi.md) |
-| `asyncapiSchema<[A, B]>(base?)` | AsyncAPI 2.6 or 3.0 document | [asyncapi](./docs/asyncapi.md) |
+| `asyncapiSchema<[A, B]>(base?)` | AsyncAPI 3.0 document (2.6 documents are read by the extractor) | [asyncapi](./docs/asyncapi.md) |
 | `openRPCSchema<[S]>(base?)` | OpenRPC 1.3 document | [openrpc](./docs/openrpc.md) |
 | `mcpSchema<[T]>(base?)` | MCP tool specifications | [mcp](./docs/mcp.md) |
 | `protobufSchema<[A, B]>()` / `encodeProto` / `decodeProto` | `.proto` text and binary codec | [protobuf](./docs/protobuf.md) |
@@ -55,6 +55,7 @@ in [getting-started.md](./docs/getting-started.md).
 | `encodeJson<T>` / `decodeJson<T>` | JSON codec with `bigint`, `Date`, `bytes` handling | [json-codec](./docs/json-codec.md) |
 | `encodeErlangText<T>` / `decodeErlangText<T>` | Erlang Text codec | [erlang](./docs/erlang.md) |
 | `encodeErlangBinary<T>` / `decodeErlangBinary<T>` | Erlang External Term Format (ETF 131) | [erlang](./docs/erlang.md) |
+| `encodeCbor<T>` / `decodeCbor<T>` | CBOR (RFC 8949) binary codec | [cbor](./docs/cbor.md) |
 
 Identical types share one generated module, so `is<User>(a)` in two files
 imports the same function.
