@@ -277,6 +277,14 @@ async function parseBody(response: Response): Promise<unknown> {
       return text;
     }
   }
+  if (ct.includes("cbor")) {
+    try {
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      return typeof (globalThis as any).decodeCbor === "function" ? (globalThis as any).decodeCbor(bytes) : bytes;
+    } catch {
+      return text;
+    }
+  }
   if (ct.includes("erlang-binary") || ct.includes("etf")) {
     try {
       const bytes = new Uint8Array(await response.arrayBuffer());

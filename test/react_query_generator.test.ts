@@ -193,8 +193,8 @@ describe("Multi-tenancy & query options verification", () => {
 
   test("mutations.ts re-uses mutation options getter inside mutation hook", () => {
     const mutations = files["mutations.ts"]!;
-    expect(mutations).toContain("return useMutation(getCreatePetMutationOptions(mutationOptions, client));");
-    expect(mutations).toContain("return useMutation(getDeletePetMutationOptions(mutationOptions, client));");
+    expect(mutations).toContain("return useMutation(getCreatePetMutationOptions<TError>(mutationOptions, client));");
+    expect(mutations).toContain("return useMutation(getDeletePetMutationOptions<TError>(mutationOptions, client));");
   });
 
   test("createQueries, createMutations, and createHooks bind operations to client instance", () => {
@@ -240,12 +240,47 @@ describe("CLI Generator Resolution & Typechecking", () => {
     expect(await Bun.file(join(outDir, "api.ts")).exists()).toBe(true);
   });
 
+  /**
+   * The stub mirrors the real generic arity and, critically, the slot
+   * semantics: `UseQueryOptions` slot 3 is `select`'s result and so is
+   * caller-chosen, while `UseMutationOptions` slot 1 is the `mutationFn`
+   * return type and so is fixed by the client method. An `any`-typed stub
+   * accepts either, which is how a free `TData` in the mutation slot reached
+   * consumers as 19 TS2345 errors against the real package.
+   */
   test("emitted code typechecks under TypeScript compiler", async () => {
     const outDir = join(tempDir, "client");
     const stubPath = join(outDir, "react-query-stub.d.ts");
     await Bun.write(
       stubPath,
-      'declare module "@tanstack/react-query" { export type UseQueryOptions<TData=any, TError=any, TQueryData=any> = any; export type UseMutationOptions<TData=any, TError=any, TVariables=any> = any; export function useQuery(...args: any[]): any; export function useMutation(...args: any[]): any; }'
+      [
+        'declare module "@tanstack/react-query" {',
+        "  export interface QueryFunctionContext {",
+        "    queryKey: readonly unknown[];",
+        "    signal: AbortSignal;",
+        "  }",
+        "  export interface UseQueryOptions<TQueryFnData = unknown, TError = unknown, TData = TQueryFnData> {",
+        "    queryKey?: readonly unknown[];",
+        "    queryFn?: (context: QueryFunctionContext) => Promise<TQueryFnData>;",
+        "    select?: (data: TQueryFnData) => TData;",
+        "    enabled?: boolean;",
+        "    retry?: number | boolean;",
+        "  }",
+        "  export interface UseMutationOptions<TData = unknown, TError = unknown, TVariables = void, TContext = unknown> {",
+        "    mutationKey?: readonly unknown[];",
+        "    mutationFn?: (variables: TVariables) => Promise<TData>;",
+        "    onSuccess?: (data: TData, variables: TVariables, context: TContext) => unknown;",
+        "    onError?: (error: TError, variables: TVariables, context: TContext) => unknown;",
+        "    retry?: number | boolean;",
+        "  }",
+        "  export function useQuery<TQueryFnData = unknown, TError = unknown, TData = TQueryFnData>(",
+        "    options: UseQueryOptions<TQueryFnData, TError, TData>",
+        "  ): { data: TData | undefined; error: TError | null };",
+        "  export function useMutation<TData = unknown, TError = unknown, TVariables = void, TContext = unknown>(",
+        "    options: UseMutationOptions<TData, TError, TVariables, TContext>",
+        "  ): { data: TData | undefined; error: TError | null; mutate: (variables: TVariables) => void };",
+        "}",
+      ].join("\n")
     );
 
     const program = ts.createProgram(

@@ -205,10 +205,9 @@ function emitReactQueryFiles(
 
       return [
         `${optionsFnDoc}export function get${op.capitalName}MutationOptions<`,
-        `  TData = Awaited<ReturnType<Client["${op.name}"]>>,`,
         "  TError = unknown",
         ">(",
-        `  mutationOptions?: Omit<UseMutationOptions<TData, TError, Parameters<Client["${op.name}"]>[0]>, "mutationFn">,`,
+        `  mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["${op.name}"]>>, TError, Parameters<Client["${op.name}"]>[0]>, "mutationFn">,`,
         "  client: Client = defaultClient()",
         ") {",
         "  return {",
@@ -220,13 +219,12 @@ function emitReactQueryFiles(
         "}",
         "",
         `${hookDoc}export function use${op.capitalName}<`,
-        `  TData = Awaited<ReturnType<Client["${op.name}"]>>,`,
         "  TError = unknown",
         ">(",
-        `  mutationOptions?: Omit<UseMutationOptions<TData, TError, Parameters<Client["${op.name}"]>[0]>, "mutationFn">,`,
+        `  mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["${op.name}"]>>, TError, Parameters<Client["${op.name}"]>[0]>, "mutationFn">,`,
         "  client: Client = defaultClient()",
         ") {",
-        `  return useMutation(get${op.capitalName}MutationOptions(mutationOptions, client));`,
+        `  return useMutation(get${op.capitalName}MutationOptions<TError>(mutationOptions, client));`,
         "}",
         "",
       ];
@@ -236,12 +234,12 @@ function emitReactQueryFiles(
     "  return {",
     ...mutationOps.map((op) => {
       return [
-        `    get${op.capitalName}MutationOptions: <TData = Awaited<ReturnType<Client["${op.name}"]>>, TError = unknown>(`,
-        `      mutationOptions?: Omit<UseMutationOptions<TData, TError, Parameters<Client["${op.name}"]>[0]>, "mutationFn">`,
-        `    ) => get${op.capitalName}MutationOptions<TData, TError>(mutationOptions, client),`,
-        `    use${op.capitalName}: <TData = Awaited<ReturnType<Client["${op.name}"]>>, TError = unknown>(`,
-        `      mutationOptions?: Omit<UseMutationOptions<TData, TError, Parameters<Client["${op.name}"]>[0]>, "mutationFn">`,
-        `    ) => use${op.capitalName}<TData, TError>(mutationOptions, client),`,
+        `    get${op.capitalName}MutationOptions: <TError = unknown>(`,
+        `      mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["${op.name}"]>>, TError, Parameters<Client["${op.name}"]>[0]>, "mutationFn">`,
+        `    ) => get${op.capitalName}MutationOptions<TError>(mutationOptions, client),`,
+        `    use${op.capitalName}: <TError = unknown>(`,
+        `      mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["${op.name}"]>>, TError, Parameters<Client["${op.name}"]>[0]>, "mutationFn">`,
+        `    ) => use${op.capitalName}<TError>(mutationOptions, client),`,
       ].join("\n");
     }),
     "  };",

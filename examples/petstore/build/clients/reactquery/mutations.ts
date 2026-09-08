@@ -10,10 +10,9 @@ import { defaultClient, type Client } from "./api.ts";
  * Adds a pet to the store and publishes a change event.
  */
 export function getAddMutationOptions<
-  TData = Awaited<ReturnType<Client["add"]>>,
   TError = unknown
 >(
-  mutationOptions?: Omit<UseMutationOptions<TData, TError, Parameters<Client["add"]>[0]>, "mutationFn">,
+  mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["add"]>>, TError, Parameters<Client["add"]>[0]>, "mutationFn">,
   client: Client = defaultClient()
 ) {
   return {
@@ -26,13 +25,12 @@ export function getAddMutationOptions<
 
 /** React Query hook for `add`. */
 export function useAdd<
-  TData = Awaited<ReturnType<Client["add"]>>,
   TError = unknown
 >(
-  mutationOptions?: Omit<UseMutationOptions<TData, TError, Parameters<Client["add"]>[0]>, "mutationFn">,
+  mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["add"]>>, TError, Parameters<Client["add"]>[0]>, "mutationFn">,
   client: Client = defaultClient()
 ) {
-  return useMutation(getAddMutationOptions(mutationOptions, client));
+  return useMutation(getAddMutationOptions<TError>(mutationOptions, client));
 }
 
 /**
@@ -41,10 +39,9 @@ export function useAdd<
  * Removes a pet. No body, so no content.
  */
 export function getRemoveMutationOptions<
-  TData = Awaited<ReturnType<Client["remove"]>>,
   TError = unknown
 >(
-  mutationOptions?: Omit<UseMutationOptions<TData, TError, Parameters<Client["remove"]>[0]>, "mutationFn">,
+  mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["remove"]>>, TError, Parameters<Client["remove"]>[0]>, "mutationFn">,
   client: Client = defaultClient()
 ) {
   return {
@@ -57,13 +54,12 @@ export function getRemoveMutationOptions<
 
 /** React Query hook for `remove`. */
 export function useRemove<
-  TData = Awaited<ReturnType<Client["remove"]>>,
   TError = unknown
 >(
-  mutationOptions?: Omit<UseMutationOptions<TData, TError, Parameters<Client["remove"]>[0]>, "mutationFn">,
+  mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["remove"]>>, TError, Parameters<Client["remove"]>[0]>, "mutationFn">,
   client: Client = defaultClient()
 ) {
-  return useMutation(getRemoveMutationOptions(mutationOptions, client));
+  return useMutation(getRemoveMutationOptions<TError>(mutationOptions, client));
 }
 
 /**
@@ -72,10 +68,9 @@ export function useRemove<
  * Sells a pet to an owner and publishes a change event.
  */
 export function getSellMutationOptions<
-  TData = Awaited<ReturnType<Client["sell"]>>,
   TError = unknown
 >(
-  mutationOptions?: Omit<UseMutationOptions<TData, TError, Parameters<Client["sell"]>[0]>, "mutationFn">,
+  mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["sell"]>>, TError, Parameters<Client["sell"]>[0]>, "mutationFn">,
   client: Client = defaultClient()
 ) {
   return {
@@ -88,35 +83,34 @@ export function getSellMutationOptions<
 
 /** React Query hook for `sell`. */
 export function useSell<
-  TData = Awaited<ReturnType<Client["sell"]>>,
   TError = unknown
 >(
-  mutationOptions?: Omit<UseMutationOptions<TData, TError, Parameters<Client["sell"]>[0]>, "mutationFn">,
+  mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["sell"]>>, TError, Parameters<Client["sell"]>[0]>, "mutationFn">,
   client: Client = defaultClient()
 ) {
-  return useMutation(getSellMutationOptions(mutationOptions, client));
+  return useMutation(getSellMutationOptions<TError>(mutationOptions, client));
 }
 
 /** Factory binding all mutation options getters and mutation hooks to a custom client instance. */
 export function createMutations(client: Client = defaultClient()) {
   return {
-    getAddMutationOptions: <TData = Awaited<ReturnType<Client["add"]>>, TError = unknown>(
-      mutationOptions?: Omit<UseMutationOptions<TData, TError, Parameters<Client["add"]>[0]>, "mutationFn">
-    ) => getAddMutationOptions<TData, TError>(mutationOptions, client),
-    useAdd: <TData = Awaited<ReturnType<Client["add"]>>, TError = unknown>(
-      mutationOptions?: Omit<UseMutationOptions<TData, TError, Parameters<Client["add"]>[0]>, "mutationFn">
-    ) => useAdd<TData, TError>(mutationOptions, client),
-    getRemoveMutationOptions: <TData = Awaited<ReturnType<Client["remove"]>>, TError = unknown>(
-      mutationOptions?: Omit<UseMutationOptions<TData, TError, Parameters<Client["remove"]>[0]>, "mutationFn">
-    ) => getRemoveMutationOptions<TData, TError>(mutationOptions, client),
-    useRemove: <TData = Awaited<ReturnType<Client["remove"]>>, TError = unknown>(
-      mutationOptions?: Omit<UseMutationOptions<TData, TError, Parameters<Client["remove"]>[0]>, "mutationFn">
-    ) => useRemove<TData, TError>(mutationOptions, client),
-    getSellMutationOptions: <TData = Awaited<ReturnType<Client["sell"]>>, TError = unknown>(
-      mutationOptions?: Omit<UseMutationOptions<TData, TError, Parameters<Client["sell"]>[0]>, "mutationFn">
-    ) => getSellMutationOptions<TData, TError>(mutationOptions, client),
-    useSell: <TData = Awaited<ReturnType<Client["sell"]>>, TError = unknown>(
-      mutationOptions?: Omit<UseMutationOptions<TData, TError, Parameters<Client["sell"]>[0]>, "mutationFn">
-    ) => useSell<TData, TError>(mutationOptions, client),
+    getAddMutationOptions: <TError = unknown>(
+      mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["add"]>>, TError, Parameters<Client["add"]>[0]>, "mutationFn">
+    ) => getAddMutationOptions<TError>(mutationOptions, client),
+    useAdd: <TError = unknown>(
+      mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["add"]>>, TError, Parameters<Client["add"]>[0]>, "mutationFn">
+    ) => useAdd<TError>(mutationOptions, client),
+    getRemoveMutationOptions: <TError = unknown>(
+      mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["remove"]>>, TError, Parameters<Client["remove"]>[0]>, "mutationFn">
+    ) => getRemoveMutationOptions<TError>(mutationOptions, client),
+    useRemove: <TError = unknown>(
+      mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["remove"]>>, TError, Parameters<Client["remove"]>[0]>, "mutationFn">
+    ) => useRemove<TError>(mutationOptions, client),
+    getSellMutationOptions: <TError = unknown>(
+      mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["sell"]>>, TError, Parameters<Client["sell"]>[0]>, "mutationFn">
+    ) => getSellMutationOptions<TError>(mutationOptions, client),
+    useSell: <TError = unknown>(
+      mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["sell"]>>, TError, Parameters<Client["sell"]>[0]>, "mutationFn">
+    ) => useSell<TError>(mutationOptions, client),
   };
 }
