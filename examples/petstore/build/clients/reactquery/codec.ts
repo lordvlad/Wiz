@@ -4,7 +4,8 @@
 import type { NewPet, Pet, Problem, Sale } from "./model.ts";
 
 export function encodeNewPet(val: NewPet): string {
-  const obj = (() => { if (val === null || typeof val !== "object") return val; const _out1 = { ...val }; if (_out1["priceCents"] !== undefined) _out1["priceCents"] = (typeof _out1["priceCents"] === "bigint" ? String(_out1["priceCents"]) : _out1["priceCents"]); return _out1; })();
+  const source = val as unknown as Record<string, unknown>;
+  const obj = (() => { if (source === null || typeof source !== "object") return source; const _out1 = { ...source }; if (_out1["priceCents"] !== undefined) _out1["priceCents"] = (typeof _out1["priceCents"] === "bigint" ? String(_out1["priceCents"]) : _out1["priceCents"]); return _out1; })();
   return JSON.stringify(obj);
 }
 
@@ -15,7 +16,8 @@ export function decodeNewPet(raw: string): NewPet {
 }
 
 export function encodePet(val: Pet): string {
-  const obj = (() => { if (val === null || typeof val !== "object") return val; const _out3 = { ...val }; if (_out3["priceCents"] !== undefined) _out3["priceCents"] = (typeof _out3["priceCents"] === "bigint" ? String(_out3["priceCents"]) : _out3["priceCents"]); if (_out3["addedAt"] !== undefined) _out3["addedAt"] = (_out3["addedAt"] instanceof Date ? _out3["addedAt"].toISOString() : _out3["addedAt"]); return _out3; })();
+  const source = val as unknown as Record<string, unknown>;
+  const obj = (() => { if (source === null || typeof source !== "object") return source; const _out3 = { ...source }; if (_out3["priceCents"] !== undefined) _out3["priceCents"] = (typeof _out3["priceCents"] === "bigint" ? String(_out3["priceCents"]) : _out3["priceCents"]); if (_out3["addedAt"] !== undefined) _out3["addedAt"] = (_out3["addedAt"] instanceof Date ? _out3["addedAt"].toISOString() : _out3["addedAt"]); return _out3; })();
   return JSON.stringify(obj);
 }
 

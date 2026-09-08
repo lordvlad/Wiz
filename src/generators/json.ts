@@ -108,7 +108,10 @@ function encodeExpr(ir: TypeIR, expr: string): string {
         if (${varV} instanceof Date) return ${varV}.toISOString();
         if (${varV} instanceof Uint8Array) return typeof Buffer !== "undefined" ? Buffer.from(${varV}).toString("base64") : btoa(Array.from(${varV}, (x) => String.fromCharCode(x)).join(""));
         if (typeof ${varV} === "object") {
-          const ${varOut} = Array.isArray(${varV}) ? [...${varV}] : { ...${varV} };
+          // An array member of the union carries no keys to rewrite, so it is
+          // copied and returned as-is; only the object members are walked.
+          if (Array.isArray(${varV})) return [...${varV}];
+          const ${varOut} = { ...${varV} };
           ${branches.join("\n          ")}
           return ${varOut};
         }
@@ -265,13 +268,19 @@ export function generateJsonCodecCode(
     const valueType = options.modelModule ? identifier : "unknown";
     if (options.modelModule) modelTypes.push(identifier);
 
-    const enc = encodeExpr(ir, "val");
+    // The encode transform rewrites fields to their wire types - a bigint
+    // leaves as a string, a Date as an ISO string - so the value being walked
+    // no longer satisfies the model type it came from. It is widened once, at
+    // the boundary where that stops being true, rather than assigning wire
+    // values into the model's own field types, which does not typecheck in the
+    // consumer's build.
+    const enc = encodeExpr(ir, "source");
     const decStmts = decodeStatements(ir, "val");
 
     const encodeBody =
-      enc === "val"
+      enc === "source"
         ? "  return JSON.stringify(val);"
-        : `  const obj = ${enc};\n  return JSON.stringify(obj);`;
+        : `  const source = val as unknown as Record<string, unknown>;\n  const obj = ${enc};\n  return JSON.stringify(obj);`;
 
     const decodeBody =
       decStmts.length === 0
