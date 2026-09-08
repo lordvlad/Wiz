@@ -321,6 +321,31 @@ export class RpcError extends Error {
   }
 }
 
+/** Call options for `petsList`. */
+export type PetsListOptions = { query: PetQuery };
+/** What `petsList` resolves to. */
+export type PetsListResult = Pet[];
+/** Call options for `petsGet`. */
+export type PetsGetOptions = { id: number };
+/** What `petsGet` resolves to. */
+export type PetsGetResult = Pet;
+/** Call options for `petsAdd`. */
+export type PetsAddOptions = { body: NewPet };
+/** What `petsAdd` resolves to. */
+export type PetsAddResult = Pet;
+/** Call options for `petsSell`. */
+export type PetsSellOptions = { id: number; body: Sale };
+/** What `petsSell` resolves to. */
+export type PetsSellResult = Pet;
+/** Call options for `petsRemove`. */
+export type PetsRemoveOptions = { id: number };
+/** What `petsRemove` resolves to. */
+export type PetsRemoveResult = unknown;
+/** Call options for `rpcDiscover`. */
+export type RpcDiscoverOptions = HttpCallOptions;
+/** What `rpcDiscover` resolves to. */
+export type RpcDiscoverResult = Record<string, unknown>;
+
 /**
  * Every operation the document declares.
  *
@@ -338,7 +363,7 @@ export interface Client {
    * tag adds a media type to the *same* response object, so the document says
    * one 200 with four `content` entries.
    */
-  petsList(params: { query: PetQuery }, callOptions?: HttpCallOptions): Promise<Pet[]>;
+  petsList(params: PetsListOptions, callOptions?: HttpCallOptions): Promise<PetsListResult>;
   /**
    * Fetch a pet
    * 
@@ -347,27 +372,27 @@ export interface Client {
    * The protobuf representation is encoded by `encodeProto<Pet>`, generated
    * from the same `@fieldNumber` declarations as `build/schemas/petstore.proto`.
    */
-  petsGet(params: { id: number }, callOptions?: HttpCallOptions): Promise<Pet>;
+  petsGet(params: PetsGetOptions, callOptions?: HttpCallOptions): Promise<PetsGetResult>;
   /**
    * Add a pet
    * 
    * Adds a pet to the store and publishes a change event.
    */
-  petsAdd(params: { body: NewPet }, callOptions?: HttpCallOptions): Promise<Pet>;
+  petsAdd(params: PetsAddOptions, callOptions?: HttpCallOptions): Promise<PetsAddResult>;
   /**
    * Sell a pet
    * 
    * Sells a pet to an owner and publishes a change event.
    */
-  petsSell(params: { id: number; body: Sale }, callOptions?: HttpCallOptions): Promise<Pet>;
+  petsSell(params: PetsSellOptions, callOptions?: HttpCallOptions): Promise<PetsSellResult>;
   /**
    * Remove a pet
    * 
    * Removes a pet. No body, so no content.
    */
-  petsRemove(params: { id: number }, callOptions?: HttpCallOptions): Promise<unknown>;
+  petsRemove(params: PetsRemoveOptions, callOptions?: HttpCallOptions): Promise<PetsRemoveResult>;
   /** Returns OpenRPC schema description */
-  rpcDiscover(callOptions?: HttpCallOptions): Promise<Record<string, unknown>>;
+  rpcDiscover(callOptions?: HttpCallOptions): Promise<RpcDiscoverResult>;
 }
 
 /**

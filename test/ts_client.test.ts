@@ -139,21 +139,35 @@ describe("emitted files", () => {
   test("each operation takes exactly the slots it declares", () => {
     const source = files["api.ts"]!;
 
+    // The slots are named once, at the module that owns them, and the signature
+    // refers to that name.
     // Only an optional query, so the whole argument is optional.
     expect(source).toContain(
-      "listPets(options?: { query?: { limit?: number } }, callOptions?: HttpCallOptions): Promise<Pet[]>;"
+      "export type ListPetsOptions = { query?: { limit?: number } };"
+    );
+    expect(source).toContain("export type ListPetsResult = Pet[];");
+    expect(source).toContain(
+      "listPets(options?: ListPetsOptions, callOptions?: HttpCallOptions): Promise<ListPetsResult>;"
     );
     // A required body is a required argument.
+    expect(source).toContain("export type CreatePetOptions = { body: NewPet };");
     expect(source).toContain(
-      "createPet(options: { body: NewPet }, callOptions?: HttpCallOptions): Promise<Pet>;"
+      "createPet(options: CreatePetOptions, callOptions?: HttpCallOptions): Promise<CreatePetResult>;"
     );
     // Path is required, the header is not, and the header name needs quoting.
     expect(source).toContain(
-      'getPetById(options: { path: { petId: string }; headers?: { "x-trace-id"?: string } }, callOptions?: HttpCallOptions): Promise<Pet>;'
+      'export type GetPetByIdOptions = { path: { petId: string }; headers?: { "x-trace-id"?: string } };'
+    );
+    expect(source).toContain(
+      "getPetById(options: GetPetByIdOptions, callOptions?: HttpCallOptions): Promise<GetPetByIdResult>;"
     );
     // No content means no payload to type.
     expect(source).toContain(
-      "deletePet(options: { path: { petId: string } }, callOptions?: HttpCallOptions): Promise<void>;"
+      "export type DeletePetOptions = { path: { petId: string } };"
+    );
+    expect(source).toContain("export type DeletePetResult = void;");
+    expect(source).toContain(
+      "deletePet(options: DeletePetOptions, callOptions?: HttpCallOptions): Promise<void>;"
     );
   });
 

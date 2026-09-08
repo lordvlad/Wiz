@@ -588,6 +588,10 @@ interface Operation {
    */
   parameterNames: string[];
   returns: string;
+  /** The first parameter's type text, or undefined when the operation takes no parameters. */
+  optionsType: string | undefined;
+  /** What a completed call yields, already unwrapped from `Promise`. */
+  resultType: string;
   /** The method body, as a member of the object `createClient` returns. */
   implementation: string;
   /** A server stream is an async generator, which reads differently. */
@@ -600,19 +604,25 @@ function httpOperation(
   identifiers: ReadonlyMap<string, string>,
   declared: ReadonlyMap<string, TypeIR>,
   options: TsClientOptions,
-  onSkipped: (mimetype: string) => void
+  onSkipped: (mimetype: string) => void,
+  aliases: { options: string; result: string }
 ): Operation {
   const slots = requestSlots(method, identifiers, options, onSkipped);
   const returns = successType(method, identifiers, options, onSkipped);
   const required = slots.some((slot) => slot.required);
   const access = slots.length === 0 || required ? "options" : "options?";
 
-  const parameter =
+  const optionsType =
     slots.length === 0
-      ? "callOptions?: HttpCallOptions"
-      : `options${required ? "" : "?"}: { ${slots
+      ? undefined
+      : `{ ${slots
           .map((slot) => `${slot.name}${slot.required ? "" : "?"}: ${slot.type}`)
-          .join("; ")} }, callOptions?: HttpCallOptions`;
+          .join("; ")} }`;
+
+  const parameter =
+    optionsType === undefined
+      ? "callOptions?: HttpCallOptions"
+      : `options${required ? "" : "?"}: ${aliases.options}, callOptions?: HttpCallOptions`;
 
   const requestBodyObj = selectBody(method.request.body, options, onSkipped);
   const requestType = requestBodyObj?.content;
@@ -795,7 +805,9 @@ function httpOperation(
     parameter,
     parameterNames:
       slots.length === 0 ? ["callOptions"] : ["options", "callOptions"],
-    returns: returns === "void" ? "Promise<void>" : `Promise<${returns}>`,
+    optionsType: optionsType ?? "HttpCallOptions",
+    resultType: returns,
+    returns: returns === "void" ? "Promise<void>" : `Promise<${aliases.result}>`,
     // Parameters are left unannotated: the object literal is contextually typed
     // by `Client`, so the signature has exactly one source of truth.
     implementation: `    async ${name}(${slots.length === 0 ? "callOptions" : "options, callOptions"}) {\n${body}\n    },`,
@@ -818,7 +830,8 @@ function grpcPath(method: GrpcServiceMethodIR): string {
 function openRpcOperation(
   method: OpenRpcServiceMethodIR,
   name: string,
-  identifiers: ReadonlyMap<string, string>
+  identifiers: ReadonlyMap<string, string>,
+  aliases: { options: string; result: string }
 ): Operation {
   const params = method.request.params;
   const paramMembers: string[] = [];
@@ -827,11 +840,12 @@ function openRpcOperation(
   }
 
   const hasParams = paramMembers.length > 0;
-  const parameter = `${hasParams ? `params: { ${paramMembers.join("; ")} }, ` : ""}callOptions?: HttpCallOptions`;
+  const optionsType = hasParams ? `{ ${paramMembers.join("; ")} }` : undefined;
+  const parameter = `${hasParams ? `params: ${aliases.options}, ` : ""}callOptions?: HttpCallOptions`;
 
   const response0 = method.responses[0];
   const returnsType = response0?.result ? typeText(response0.result, identifiers) : "unknown";
-  const returns = `Promise<${returnsType}>`;
+  const returns = `Promise<${aliases.result}>`;
 
   const methodName = method.address.service
     ? `${method.address.service}.${method.address.method}`
@@ -875,6 +889,8 @@ function openRpcOperation(
     parameter,
     parameterNames: hasParams ? ["params", "callOptions"] : ["callOptions"],
     returns,
+    optionsType: optionsType ?? "HttpCallOptions",
+    resultType: returnsType,
     doc,
     implementation,
     // A JSON-RPC call resolves once; there is no server-stream form of it.
@@ -886,7 +902,8 @@ function grpcOperation(
   method: GrpcServiceMethodIR,
   name: string,
   identifiers: ReadonlyMap<string, string>,
-  onUnsupported: (name: string, reason: string) => void
+  onUnsupported: (name: string, reason: string) => void,
+  aliases: { options: string; result: string }
 ): Operation {
   const response = method.responses[0];
   const requestName = method.request.message.name;
@@ -919,6 +936,8 @@ function grpcOperation(
       parameter: "",
       parameterNames: [],
       returns: "Promise<never>",
+      optionsType: undefined,
+      resultType: "never",
       implementation: `    async ${name}() {\n      throw new Error(${JSON.stringify(
         `[wiz] ${name} is not callable: ${reason}`
       )});\n    },`,
@@ -936,9 +955,8 @@ function grpcOperation(
   // resolving once or yielding until the server is done. The transport decides
   // whether the streaming-in directions can run at all, and says so at the
   // call rather than here, because a client can be reconfigured.
-  const parameter = streamsIn
-    ? `requests: AsyncIterable<${requestIdentifier}>, options?: GrpcCallOptions`
-    : `request: ${requestIdentifier}, options?: GrpcCallOptions`;
+  const optionsType = streamsIn ? `AsyncIterable<${requestIdentifier}>` : requestIdentifier;
+  const parameter = `${streamsIn ? "requests" : "request"}: ${aliases.options}, options?: GrpcCallOptions`;
 
   const outgoing = streamsIn
     ? `grpcEncoded(requests, ${encode})`
@@ -950,7 +968,9 @@ function grpcOperation(
       doc,
       parameter,
       parameterNames: [streamsIn ? "requests" : "request", "options"],
-      returns: `AsyncIterable<${responseIdentifier}>`,
+      optionsType,
+      resultType: `AsyncIterable<${responseIdentifier}>`,
+      returns: aliases.result,
       implementation: [
         `    async *${name}(${streamsIn ? "requests" : "request"}, options) {`,
         `      const messages = grpcCall(config, ${path}, ${outgoing}, options, ${streamsIn});`,
@@ -966,7 +986,9 @@ function grpcOperation(
     doc,
     parameter,
     parameterNames: [streamsIn ? "requests" : "request", "options"],
-    returns: `Promise<${responseIdentifier}>`,
+    optionsType,
+    resultType: responseIdentifier,
+    returns: `Promise<${aliases.result}>`,
     implementation: streamsIn
       ? [
           `    async ${name}(requests, options) {`,
@@ -2089,6 +2111,61 @@ async function grpcClientStream(
   return message;
 }`;
 
+/** Top-level names the emitted runtime already declares, so an operation type never shadows one. */
+function preludeDeclaredNames(): Set<string> {
+  const pattern =
+    /^(?:export\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\s*\*?|const|let|var|class|interface|type|enum)\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm;
+  const found = new Set<string>([
+    "Client",
+    "createClient",
+    "configure",
+    "currentConfig",
+    "defaultClient",
+    "defaults",
+    "client",
+    "rpcId",
+  ]);
+  for (const source of [
+    PRELUDE,
+    HTTP_ENCODING,
+    OPENRPC_PRELUDE,
+    GRPC_PRELUDE,
+    HTTP2_TRANSPORT,
+  ]) {
+    pattern.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(source))) found.add(match[1]!);
+  }
+  return found;
+}
+
+/** `<Cap>Options` / `<Cap>Result` per operation, unique against models, runtime names and each other. */
+export function operationTypeNames(
+  methodOrder: readonly string[],
+  identifiers: ReadonlyMap<string, string>
+): Map<string, { options: string; result: string }> {
+  const taken = preludeDeclaredNames();
+  for (const identifier of identifiers.values()) taken.add(identifier);
+  for (const name of methodOrder) taken.add(name);
+
+  const allocate = (base: string): string => {
+    let unique = base;
+    for (let index = 2; taken.has(unique); index += 1) unique = `${base}${index}`;
+    taken.add(unique);
+    return unique;
+  };
+
+  const result = new Map<string, { options: string; result: string }>();
+  for (const name of methodOrder) {
+    const capital = name.charAt(0).toUpperCase() + name.slice(1);
+    result.set(name, {
+      options: allocate(`${capital}Options`),
+      result: allocate(`${capital}Result`),
+    });
+  }
+  return result;
+}
+
 /**
  * Every named type the client refers to.
  *
@@ -2096,7 +2173,7 @@ async function grpcClientStream(
  * only inside an operation, and those have to be declared too or the emitted
  * signatures would reference nothing.
  */
-function declaredTypes(
+export function declaredTypes(
   service: ServiceIR,
   types: Map<string, TypeIR> | undefined
 ): Map<string, TypeIR> {
@@ -2183,22 +2260,40 @@ function emitFiles(
 
   const names = methodNames(service);
   const grpcMethods = service.methods.filter(isGrpcMethod);
+  const aliasNames = operationTypeNames([...names.values()], identifiers);
   const operations = service.methods.map((method) => {
+    const name = names.get(method)!;
+    const aliases = aliasNames.get(name)!;
     if (isGrpcMethod(method)) {
-      return grpcOperation(method, names.get(method)!, identifiers, onUnsupported);
+      return grpcOperation(method, name, identifiers, onUnsupported, aliases);
     }
     if (isOpenRpcMethod(method)) {
-      return openRpcOperation(method, names.get(method)!, identifiers);
+      return openRpcOperation(method, name, identifiers, aliases);
     }
     return httpOperation(
       method as HttpServiceMethodIR,
-      names.get(method)!,
+      name,
       identifiers,
       declared,
       context.options,
-      onSkipped
+      onSkipped,
+      aliases
     );
   });
+
+  // Every published contract has a name of its own here, so a consumer can
+  // annotate a variable without deriving anything from the method's type.
+  const operationTypes = operations
+    .flatMap((operation) => {
+      const alias = aliasNames.get(operation.name)!;
+      return [
+        `/** Call options for \`${operation.name}\`. */`,
+        `export type ${alias.options} = ${operation.optionsType ?? "undefined"};`,
+        `/** What \`${operation.name}\` resolves to. */`,
+        `export type ${alias.result} = ${operation.resultType};`,
+      ];
+    })
+    .join("\n");
   const clientInterface = [
     "/**",
     " * Every operation the document declares.",
@@ -2283,7 +2378,7 @@ function emitFiles(
 
   // Only the names the signatures actually mention are imported, so the file
   // stays clean under `noUnusedLocals`.
-  const declarations = `${clientInterface}\n\n${factory}\n\n${moduleLevel}`;
+  const declarations = `${operationTypes}\n\n${clientInterface}\n\n${factory}\n\n${moduleLevel}`;
   const imported = [...identifiers.values()]
     .filter((identifier) => new RegExp(`\\b${identifier}\\b`).test(declarations))
     .sort();

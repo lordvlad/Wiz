@@ -2,7 +2,7 @@
 // React Query options getters and hooks for mutation operations. Edit the document, not this file.
 
 import { useMutation, type UseMutationOptions } from "@tanstack/react-query";
-import { defaultClient, type Client } from "./api.ts";
+import { defaultClient, type Client, type AddOptions, type AddResult, type RemoveOptions, type RemoveResult, type SellOptions, type SellResult } from "./api.ts";
 
 /**
  * Add a pet
@@ -12,12 +12,12 @@ import { defaultClient, type Client } from "./api.ts";
 export function getAddMutationOptions<
   TError = unknown
 >(
-  mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["add"]>>, TError, Parameters<Client["add"]>[0]>, "mutationFn">,
+  mutationOptions?: Omit<UseMutationOptions<AddResult, TError, AddOptions>, "mutationFn">,
   client: Client = defaultClient()
 ) {
   return {
     mutationKey: ["/pets", "POST"] as const,
-    mutationFn: (options: Parameters<Client["add"]>[0]) =>
+    mutationFn: (options: AddOptions) =>
       client.add(options as any),
     ...mutationOptions,
   };
@@ -27,7 +27,7 @@ export function getAddMutationOptions<
 export function useAdd<
   TError = unknown
 >(
-  mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["add"]>>, TError, Parameters<Client["add"]>[0]>, "mutationFn">,
+  mutationOptions?: Omit<UseMutationOptions<AddResult, TError, AddOptions>, "mutationFn">,
   client: Client = defaultClient()
 ) {
   return useMutation(getAddMutationOptions<TError>(mutationOptions, client));
@@ -41,12 +41,12 @@ export function useAdd<
 export function getRemoveMutationOptions<
   TError = unknown
 >(
-  mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["remove"]>>, TError, Parameters<Client["remove"]>[0]>, "mutationFn">,
+  mutationOptions?: Omit<UseMutationOptions<RemoveResult, TError, RemoveOptions>, "mutationFn">,
   client: Client = defaultClient()
 ) {
   return {
     mutationKey: ["/pets/{id}", "DELETE"] as const,
-    mutationFn: (options: Parameters<Client["remove"]>[0]) =>
+    mutationFn: (options: RemoveOptions) =>
       client.remove(options as any),
     ...mutationOptions,
   };
@@ -56,7 +56,7 @@ export function getRemoveMutationOptions<
 export function useRemove<
   TError = unknown
 >(
-  mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["remove"]>>, TError, Parameters<Client["remove"]>[0]>, "mutationFn">,
+  mutationOptions?: Omit<UseMutationOptions<RemoveResult, TError, RemoveOptions>, "mutationFn">,
   client: Client = defaultClient()
 ) {
   return useMutation(getRemoveMutationOptions<TError>(mutationOptions, client));
@@ -70,12 +70,12 @@ export function useRemove<
 export function getSellMutationOptions<
   TError = unknown
 >(
-  mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["sell"]>>, TError, Parameters<Client["sell"]>[0]>, "mutationFn">,
+  mutationOptions?: Omit<UseMutationOptions<SellResult, TError, SellOptions>, "mutationFn">,
   client: Client = defaultClient()
 ) {
   return {
     mutationKey: ["/pets/{id}/sale", "POST"] as const,
-    mutationFn: (options: Parameters<Client["sell"]>[0]) =>
+    mutationFn: (options: SellOptions) =>
       client.sell(options as any),
     ...mutationOptions,
   };
@@ -85,7 +85,7 @@ export function getSellMutationOptions<
 export function useSell<
   TError = unknown
 >(
-  mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["sell"]>>, TError, Parameters<Client["sell"]>[0]>, "mutationFn">,
+  mutationOptions?: Omit<UseMutationOptions<SellResult, TError, SellOptions>, "mutationFn">,
   client: Client = defaultClient()
 ) {
   return useMutation(getSellMutationOptions<TError>(mutationOptions, client));
@@ -95,22 +95,22 @@ export function useSell<
 export function createMutations(client: Client = defaultClient()) {
   return {
     getAddMutationOptions: <TError = unknown>(
-      mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["add"]>>, TError, Parameters<Client["add"]>[0]>, "mutationFn">
+      mutationOptions?: Omit<UseMutationOptions<AddResult, TError, AddOptions>, "mutationFn">
     ) => getAddMutationOptions<TError>(mutationOptions, client),
     useAdd: <TError = unknown>(
-      mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["add"]>>, TError, Parameters<Client["add"]>[0]>, "mutationFn">
+      mutationOptions?: Omit<UseMutationOptions<AddResult, TError, AddOptions>, "mutationFn">
     ) => useAdd<TError>(mutationOptions, client),
     getRemoveMutationOptions: <TError = unknown>(
-      mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["remove"]>>, TError, Parameters<Client["remove"]>[0]>, "mutationFn">
+      mutationOptions?: Omit<UseMutationOptions<RemoveResult, TError, RemoveOptions>, "mutationFn">
     ) => getRemoveMutationOptions<TError>(mutationOptions, client),
     useRemove: <TError = unknown>(
-      mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["remove"]>>, TError, Parameters<Client["remove"]>[0]>, "mutationFn">
+      mutationOptions?: Omit<UseMutationOptions<RemoveResult, TError, RemoveOptions>, "mutationFn">
     ) => useRemove<TError>(mutationOptions, client),
     getSellMutationOptions: <TError = unknown>(
-      mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["sell"]>>, TError, Parameters<Client["sell"]>[0]>, "mutationFn">
+      mutationOptions?: Omit<UseMutationOptions<SellResult, TError, SellOptions>, "mutationFn">
     ) => getSellMutationOptions<TError>(mutationOptions, client),
     useSell: <TError = unknown>(
-      mutationOptions?: Omit<UseMutationOptions<Awaited<ReturnType<Client["sell"]>>, TError, Parameters<Client["sell"]>[0]>, "mutationFn">
+      mutationOptions?: Omit<UseMutationOptions<SellResult, TError, SellOptions>, "mutationFn">
     ) => useSell<TError>(mutationOptions, client),
   };
 }

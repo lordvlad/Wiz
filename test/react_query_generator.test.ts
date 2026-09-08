@@ -217,12 +217,27 @@ describe("Multi-tenancy & query options verification", () => {
     const mutations = files["mutations.ts"]!;
 
     for (const source of [queries, mutations]) {
-      expect(source).toContain('import { defaultClient, type Client } from "./api.ts";');
+      expect(source).toContain('import { defaultClient, type Client');
+      expect(source).toContain('} from "./api.ts";');
       expect(source).toContain("client: Client = defaultClient()");
       expect(source).not.toContain("createClient()");
     }
 
     expect(files["api.ts"]!).toContain("export function defaultClient(): Client {");
+  });
+
+  /**
+   * A published contract derived from a function type - `ReturnType<…>`,
+   * `Parameters<…>[0]` - has no name a consumer can import, so every one of
+   * them is named in `api.ts` instead. A single missed template literal in the
+   * generators leaves one behind, which is what this catches.
+   */
+  test("no generated file derives a contract from a function type", () => {
+    for (const [name, source] of Object.entries(files)) {
+      expect(source, name).not.toMatch(/ReturnType</);
+      expect(source, name).not.toMatch(/\bParameters</);
+      expect(source, name).not.toMatch(/\bAwaited</);
+    }
   });
 });
 

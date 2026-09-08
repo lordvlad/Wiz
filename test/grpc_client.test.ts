@@ -180,19 +180,31 @@ describe("emitted gRPC client", () => {
   test("all four streaming directions are emitted with the shape callers expect", () => {
     const source = files["api.ts"]!;
 
-    // Proto names are fully qualified, so the model identifier is too.
+    // Proto names are fully qualified, so the model identifier is too, and each
+    // direction's request and result carry a name of their own.
+    expect(source).toContain("export type GetPetOptions = pets_v1_GetPetRequest;");
+    expect(source).toContain("export type GetPetResult = pets_v1_Pet;");
     expect(source).toContain(
-      "getPet(request: pets_v1_GetPetRequest, options?: GrpcCallOptions): Promise<pets_v1_Pet>;"
+      "getPet(request: GetPetOptions, options?: GrpcCallOptions): Promise<GetPetResult>;"
+    );
+    // A server stream resolves to nothing: the result is the iterable itself.
+    expect(source).toContain(
+      "export type WatchPetsResult = AsyncIterable<pets_v1_Pet>;"
     );
     expect(source).toContain(
-      "watchPets(request: pets_v1_GetPetRequest, options?: GrpcCallOptions): AsyncIterable<pets_v1_Pet>;"
+      "watchPets(request: WatchPetsOptions, options?: GrpcCallOptions): WatchPetsResult;"
     );
     // Streaming in takes a stream in, whichever transport ends up carrying it.
     expect(source).toContain(
-      "upload(requests: AsyncIterable<pets_v1_Note>, options?: GrpcCallOptions): Promise<pets_v1_Note>;"
+      "export type UploadOptions = AsyncIterable<pets_v1_Note>;"
     );
     expect(source).toContain(
-      "chat(requests: AsyncIterable<pets_v1_Note>, options?: GrpcCallOptions): AsyncIterable<pets_v1_Note>;"
+      "upload(requests: UploadOptions, options?: GrpcCallOptions): Promise<UploadResult>;"
+    );
+    expect(source).toContain("export type ChatOptions = AsyncIterable<pets_v1_Note>;");
+    expect(source).toContain("export type ChatResult = AsyncIterable<pets_v1_Note>;");
+    expect(source).toContain(
+      "chat(requests: ChatOptions, options?: GrpcCallOptions): ChatResult;"
     );
   });
 

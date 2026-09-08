@@ -344,6 +344,27 @@ async function send(
   return body;
 }
 
+/** Call options for `list`. */
+export type ListOptions = { query?: { /** Restrict to one status. */ status?: "available" | "pending" | "sold"; /** Substring match on the name, case-insensitive. */ q?: string; limit?: number } };
+/** What `list` resolves to. */
+export type ListResult = Pet[];
+/** Call options for `add`. */
+export type AddOptions = { body: NewPet };
+/** What `add` resolves to. */
+export type AddResult = Pet;
+/** Call options for `get`. */
+export type GetOptions = { path: { id: number } };
+/** What `get` resolves to. */
+export type GetResult = Pet;
+/** Call options for `remove`. */
+export type RemoveOptions = { path: { id: number } };
+/** What `remove` resolves to. */
+export type RemoveResult = void;
+/** Call options for `sell`. */
+export type SellOptions = { path: { id: number }; body: Sale };
+/** What `sell` resolves to. */
+export type SellResult = Pet;
+
 /**
  * Every operation the document declares.
  *
@@ -361,13 +382,13 @@ export interface Client {
    * tag adds a media type to the *same* response object, so the document says
    * one 200 with four `content` entries.
    */
-  list(options?: { query?: { /** Restrict to one status. */ status?: "available" | "pending" | "sold"; /** Substring match on the name, case-insensitive. */ q?: string; limit?: number } }, callOptions?: HttpCallOptions): Promise<Pet[]>;
+  list(options?: ListOptions, callOptions?: HttpCallOptions): Promise<ListResult>;
   /**
    * Add a pet
    * 
    * Adds a pet to the store and publishes a change event.
    */
-  add(options: { body: NewPet }, callOptions?: HttpCallOptions): Promise<Pet>;
+  add(options: AddOptions, callOptions?: HttpCallOptions): Promise<AddResult>;
   /**
    * Fetch a pet
    * 
@@ -376,19 +397,19 @@ export interface Client {
    * The protobuf representation is encoded by `encodeProto<Pet>`, generated
    * from the same `@fieldNumber` declarations as `build/schemas/petstore.proto`.
    */
-  get(options: { path: { id: number } }, callOptions?: HttpCallOptions): Promise<Pet>;
+  get(options: GetOptions, callOptions?: HttpCallOptions): Promise<GetResult>;
   /**
    * Remove a pet
    * 
    * Removes a pet. No body, so no content.
    */
-  remove(options: { path: { id: number } }, callOptions?: HttpCallOptions): Promise<void>;
+  remove(options: RemoveOptions, callOptions?: HttpCallOptions): Promise<void>;
   /**
    * Sell a pet
    * 
    * Sells a pet to an owner and publishes a change event.
    */
-  sell(options: { path: { id: number }; body: Sale }, callOptions?: HttpCallOptions): Promise<Pet>;
+  sell(options: SellOptions, callOptions?: HttpCallOptions): Promise<SellResult>;
 }
 
 /**
