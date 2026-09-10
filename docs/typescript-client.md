@@ -627,26 +627,28 @@ only; a protobuf message is validated by the wire format itself.
 
 An `x-*` keyword is by definition something OpenAPI does not model, so the
 generator cannot honour it structurally. Extensions on a **Schema Object** are
-carried into the IR verbatim (`Annotated.extensions`) and handed to plugins that
-say what one means in emitted TypeScript. Anything no plugin claims is dropped,
-once per key, with a warning:
+carried into the IR verbatim (`Annotated.extensions`), and those on a
+**Response Object** as `HttpResponseIR.extensions`; both are handed to plugins
+that say what one means in emitted TypeScript. Anything no plugin claims is
+dropped, once per key, with a warning:
 
 ```
 [wiz] no plugin handles vendor extension 'x-widget'; it is dropped
 ```
 
-Two builtins ship, always on, in this order:
+Three builtins ship, always on, in this order:
 
-| keyword | effect |
-|---|---|
-| `x-enum-varnames` | the enum is emitted as a named const object plus a union alias, so `Status.ACTIVE` exists |
-| `x-enum-descriptions` | each enum member gets its own doc comment |
+| keyword | on | effect |
+|---|---|---|
+| `x-enum-varnames` | schema | the enum is emitted as a named const object plus a union alias, so `Status.ACTIVE` exists |
+| `x-enum-descriptions` | schema | each enum member gets its own doc comment |
+| `x-select` | response | the payload is unwrapped before it is cast to the declared type |
 
-Both pair positionally with `enum`. A non-array value, a length mismatch or a
-keyword on a non-enum schema is a warning, not a failure, and whatever overlaps
-is applied. `x-enum-varnames` that repeat are suffixed `_2`, `_3`, … since a
-duplicate key would not compile; a varname that is not an identifier is emitted
-as a quoted key, reachable as `Status["FOO-BAR"]`.
+The two enum keywords pair positionally with `enum`. A non-array value, a
+length mismatch or a keyword on a non-enum schema is a warning, not a failure,
+and whatever overlaps is applied. `x-enum-varnames` that repeat are suffixed
+`_2`, `_3`, … since a duplicate key would not compile; a varname that is not
+an identifier is emitted as a quoted key, reachable as `Status["FOO-BAR"]`.
 
 ```jsonc
 "Status": {
@@ -682,10 +684,64 @@ export type Tier =
   | "paid";
 ```
 
+### `x-select`
+
+For the document that cannot describe the wire exactly: a schema written
+against the pet, while the server wraps it in `{ data, meta }`. Put the
+selector on the **Response Object**, beside `description`:
+
+```jsonc
+"responses": {
+  "200": {
+    "description": "ok",
+    "x-select": "$.data.pet",
+    "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } } }
+  }
+}
+```
+
+```ts
+const result = ((($: any) => ($?.data?.pet))(decodePet(await send(config, { … })))) as Pet;
+```
+
+The selection happens after the media type has been decoded — `parseBody`
+already dispatches on `content-type` — and **before** the cast and before
+response validation, so `--validate` checks what the caller is actually
+handed. A missing wrapper yields `undefined` and a validation error rather
+than a `TypeError` from inside the client.
+
+Two forms are accepted:
+
+- **A JSONPath** — `$`, `.name`, `["name"]`, `[0]` and chains of them. This
+  subset is compiled to an optional-chained access. A bare `$` selects the
+  whole payload and emits nothing at all.
+- **Any TypeScript expression** of `$`, for anything else (`$.items.find(…)`).
+
+> **The second form is a security boundary.** A spec document is contributing
+> code to your client, so it is warned about every time:
+>
+> ```
+> [wiz] x-select on 'getPet' is not a plain JSONPath; '$.items.find((p) => p.id)'
+> is inlined into the generated client and runs on every response - review it
+> before shipping
+> ```
+>
+> Treat an `x-select` expression in a third-party document exactly as you would
+> a dependency's postinstall script. Read it in the diff before it ships.
+
+The selector is **inlined at generation time**, not compiled with
+`new Function` in the emitted client. An emitted `new Function` would demand
+`unsafe-eval` from every browser consuming the client, hide the code from
+bundlers and from `tsc`, and put a spec author's expression into your runtime
+where nobody reads it. Inlined, it is ordinary source in the generated file
+and in code review. A selector that does not parse is dropped with a warning
+rather than emitted, so a bad document cannot produce an `api.ts` that will
+not compile.
+
 ### Writing one
 
 `TsClientOptions.plugins` runs after the builtins. A plugin declares the keys it
-consumes and implements either hook:
+consumes and implements any of the three hooks:
 
 ```ts
 import { generate } from "wiz/generators/generator.ts";
@@ -701,6 +757,8 @@ const widget: TsClientPlugin = {
   // Renders the whole `export …` block for one declared type. First
   // non-undefined result wins, so a builtin beats a later plugin.
   declaration: ({ name }) => (name === "Widget" ? "export type Widget = 42;" : undefined),
+  // Rewrites the expression a response body is read from, before the cast.
+  responseBody: ({ body }) => `unwrap(${body})`,
 };
 
 generate(ir, tsClientGenerator, { plugins: [widget] }, logger);
@@ -711,8 +769,8 @@ shapes `model.ts` only: `api.ts`, `codec.ts`, the validators and the registry
 hash all read the extracted IR, so renaming an enum member here cannot change a
 protobuf entry name or a wire format.
 
-Extensions are captured on schemas only. Operation-level ones (`x-package`,
-`x-service`) are read by the harvesters and never enter the type IR.
+`x-*` keys are captured on schemas and responses. Operation-level ones
+(`x-package`, `x-service`) are read by the harvesters and never enter the IR.
 
 ## Limitations
 

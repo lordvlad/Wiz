@@ -149,6 +149,14 @@ export interface HttpResponseIR {
   headers?: ParameterIR[];
   /** Set when the whole response came from a `components.responses` entry. */
   component?: string;
+  /**
+   * Vendor extension keywords (`x-*`) on the Response Object, verbatim.
+   *
+   * Schema extensions ride on `Annotated`; these belong to the response as a
+   * whole - what to unwrap from the payload, for instance - and have no
+   * schema to hang off.
+   */
+  extensions?: Record<string, unknown>;
 }
 
 /**

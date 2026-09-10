@@ -198,6 +198,23 @@ export function annotationsToKeywords(
   return keywords;
 }
 
+/**
+ * The `x-*` keys of any OpenAPI object, verbatim, or nothing when it has none.
+ *
+ * Schemas funnel through {@link keywordsToAnnotations}; a Response Object has
+ * no annotations to carry them, so it reads this directly.
+ */
+export function vendorExtensions(
+  source: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  let extensions: Record<string, unknown> | undefined;
+  for (const key of Object.keys(source)) {
+    if (!key.startsWith("x-")) continue;
+    (extensions ??= {})[key] = source[key];
+  }
+  return extensions;
+}
+
 /** The inverse of {@link annotationsToKeywords}, plus the shared prose. */
 export function keywordsToAnnotations(
   schema: Record<string, unknown>
@@ -215,11 +232,7 @@ export function keywordsToAnnotations(
     annotated.examples = [schema.example];
   }
   if (schema.default !== undefined) annotated.default = schema.default;
-  let extensions: Record<string, unknown> | undefined;
-  for (const key of Object.keys(schema)) {
-    if (!key.startsWith("x-")) continue;
-    (extensions ??= {})[key] = schema[key];
-  }
+  const extensions = vendorExtensions(schema);
   if (extensions) annotated.extensions = extensions;
   return annotated;
 }

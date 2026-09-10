@@ -16,6 +16,7 @@ import {
   keywordsToAnnotations,
   keywordsToConstraints,
   PRIMITIVE_FORMATS,
+  vendorExtensions,
 } from "../openapiDialect.ts";
 import type {
   HttpMethodName,
@@ -767,6 +768,8 @@ function responseToIR(
   if (bodies.length > 0) response.body = bodies;
   const headers = headersFor(raw.headers, ctx, `${pointer}/headers`);
   if (headers.length > 0) response.headers = headers;
+  const extensions = vendorExtensions(raw);
+  if (extensions) response.extensions = extensions;
   return response;
 }
 

@@ -23,6 +23,7 @@ import { docComment, tsDeclarations, typeIdentifiers, typeText } from "./tsTypes
 import {
   applyPlugins,
   BUILTIN_TS_CLIENT_PLUGINS,
+  type AppliedPlugins,
   type TsClientPlugin,
 } from "./tsClientPlugins.ts";
 
@@ -624,7 +625,8 @@ function httpOperation(
   declared: ReadonlyMap<string, TypeIR>,
   options: TsClientOptions,
   onSkipped: (mimetype: string) => void,
-  aliases: { options: string; result: string }
+  aliases: { options: string; result: string },
+  applied: AppliedPlugins
 ): Operation {
   const slots = requestSlots(method, identifiers, options, onSkipped);
   const returns = successType(method, identifiers, options, onSkipped);
@@ -797,17 +799,25 @@ function httpOperation(
     ? `      const __prune = false;\n${requestChecks.length > 0 ? `${requestChecks.join("\n")}\n` : ""}`
     : "";
 
+  // A response extension can rewrite what the body is read from - unwrapping
+  // an envelope the schema does not describe - before the cast and before the
+  // response is validated, so what is checked is what the caller is handed.
+  const selected = (value: string): string =>
+    applied.responseBody(name, chosen[0]?.extensions, value);
+
   let body: string;
   if (returns === "void") {
     body = `${valPrefix}      await ${send};`;
   } else if (decode) {
+    const value = selected(`${decode}(await ${send} as string)`);
     body = validatesResponse
-      ? `${valPrefix}      const result = ${decode}(await ${send} as string) as ${returns};\n${responseCheck()}\n      return result;`
-      : `${valPrefix}      return ${decode}(await ${send} as string) as ${returns};`;
+      ? `${valPrefix}      const result = ${value} as ${returns};\n${responseCheck()}\n      return result;`
+      : `${valPrefix}      return ${value} as ${returns};`;
   } else {
+    const value = selected(`await ${send}`);
     body = validatesResponse
-      ? `${valPrefix}      const result = (await ${send}) as ${returns};\n${responseCheck()}\n      return result;`
-      : `${valPrefix}      return (await ${send}) as ${returns};`;
+      ? `${valPrefix}      const result = (${value}) as ${returns};\n${responseCheck()}\n      return result;`
+      : `${valPrefix}      return (${value}) as ${returns};`;
   }
   return {
     name,
@@ -2303,7 +2313,8 @@ function emitFiles(
       declared,
       context.options,
       onSkipped,
-      aliases
+      aliases,
+      applied
     );
   });
 

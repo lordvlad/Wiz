@@ -34,6 +34,15 @@ export interface TsClientDeclarationInput extends TsClientPluginContext {
   identifiers: ReadonlyMap<string, string>;
 }
 
+export interface TsClientResponseInput extends TsClientPluginContext {
+  /**
+   * The emitted expression holding the decoded response body, to be wrapped
+   * or replaced. It is TypeScript source, not a value: this runs at
+   * generation time.
+   */
+  body: string;
+}
+
 export interface TsClientPlugin {
   /** Used in diagnostics. */
   name: string;
@@ -46,6 +55,11 @@ export interface TsClientPlugin {
    * plugin to return a string wins; later plugins are skipped for that type.
    */
   declaration?(input: TsClientDeclarationInput): string | undefined;
+  /**
+   * Rewrites the expression a response body is read from, before it is cast
+   * to the declared type. The first plugin to return a string wins.
+   */
+  responseBody?(input: TsClientResponseInput): string | undefined;
 }
 
 export interface AppliedPlugins {
@@ -57,6 +71,15 @@ export interface AppliedPlugins {
     ir: TypeIR,
     identifiers: ReadonlyMap<string, string>
   ): string | undefined;
+  /**
+   * The expression one operation's response body is read from, wrapped by
+   * whichever plugin claims the response's extensions.
+   */
+  responseBody(
+    name: string,
+    extensions: Record<string, unknown> | undefined,
+    body: string
+  ): string;
 }
 
 /**
@@ -73,7 +96,11 @@ export function applyPlugins(
   logger: WizLogger
 ): AppliedPlugins {
   if (plugins.length === 0) {
-    return { types: new Map(declared), declaration: () => undefined };
+    return {
+      types: new Map(declared),
+      declaration: () => undefined,
+      responseBody: (_name, _extensions, body) => body,
+    };
   }
 
   // One call, so references shared between two named types stay shared -
@@ -83,15 +110,19 @@ export function applyPlugins(
   const claimed = new Set(plugins.flatMap((plugin) => plugin.extensions));
   const warned = new Set<string>();
 
+  const warnUnclaimed = (extensions: Readonly<Record<string, unknown>>) => {
+    for (const key of Object.keys(extensions)) {
+      if (claimed.has(key) || warned.has(key)) continue;
+      warned.add(key);
+      logger.warn(`[wiz] no plugin handles vendor extension '${key}'; it is dropped`);
+    }
+  };
+
   for (const [name, root] of types) {
     walkTypeIR(root, (node) => {
       const extensions = node.extensions;
       if (!extensions) return;
-      for (const key of Object.keys(extensions)) {
-        if (claimed.has(key) || warned.has(key)) continue;
-        warned.add(key);
-        logger.warn(`[wiz] no plugin handles vendor extension '${key}'; it is dropped`);
-      }
+      warnUnclaimed(extensions);
       for (const plugin of plugins) {
         plugin.type?.({ node, name, extensions, logger });
       }
@@ -114,6 +145,15 @@ export function applyPlugins(
         if (rendered !== undefined) return rendered;
       }
       return undefined;
+    },
+    responseBody(name, extensions, body) {
+      if (!extensions) return body;
+      warnUnclaimed(extensions);
+      for (const plugin of plugins) {
+        const rewritten = plugin.responseBody?.({ name, extensions, body, logger });
+        if (rewritten !== undefined) return rewritten;
+      }
+      return body;
     },
   };
 }
@@ -218,8 +258,92 @@ export const enumVarnamesPlugin: TsClientPlugin = {
   },
 };
 
+/**
+ * A dotted/indexed JSONPath rewritten as an optional-chained access, or
+ * nothing when the selector uses anything outside that subset.
+ *
+ * The subset - `$.a`, `$["a"]`, `$[0]` and chains of them - is the part of
+ * JSONPath that is also a TypeScript expression, so it needs no evaluator.
+ * Optional chaining is deliberate: a wrapper the server omitted yields
+ * `undefined`, which response validation reports, instead of a `TypeError`
+ * thrown from inside the generated client.
+ */
+function jsonPathAccess(selector: string): string | undefined {
+  if (!selector.startsWith("$")) return undefined;
+  const segment = /\.([A-Za-z_$][A-Za-z0-9_$]*)|\[(\d+)\]|\["([^"\\]*)"\]|\['([^'\\]*)'\]/y;
+  segment.lastIndex = 1;
+  let access = "$";
+  while (segment.lastIndex < selector.length) {
+    const match = segment.exec(selector);
+    if (!match) return undefined;
+    const [, property, index, doubleQuoted, singleQuoted] = match;
+    if (property !== undefined) access += `?.${property}`;
+    else if (index !== undefined) access += `?.[${index}]`;
+    else access += `?.[${JSON.stringify(doubleQuoted ?? singleQuoted)}]`;
+  }
+  return access;
+}
+
+/** Whether an expression parses, so a bad selector cannot break `api.ts`. */
+function parses(expression: string): boolean {
+  const source = `const __wizSelect = ($: any) => (${expression});`;
+  try {
+    if (typeof Bun === "undefined") new Function("$", `return (${expression});`);
+    else new Bun.Transpiler({ loader: "ts" }).transformSync(source);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `x-select` on a Response Object: what to pull out of the payload before it
+ * is cast to the declared type.
+ *
+ * It exists for the document that cannot describe the wire exactly - a schema
+ * written against `data` while the server wraps it in `{ data, meta }`. The
+ * selector is inlined into `api.ts` at generation time rather than compiled
+ * with `new Function` at runtime: an emitted `new Function` would need
+ * `unsafe-eval` in every browser consuming the client, would be invisible to
+ * bundlers and type checking, and would move a spec author's code into the
+ * consumer's runtime unreviewed. Inlined, it is ordinary source a human reads
+ * in the diff.
+ *
+ * That is still a spec document contributing code, so anything beyond a plain
+ * path is warned about.
+ */
+export const selectPlugin: TsClientPlugin = {
+  name: "x-select",
+  extensions: ["x-select"],
+  responseBody({ extensions, name, body, logger }) {
+    const selector = extensions["x-select"];
+    if (selector === undefined) return undefined;
+    if (typeof selector !== "string" || selector.trim() === "") {
+      logger.warn(`[wiz] x-select on '${name}' is ignored; expected a non-empty string`);
+      return undefined;
+    }
+
+    const expression = selector.trim();
+    const path = jsonPathAccess(expression);
+    if (path === "$") return body;
+    if (path === undefined) {
+      if (!parses(expression)) {
+        logger.warn(
+          `[wiz] x-select on '${name}' is ignored; '${expression}' is neither a JSONPath nor an expression that parses`
+        );
+        return undefined;
+      }
+      logger.warn(
+        `[wiz] x-select on '${name}' is not a plain JSONPath; '${expression}' is inlined into the generated client and runs on every response - review it before shipping`
+      );
+    }
+    return `((($: any) => (${path ?? expression}))(${body}))`;
+  },
+};
+
 /** Builtins, in the order they run. Varnames renders; descriptions supply text. */
 export const BUILTIN_TS_CLIENT_PLUGINS: readonly TsClientPlugin[] = [
   enumVarnamesPlugin,
   enumDescriptionsPlugin,
+  selectPlugin,
 ];
