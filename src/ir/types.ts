@@ -72,6 +72,8 @@ export interface Annotated {
   default?: unknown;
   /** Unrecognised JSDoc tags, verbatim, in source order. */
   meta?: Record<string, (string | true)[]>;
+  /** Vendor extension keywords (`x-*`) from a spec document, verbatim. */
+  extensions?: Record<string, unknown>;
 }
 
 export interface BaseTypeIR extends Annotated {
@@ -157,6 +159,7 @@ export interface IntersectionTypeIR extends BaseTypeIR {
 export interface EnumMemberIR {
   name: string;
   value: string | number;
+  description?: string;
 }
 
 export interface EnumTypeIR extends BaseTypeIR {
@@ -211,6 +214,9 @@ function normalizeAnnotations(node: Annotated): Record<string, unknown> {
     def: node.default ?? undefined,
     meta: node.meta
       ? Object.entries(node.meta).sort(([a], [b]) => a.localeCompare(b))
+      : undefined,
+    ext: node.extensions
+      ? Object.entries(node.extensions).sort(([a], [b]) => a.localeCompare(b))
       : undefined,
   };
 }

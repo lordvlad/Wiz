@@ -215,5 +215,11 @@ export function keywordsToAnnotations(
     annotated.examples = [schema.example];
   }
   if (schema.default !== undefined) annotated.default = schema.default;
+  let extensions: Record<string, unknown> | undefined;
+  for (const key of Object.keys(schema)) {
+    if (!key.startsWith("x-")) continue;
+    (extensions ??= {})[key] = schema[key];
+  }
+  if (extensions) annotated.extensions = extensions;
   return annotated;
 }

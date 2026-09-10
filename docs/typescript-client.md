@@ -623,6 +623,97 @@ fully enforced.
 **gRPC and OpenRPC operations are unaffected.** The flag reaches HTTP methods
 only; a protobuf message is validated by the wire format itself.
 
+## Vendor extensions (`plugins`)
+
+An `x-*` keyword is by definition something OpenAPI does not model, so the
+generator cannot honour it structurally. Extensions on a **Schema Object** are
+carried into the IR verbatim (`Annotated.extensions`) and handed to plugins that
+say what one means in emitted TypeScript. Anything no plugin claims is dropped,
+once per key, with a warning:
+
+```
+[wiz] no plugin handles vendor extension 'x-widget'; it is dropped
+```
+
+Two builtins ship, always on, in this order:
+
+| keyword | effect |
+|---|---|
+| `x-enum-varnames` | the enum is emitted as a named const object plus a union alias, so `Status.ACTIVE` exists |
+| `x-enum-descriptions` | each enum member gets its own doc comment |
+
+Both pair positionally with `enum`. A non-array value, a length mismatch or a
+keyword on a non-enum schema is a warning, not a failure, and whatever overlaps
+is applied. `x-enum-varnames` that repeat are suffixed `_2`, `_3`, … since a
+duplicate key would not compile; a varname that is not an identifier is emitted
+as a quoted key, reachable as `Status["FOO-BAR"]`.
+
+```jsonc
+"Status": {
+  "type": "string",
+  "enum": ["active", "banned"],
+  "description": "Whether the account may sign in.",
+  "x-enum-varnames": ["ACTIVE", "BANNED"],
+  "x-enum-descriptions": ["The account is usable.", "Locked by an operator."]
+}
+```
+
+```ts
+/** Whether the account may sign in. */
+export const Status = {
+  /** The account is usable. */
+  ACTIVE: "active",
+  /** Locked by an operator. */
+  BANNED: "banned",
+} as const;
+export type Status = (typeof Status)[keyof typeof Status];
+```
+
+A const object and a union, not a TypeScript `enum`: a bare `"active"` stays
+assignable wherever `Status` is expected, so no existing call site gets
+stricter. Descriptions without varnames keep the plain union and only add the
+comments:
+
+```ts
+export type Tier =
+  /** No card on file. */
+  | "free"
+  /** Billing active. */
+  | "paid";
+```
+
+### Writing one
+
+`TsClientOptions.plugins` runs after the builtins. A plugin declares the keys it
+consumes and implements either hook:
+
+```ts
+import { generate } from "wiz/generators/generator.ts";
+import { tsClientGenerator, type TsClientPlugin } from "wiz/generators/tsClient.ts";
+
+const widget: TsClientPlugin = {
+  name: "x-widget",
+  extensions: ["x-widget"],
+  // Rewrites one IR node in place, before anything is rendered.
+  type({ node, extensions }) {
+    if (node.kind === "primitive") node.description = `Rendered as ${extensions["x-widget"]}.`;
+  },
+  // Renders the whole `export …` block for one declared type. First
+  // non-undefined result wins, so a builtin beats a later plugin.
+  declaration: ({ name }) => (name === "Widget" ? "export type Widget = 42;" : undefined),
+};
+
+generate(ir, tsClientGenerator, { plugins: [widget] }, logger);
+```
+
+`type` receives a **generator-local clone** of the declared types. Mutating it
+shapes `model.ts` only: `api.ts`, `codec.ts`, the validators and the registry
+hash all read the extracted IR, so renaming an enum member here cannot change a
+protobuf entry name or a wire format.
+
+Extensions are captured on schemas only. Operation-level ones (`x-package`,
+`x-service`) are read by the harvesters and never enter the type IR.
+
 ## Limitations
 
 **JSON only.** `jsonBody` picks `application/json` and warns for everything

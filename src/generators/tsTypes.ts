@@ -61,7 +61,7 @@ const RESERVED: Record<string, true> = {
   with: true,
 };
 
-const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+export const TS_IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
 /**
  * Maps declared schema names onto the identifiers the emitted code uses.
@@ -97,7 +97,9 @@ function parenthesized(text: string): string {
   return /[|&]/.test(text) && !text.startsWith("(") ? `(${text})` : text;
 }
 
-function literalText(value: string | number | boolean | bigint | null): string {
+export function literalText(
+  value: string | number | boolean | bigint | null
+): string {
   if (typeof value === "string") return JSON.stringify(value);
   if (typeof value === "bigint") return `${value.toString()}n`;
   return String(value);
@@ -148,13 +150,16 @@ function objectText(
 ): string {
   const inner = `${indent}  `;
   const members = ir.properties.map((property) => {
-    const key = IDENTIFIER.test(property.name)
+    const key = TS_IDENTIFIER.test(property.name)
       ? property.name
       : JSON.stringify(property.name);
     const optional = property.optional ? "?" : "";
     const readonly = property.readonly ? "readonly " : "";
+    // A doc-commented enum body starts on its own line, so the usual space
+    // after the colon would be trailing whitespace.
     const type = typeText(property.type, identifiers, inner);
-    return `${docComment(property, inner)}${inner}${readonly}${key}${optional}: ${type};`;
+    const gap = type.startsWith("\n") ? "" : " ";
+    return `${docComment(property, inner)}${inner}${readonly}${key}${optional}:${gap}${type};`;
   });
 
   const index =
@@ -241,10 +246,19 @@ export function typeBodyText(
       return ir.types
         .map((member) => parenthesized(typeText(member, identifiers, indent)))
         .join(" & ");
-    case "enum":
-      return ir.members.length === 0
-        ? "never"
-        : ir.members.map((member) => literalText(member.value)).join(" | ");
+    case "enum": {
+      if (ir.members.length === 0) return "never";
+      if (!ir.members.some((member) => member.description)) {
+        return ir.members.map((member) => literalText(member.value)).join(" | ");
+      }
+      const inner = `${indent}  `;
+      return `\n${ir.members
+        .map(
+          (member) =>
+            `${docComment(member, inner)}${inner}| ${literalText(member.value)}`
+        )
+        .join("\n")}`;
+    }
     case "record":
       return `Record<${typeText(ir.keyType, identifiers, indent)}, ${typeText(ir.valueType, identifiers, indent)}>`;
     case "ref": {
@@ -266,11 +280,22 @@ export function typeBodyText(
  */
 export function tsDeclarations(
   types: Iterable<readonly [string, TypeIR]>,
-  identifiers: ReadonlyMap<string, string>
+  identifiers: ReadonlyMap<string, string>,
+  override?: (
+    name: string,
+    ir: TypeIR,
+    identifiers: ReadonlyMap<string, string>
+  ) => string | undefined
 ): string {
   const blocks: string[] = [];
 
   for (const [name, ir] of types) {
+    const replaced = override?.(name, ir, identifiers);
+    if (replaced !== undefined) {
+      blocks.push(replaced);
+      continue;
+    }
+
     const identifier = identifiers.get(name) ?? name;
     const doc = docComment(ir, "");
 
@@ -279,7 +304,9 @@ export function tsDeclarations(
       continue;
     }
 
-    blocks.push(`${doc}export type ${identifier} = ${typeBodyText(ir, identifiers, "")};`);
+    const body = typeBodyText(ir, identifiers, "");
+    const gap = body.startsWith("\n") ? "" : " ";
+    blocks.push(`${doc}export type ${identifier} =${gap}${body};`);
   }
 
   return blocks.join("\n\n");
