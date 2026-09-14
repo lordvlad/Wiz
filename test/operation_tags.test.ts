@@ -359,3 +359,29 @@ describe("an rpc needs @grpc", () => {
     TIMEOUT
   );
 });
+
+describe("OpenAPI parameter slot parsing", () => {
+  test(
+    "a parameter named 'query' with a 'path' property is not mistaken for a slot wrapper",
+    () => {
+      const doc = harvest(`
+        import { openapiSchema } from "../../src/index.ts";
+        export class FileService {
+          /**
+           * @get /file
+           */
+          getFileContent(query: { path: string; cwd?: string }): string { return ""; }
+        }
+        export const schema = openapiSchema<[FileService]>(${OPENAPI_BASE});
+      `).openapiSchema();
+
+      const params = doc.paths["/file"]!.get.parameters as Array<{ name: string; in: string }>;
+      expect(params).toHaveLength(2);
+      expect(params[0]!.name).toBe("path");
+      expect(params[0]!.in).toBe("query");
+      expect(params[1]!.name).toBe("cwd");
+      expect(params[1]!.in).toBe("query");
+    },
+    TIMEOUT
+  );
+});

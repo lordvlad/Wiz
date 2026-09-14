@@ -733,10 +733,11 @@ function parseOpenApiMethodFromSignature(
     const isOpt = (p.flags & ts.SymbolFlags.Optional) !== 0;
     const pJsDoc = extractJSDocInfo(p, checker);
     const pName = p.name;
-    if (pIR.kind === "object") {
+    if (pName !== "query" && pName !== "body" && pName !== "path" && pIR.kind === "object") {
       const subProps = pIR.properties;
       const hasKnownSlots = subProps.some((sp) =>
-        sp.name === "path" || sp.name === "query" || sp.name === "header" || sp.name === "cookie" || sp.name === "body"
+        (sp.name === "path" || sp.name === "query" || sp.name === "header" || sp.name === "cookie" || sp.name === "body") &&
+        (sp.type.kind === "object" || sp.type.kind === "ref" || sp.type.kind === "intersection")
       );
 
       if (hasKnownSlots) {
