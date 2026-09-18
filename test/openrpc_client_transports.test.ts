@@ -31,7 +31,7 @@ describe("OpenRPC Client & Transports", () => {
 
   test("openRpcClient over HTTP transport", async () => {
     const transport = httpTransport({
-      fetch: async (url, init) => handler.fetch(new Request(url, init)),
+      fetch: async (url, init) => handler.fetch(new Request(String(url), init)),
     });
 
     interface CalculatorClient {
@@ -132,7 +132,7 @@ describe("OpenRPC Client & Transports", () => {
     };
 
     const transport = httpTransport({
-      fetch: async (url, init) => handler.fetch(new Request(url, init)),
+      fetch: async (url, init) => handler.fetch(new Request(String(url), init)),
     });
 
     const client = openRpcClient<{ multiply(params: { a: number; b: number }): Promise<number> }>({
@@ -147,7 +147,7 @@ describe("OpenRPC Client & Transports", () => {
 
   test("openRpcClient handles error response", async () => {
     const transport = httpTransport({
-      fetch: async (url, init) => handler.fetch(new Request(url, init)),
+      fetch: async (url, init) => handler.fetch(new Request(String(url), init)),
     });
 
     const client = openRpcClient<{ divide(a: number, b: number): Promise<number> }>({

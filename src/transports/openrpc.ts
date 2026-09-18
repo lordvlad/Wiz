@@ -21,15 +21,32 @@ export interface OpenRpcTransport {
   call(call: OpenRpcCall): Promise<OpenRpcResult>;
   close?(): void;
 }
+export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
-export type FetchLike = (input: any, init?: any) => Promise<any>;
+export interface WebSocketLike {
+  readyState?: number;
+  send(data: string | ArrayBuffer | Uint8Array): void;
+  close?(): void;
+  addEventListener?(type: string, listener: (ev: unknown) => void, options?: { once?: boolean }): void;
+  onmessage?: ((ev: unknown) => void) | null;
+  onopen?: ((ev: unknown) => void) | null;
+  onerror?: ((ev: unknown) => void) | null;
+  onclose?: ((ev: unknown) => void) | null;
+}
+
+export interface SocketLike {
+  write?(data: string | Uint8Array): void;
+  send?(data: string | Uint8Array): void;
+  end?(): void;
+  close?(): void;
+  on?(event: string, listener: (data: unknown) => void): void;
+}
 
 export interface HttpTransportOptions {
   url?: string;
   fetch?: FetchLike;
   headers?: Record<string, string>;
 }
-
 export function httpTransport(options: HttpTransportOptions = {}): OpenRpcTransport {
   const url = options.url ?? "http://localhost/rpc";
   const fetchFn = options.fetch ?? globalThis.fetch;
@@ -62,8 +79,9 @@ export function httpTransport(options: HttpTransportOptions = {}): OpenRpcTransp
       const bodyText = await res.text();
       try {
         return JSON.parse(bodyText) as OpenRpcResult;
-      } catch (e: any) {
-        throw new Error(`[httpTransport] Failed to parse JSON response: ${e.message}`);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`[httpTransport] Failed to parse JSON response: ${msg}`);
       }
     },
   };
@@ -71,22 +89,27 @@ export function httpTransport(options: HttpTransportOptions = {}): OpenRpcTransp
 
 export interface WebSocketTransportOptions {
   url: string;
-  ws?: any;
+  ws?: WebSocketLike;
 }
 
 export function webSocketTransport(options: WebSocketTransportOptions): OpenRpcTransport {
-  let socket: any = options.ws;
+  let socket: WebSocketLike | undefined = options.ws;
   const pending = new Map<
     string | number,
-    { resolve: (res: OpenRpcResult) => void; reject: (err: any) => void }
+    { resolve: (res: OpenRpcResult) => void; reject: (err: unknown) => void }
   >();
 
-  function handleMessage(event: any) {
+  function handleMessage(event: unknown) {
     try {
+      const evObj = event as { data?: unknown };
       const text =
-        typeof event.data === "string"
-          ? event.data
-          : new TextDecoder().decode(event.data);
+        typeof evObj.data === "string"
+          ? evObj.data
+          : evObj.data instanceof Uint8Array
+            ? new TextDecoder().decode(evObj.data)
+            : typeof evObj.data === "object" && evObj.data !== null && "byteLength" in evObj.data
+              ? new TextDecoder().decode(new Uint8Array(evObj.data as ArrayBuffer))
+              : String(evObj.data);
       const data = JSON.parse(text) as OpenRpcResult;
       if (data && data.id !== undefined && pending.has(data.id)) {
         const handler = pending.get(data.id)!;
@@ -98,8 +121,8 @@ export function webSocketTransport(options: WebSocketTransportOptions): OpenRpcT
     }
   }
 
-  function bindSocket(s: any) {
-    if (s.addEventListener) {
+  function bindSocket(s: WebSocketLike) {
+    if (typeof s.addEventListener === "function") {
       s.addEventListener("message", handleMessage);
     } else {
       s.onmessage = handleMessage;
@@ -108,13 +131,13 @@ export function webSocketTransport(options: WebSocketTransportOptions): OpenRpcT
 
   if (socket) bindSocket(socket);
 
-  function getSocket(): Promise<any> {
+  function getSocket(): Promise<WebSocketLike> {
     if (socket && (socket.readyState === 1 || socket.readyState === 0)) {
       if (socket.readyState === 1) return Promise.resolve(socket);
-      const { promise, resolve, reject } = Promise.withResolvers<any>();
-      const onOpen = () => resolve(socket);
-      const onError = (e: any) => reject(e);
-      if (socket.addEventListener) {
+      const { promise, resolve, reject } = Promise.withResolvers<WebSocketLike>();
+      const onOpen = () => resolve(socket!);
+      const onError = (e: unknown) => reject(e);
+      if (typeof socket.addEventListener === "function") {
         socket.addEventListener("open", onOpen, { once: true });
         socket.addEventListener("error", onError, { once: true });
       } else {
@@ -124,15 +147,15 @@ export function webSocketTransport(options: WebSocketTransportOptions): OpenRpcT
       return promise;
     }
 
-    const WS = (globalThis as any).WebSocket;
+    const WS = (globalThis as unknown as { WebSocket?: new (url: string) => WebSocketLike }).WebSocket;
     if (!WS) throw new Error("WebSocket implementation not available");
 
     socket = new WS(options.url);
     bindSocket(socket);
 
-    const { promise, resolve, reject } = Promise.withResolvers<any>();
-    socket.onopen = () => resolve(socket);
-    socket.onerror = (e: any) => reject(e);
+    const { promise, resolve, reject } = Promise.withResolvers<WebSocketLike>();
+    socket.onopen = () => resolve(socket!);
+    socket.onerror = (e: unknown) => reject(e);
     return promise;
   }
 
@@ -163,21 +186,26 @@ export interface TcpTransportOptions {
   host?: string;
   port?: number;
   path?: string;
-  socket?: any;
+  socket?: SocketLike;
 }
 
 export function tcpTransport(options: TcpTransportOptions): OpenRpcTransport {
-  let conn: any = options.socket;
+  let conn: SocketLike | undefined = options.socket;
   const pending = new Map<
     string | number,
-    { resolve: (res: OpenRpcResult) => void; reject: (err: any) => void }
+    { resolve: (res: OpenRpcResult) => void; reject: (err: unknown) => void }
   >();
   let buffer = "";
 
-  function setupSocket(s: any) {
+  function setupSocket(s: SocketLike) {
     if (typeof s.on === "function") {
-      s.on("data", (data: Uint8Array | string) => {
-        const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+      s.on("data", (data: unknown) => {
+        const text =
+          typeof data === "string"
+            ? data
+            : data instanceof Uint8Array
+              ? new TextDecoder().decode(data)
+              : String(data);
         buffer += text;
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
@@ -198,15 +226,16 @@ export function tcpTransport(options: TcpTransportOptions): OpenRpcTransport {
 
   if (conn) setupSocket(conn);
 
-  async function getConn(): Promise<any> {
+  async function getConn(): Promise<SocketLike> {
     if (conn) return conn;
 
-    if (typeof (globalThis as any).Bun?.connect === "function") {
-      conn = await (globalThis as any).Bun.connect({
+    const bunObj = (globalThis as unknown as { Bun?: { connect?: (opts: unknown) => Promise<SocketLike> } }).Bun;
+    if (typeof bunObj?.connect === "function") {
+      conn = await bunObj.connect({
         hostname: options.host ?? "127.0.0.1",
         port: options.port ?? 8080,
         socket: {
-          data(_socket: any, data: Uint8Array) {
+          data(_socket: unknown, data: Uint8Array) {
             const text = new TextDecoder().decode(data);
             buffer += text;
             const lines = buffer.split("\n");

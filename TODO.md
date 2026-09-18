@@ -17,7 +17,7 @@ deserves a decision rather than a paragraph.
 - [x] [`as any` where a narrowing guard already exists](#as-any-where-a-narrowing-guard-already-exists)
 - [x] [Generated react-query hooks launder their options through `any`](#generated-react-query-hooks-launder-their-options-through-any)
 - [x] [`tsClient` degrades silently when a Bun global is absent](#tsclient-degrades-silently-when-a-bun-global-is-absent)
-- [ ] [The OpenRPC server and transports are untyped glue](#the-openrpc-server-and-transports-are-untyped-glue)
+- [x] [The OpenRPC server and transports are untyped glue](#the-openrpc-server-and-transports-are-untyped-glue)
 - [ ] [`document.ts` merges responses through a hardcoded `204`](#documentts-merges-responses-through-a-hardcoded-204)
 - [ ] [`package.json` has no version](#packagejson-has-no-version)
 

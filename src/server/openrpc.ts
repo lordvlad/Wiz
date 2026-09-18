@@ -1,51 +1,64 @@
+export type JsonRpcId = string | number | null;
+export type JsonRpcParams = unknown[] | Record<string, unknown>;
+
+export interface WebSocketLike {
+  send?(data: string | Uint8Array): void;
+}
+
+export interface SocketLike {
+  write?(data: string | Uint8Array): void;
+}
+
+export type RpcMethodFunction = (...args: unknown[]) => unknown;
+
 export interface OpenRpcHandlerOptions {
-  services?: any[] | Record<string, any>;
-  methods?: Record<string, (...args: any[]) => any>;
+  services?: unknown[] | Record<string, unknown>;
+  methods?: Record<string, RpcMethodFunction>;
   info?: { title?: string; version?: string; description?: string };
   doc?: Record<string, unknown>;
 }
 
 export interface JsonRpcRequest {
   jsonrpc: string;
-  id?: string | number | null;
+  id?: JsonRpcId;
   method: string;
-  params?: any;
+  params?: JsonRpcParams;
 }
 
 export interface JsonRpcResponse {
   jsonrpc: "2.0";
-  id: string | number | null;
-  result?: any;
+  id: JsonRpcId;
+  result?: unknown;
   error?: {
     code: number;
     message: string;
-    data?: any;
+    data?: unknown;
   };
 }
 
 export interface OpenRpcHandler {
   fetch(req: Request): Promise<Response>;
   websocket: {
-    open(ws: any): void;
-    message(ws: any, msg: string | Uint8Array): Promise<void>;
-    close(ws: any): void;
+    open(ws: WebSocketLike): void;
+    message(ws: WebSocketLike, msg: string | Uint8Array | ArrayBuffer): Promise<void>;
+    close(ws: WebSocketLike): void;
   };
   socket: {
-    open(socket: any): void;
-    data(socket: any, buf: Uint8Array | string): Promise<void>;
-    close(socket: any): void;
+    open(socket: SocketLike): void;
+    data(socket: SocketLike, buf: Uint8Array | string): Promise<void>;
+    close(socket: SocketLike): void;
   };
   handleRequest(request: unknown): Promise<unknown>;
 }
-
 function safeJsonStringify(val: unknown): string {
   return JSON.stringify(val, (_k, v) => (typeof v === "bigint" ? String(v) : v));
 }
 
 export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
-  const methodTable = new Map<string, { fn: (...args: any[]) => any; target: any }>();
+  // Dynamic service method registration table
+  const methodTable = new Map<string, { fn: RpcMethodFunction; target: unknown }>();
 
-  function registerMethod(name: string, fn: (...args: any[]) => any, target: any) {
+  function registerMethod(name: string, fn: RpcMethodFunction, target: unknown) {
     methodTable.set(name, { fn, target });
   }
 
@@ -60,7 +73,7 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
 
   // Register methods from options.services
   if (options.services) {
-    const servicesList: Array<{ name?: string; instance: any }> = [];
+    const servicesList: Array<{ name?: string; instance: Record<string, unknown> }> = [];
 
     if (Array.isArray(options.services)) {
       for (const item of options.services) {
@@ -68,13 +81,13 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
           const name = item.constructor && item.constructor.name !== "Object"
             ? item.constructor.name
             : undefined;
-          servicesList.push({ name, instance: item });
+          servicesList.push({ name, instance: item as Record<string, unknown> });
         }
       }
     } else if (typeof options.services === "object") {
       for (const [key, item] of Object.entries(options.services)) {
         if (item && typeof item === "object") {
-          servicesList.push({ name: key, instance: item });
+          servicesList.push({ name: key, instance: item as Record<string, unknown> });
         }
       }
     }
@@ -99,11 +112,14 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
       }
 
       for (const methodName of keys) {
-        const fn = instance[methodName].bind(instance);
-        if (serviceName) {
-          registerMethod(`${serviceName}.${methodName}`, fn, instance);
+        const member = instance[methodName];
+        if (typeof member === "function") {
+          const fn = (member as RpcMethodFunction).bind(instance);
+          if (serviceName) {
+            registerMethod(`${serviceName}.${methodName}`, fn, instance);
+          }
+          registerMethod(methodName, fn, instance);
         }
-        registerMethod(methodName, fn, instance);
       }
     }
   }
@@ -153,7 +169,7 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
     }
 
     try {
-      let result: any;
+      let result: unknown;
       if (Array.isArray(req.params)) {
         result = await entry.fn(...req.params);
       } else if (req.params !== undefined && req.params !== null && typeof req.params === "object") {
@@ -170,15 +186,16 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
         id,
         result: result ?? null,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (isNotification) return null;
+      const errObj = err && typeof err === "object" ? (err as Record<string, unknown>) : undefined;
       return {
         jsonrpc: "2.0",
         id,
         error: {
-          code: typeof err?.code === "number" ? err.code : -32603,
-          message: err?.message ?? "Internal error",
-          data: err?.data,
+          code: typeof errObj?.code === "number" ? errObj.code : -32603,
+          message: typeof errObj?.message === "string" ? errObj.message : "Internal error",
+          data: errObj?.data,
         },
       };
     }
@@ -267,8 +284,8 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
   }
 
   const websocket = {
-    open(_ws: any) {},
-    async message(ws: any, msg: any) {
+    open(_ws: WebSocketLike) {},
+    async message(ws: WebSocketLike, msg: string | Uint8Array | ArrayBuffer) {
       try {
         let text: string;
         if (typeof msg === "string") {
@@ -285,7 +302,7 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
         if (res !== null && ws && typeof ws.send === "function") {
           ws.send(safeJsonStringify(res));
         }
-      } catch (err) {
+      } catch {
         if (ws && typeof ws.send === "function") {
           ws.send(
             JSON.stringify({
@@ -297,12 +314,12 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
         }
       }
     },
-    close(_ws: any) {},
+    close(_ws: WebSocketLike) {},
   };
 
   const socket = {
-    open(_socket: any) {},
-    async data(soc: any, buf: Uint8Array | string) {
+    open(_socket: SocketLike) {},
+    async data(soc: SocketLike, buf: Uint8Array | string) {
       try {
         const text = typeof buf === "string" ? buf : new TextDecoder().decode(buf);
         const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -329,7 +346,7 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
         // ignore malformed socket chunk
       }
     },
-    close(_socket: any) {},
+    close(_socket: SocketLike) {},
   };
 
   return {
