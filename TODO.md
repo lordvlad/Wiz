@@ -11,7 +11,7 @@ deserves a decision rather than a paragraph.
 ## Defects
 
 - [x] [Spec pre-validation does not validate OpenAPI or JSON Schema](#spec-pre-validation-does-not-validate-openapi-or-json-schema)
-- [ ] [The MCP generator builds a document it never validates](#the-mcp-generator-builds-a-document-it-never-validates)
+- [x] [The MCP generator builds a document it never validates](#the-mcp-generator-builds-a-document-it-never-validates)
 - [ ] [`harvest.ts` reads TypeScript compiler internals](#harvestts-reads-typescript-compiler-internals)
 - [ ] [MCP smuggles fields the IR does not declare](#mcp-smuggles-fields-the-ir-does-not-declare)
 - [ ] [`as any` where a narrowing guard already exists](#as-any-where-a-narrowing-guard-already-exists)

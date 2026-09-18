@@ -32,3 +32,4 @@ export const tools = mcpSchema<[CalculateTax, UserService]>();
 - **0-Method Warning**: If an object type with 0 methods is passed to `mcpSchema`, a compiler warning (`no methods found on object type '<TypeName>' for mcpSchema`) is logged.
 - **`@package` / `@service`**: `@service Users` renames the namespace, and `@package acme` prefixes it, so a tool becomes `acme.Users.search_users`. Both are read from the interface (applying to every method) or from a single method.
 - **Other tags**: `@title`, `@summary`, `@audience` and `@priority` populate the tool's title, description and annotations; the doc comment's prose is the description.
+- **Pre-Validation**: MCP tool output documents are generated directly from the intermediate representations without additional spec pre-validation assertions.
