@@ -54,6 +54,7 @@ export interface McpAddressIR {
   service?: string;
   method?: string;
   name: string;
+  hasOverride?: boolean;
 }
 
 /**

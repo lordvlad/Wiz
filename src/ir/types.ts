@@ -74,6 +74,8 @@ export interface Annotated {
   meta?: Record<string, (string | true)[]>;
   /** Vendor extension keywords (`x-*`) from a spec document, verbatim. */
   extensions?: Record<string, unknown>;
+  /** Direct MCP tool metadata attached to a payload or type node. */
+  mcpTool?: unknown;
 }
 
 export interface BaseTypeIR extends Annotated {

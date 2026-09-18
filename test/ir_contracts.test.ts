@@ -2,6 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import { generateOpenApiSchemaCode } from "../src/generators/openapi.ts";
 import { generateSchemaCode } from "../src/generators/schema.ts";
+import { generateMcpSchemaCode } from "../src/generators/mcp.ts";
 import {
   computeTypeIRHash,
   normalizeTypeIR,
@@ -45,6 +46,24 @@ describe("TypeIR graph contracts", () => {
     };
     const schema = evalModule<{ schema_draft2020: any }>(generateSchemaCode(ir)).schema_draft2020;
     expect(schema.minItems).toBe(1);
+  });
+
+  test("MCP generator respects McpAddressIR.hasOverride without namespace prefixing", () => {
+    const code = generateMcpSchemaCode([], {
+      kind: "service",
+      name: "CustomService",
+      methods: [
+        {
+          kind: "serviceMethod",
+          protocol: "mcp",
+          address: { protocol: "mcp", name: "exact_override_name", hasOverride: true },
+          request: { protocol: "mcp", input: { id: "t1", kind: "object", properties: [] } },
+          responses: [],
+        },
+      ],
+    });
+    const mod = evalModule<{ mcpSchema: () => { tools: Array<{ name: string }> } }>(code);
+    expect(mod.mcpSchema().tools[0]?.name).toBe("exact_override_name");
   });
 });
 

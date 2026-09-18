@@ -49,7 +49,7 @@ export function generateMcpSchemaCode(
       const pkg = method.address.package ?? service.package;
       const svc = method.address.service ?? service.name;
       const mName = method.address.method ?? method.address.name;
-      const hasOverride = (method.address as any).hasOverride;
+      const hasOverride = method.address.hasOverride;
       const rawName = method.address.name;
       const name = hasOverride
         ? rawName
@@ -60,7 +60,6 @@ export function generateMcpSchemaCode(
             : svc
               ? `${svc}.${toSnakeCase(mName)}`
               : toSnakeCase(mName);
-
       if (!toolNames.has(name)) {
         const inputSchema = irToMcpInputSchema(method.request.input);
         const outputResp = method.responses[0]?.output;
@@ -84,7 +83,7 @@ export function generateMcpSchemaCode(
   }
   // 2. Process types passed directly (from mcpSchema<[typeof searchUsers]>() with mcpTool metadata in IR)
   for (const { ir } of types) {
-    const mcpMeta = (ir as any).meta?.mcpTool as McpToolSpec | undefined;
+    const mcpMeta = (ir.mcpTool ?? ir.meta?.mcpTool) as McpToolSpec | undefined;
     if (mcpMeta && mcpMeta.name) {
       if (!toolNames.has(mcpMeta.name)) {
         toolsList.push(mcpMeta);
