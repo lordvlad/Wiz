@@ -225,6 +225,8 @@ const GENERATOR_SHORTCUTS: Record<string, string> = {
   "openrpc.ts": "../generators/openrpc.ts",
   asyncapi: "../generators/asyncapi.ts",
   "asyncapi.ts": "../generators/asyncapi.ts",
+  java: "../generators/java.ts",
+  "java.ts": "../generators/java.ts",
 };
 
 async function loadGenerator(
