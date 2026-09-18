@@ -120,9 +120,8 @@ The same shape drives [OpenAPI](./docs/openapi.md),
 
 Going the other way, `wiz generate` turns an OpenAPI document or a `.proto`
 file into a typed client: [typescript-client](./docs/typescript-client.md),
-[react-query](./docs/react-query.md), [grpc](./docs/grpc.md), and
+[react-query](./docs/react-query.md), [java](./docs/java.md), [grpc](./docs/grpc.md), and
 [cli](./docs/cli.md) for `init`, `eject` and `generate`.
-
 ## Documentation
 
 Every feature, extractor and generator has a guide in

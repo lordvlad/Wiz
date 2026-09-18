@@ -75,8 +75,7 @@ wiz generate -g wiz/generators/tsClient.ts openapi.yaml --outdir src/api
 
 | Flag | Short | Description |
 |---|---|---|
-| `--generator <name\|path>` | `-g` | Generator shortcut (`reactQuery`, `tsClient`, `openrpc`) or path to a generator file. Required. |
-| `--outdir <dir>` | `-o` | Output directory. If omitted, JSON record is printed to stdout. |
+| `--generator <name\|path>` | `-g` | Generator shortcut (`reactQuery`, `tsClient`, `openrpc`, `asyncapi`, `java`) or path to a generator file. Required. |
 | `--format <fmt>` | `-f` | Override input format inference (`openapi`, `proto`, `jsonschema`). |
 | `--lenient` | | Widen parameter shapes in client generators. |
 | `--media-types <list\|all>` | | Additional media types to support in `tsClient` / `reactQuery` (`jsonl`, `jsonc`, `json5`, `xml`, `html`, `xml+html`, `grpc`, `erlangText`, `erlangBinary`, `cbor`, `yaml`, or `all`). `json` is always enabled. |
@@ -87,7 +86,8 @@ Passing a shortcut name to `-g` resolves directly to the bundled generator modul
 - `-g reactQuery`: React Query client generator (`model.ts`, `api.ts`, `codec.ts`, `queries.ts`, `mutations.ts`).
 - `-g tsClient`: Standard TypeScript HTTP client generator (`model.ts`, `api.ts`, `codec.ts`).
 - `-g openrpc`: OpenRPC schema and handler generator.
-
+- `-g asyncapi`: AsyncAPI client generator.
+- `-g java`: Java code generator (Records/POJOs, Jackson, Jakarta validation, Lombok, Jakarta REST client).
 ### `--validate`
 
 The only flag whose value is optional. Bare, it validates every part of a call;

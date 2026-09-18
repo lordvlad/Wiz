@@ -22,7 +22,7 @@
 - **[MCP](./mcp.md)** — `mcpSchema`, tool harvesting, input/output JSON schemas, and tool annotations.
 - **[TypeScript Client](./typescript-client.md)** — `wiz generate -g tsClient`, HTTP client operations, custom JSON codecs, interceptor chains, deadlines, `createClient`, and runtime validation via `--validate`.
 - **[React Query Client](./react-query.md)** — `wiz generate -g reactQuery`, generated queries and mutations, and query keys.
-
+- **[Java Code Generator](./java.md)** — `wiz generate -g java`, Java 17+ Records / POJOs, Jackson, Jakarta validation constraints, Lombok annotations, and Jakarta REST client (`jakarta.ws.rs.client`).
 ### Binary Codecs & Protocols
 - **[Protocol Buffers](./protobuf.md)** — `protobufSchema`, `encodeProto`, `decodeProto`, `@fieldNumber`, scalar widths, `oneof`, and `NumberedUnion`.
 - **[gRPC](./grpc.md)** — Proto front end, `grpcSchema` service harvesting, all 4 streaming directions, `createHttp2Transport()`, deadlines, metadata, and trailers.
