@@ -348,10 +348,10 @@ function bodySerializer(mimetype: string, access: string, encode?: string): stri
     return `((globalThis as any).Bun?.YAML ?? JSON).stringify(${access}.body)`;
   }
   if (norm.includes("xml")) {
-    return `((globalThis as any).Bun?.XML ?? { stringify: (v: any) => String(v) }).stringify(${access}.body)`;
+    return `((globalThis as any).Bun?.XML ? (globalThis as any).Bun.XML.stringify(${access}.body) : (() => { throw new Error("[wiz] application/xml requests need Bun.XML; this runtime has none"); })())`;
   }
   if (norm.includes("html")) {
-    return `typeof ${access}.body === "string" ? ${access}.body : ((globalThis as any).Bun?.escapeHTML ? (globalThis as any).Bun.escapeHTML(String(${access}.body)) : String(${access}.body))`;
+    return `typeof ${access}.body === "string" ? ${access}.body : ((globalThis as any).Bun?.escapeHTML ? (globalThis as any).Bun.escapeHTML(String(${access}.body)) : (() => { throw new Error("[wiz] non-string HTML request bodies need Bun.escapeHTML; this runtime has none"); })())`;
   }
   if (norm.includes("cbor")) {
     return `encodeCbor(${access}.body)`;
@@ -1234,69 +1234,45 @@ async function parseBody(response: Response): Promise<unknown> {
   const ct = (response.headers.get("content-type") ?? "").toLowerCase();
   const bun = (globalThis as any).Bun;
   if (ct.includes("jsonl") || ct.includes("json-lines") || ct.includes("x-jsonlines")) {
-    try {
-      return (bun?.JSONL ?? { parse: (t: string) => t.trim().split("\\n").map((l: string) => JSON.parse(l)) }).parse(text);
-    } catch {
-      return text;
-    }
+    if (bun?.JSONL) return bun.JSONL.parse(text);
+    return text.trim().split("\\n").map((l: string) => JSON.parse(l));
   }
   if (ct.includes("jsonc")) {
-    try {
-      return (bun?.JSONC ?? JSON).parse(text);
-    } catch {
-      return text;
-    }
+    return (bun?.JSONC ?? JSON).parse(text);
   }
   if (ct.includes("json5")) {
-    try {
-      return (bun?.JSON5 ?? JSON).parse(text);
-    } catch {
-      return text;
-    }
+    return (bun?.JSON5 ?? JSON).parse(text);
   }
   if (ct.includes("yaml")) {
-    try {
-      return (bun?.YAML ?? { parse: (t: string) => JSON.parse(t) }).parse(text);
-    } catch {
-      return text;
-    }
+    if (bun?.YAML) return bun.YAML.parse(text);
+    return JSON.parse(text);
   }
   if (ct.includes("xml")) {
-    try {
-      return (bun?.XML ?? { parse: (t: string) => t }).parse(text);
-    } catch {
-      return text;
-    }
+    if (bun?.XML) return bun.XML.parse(text);
+    throw new Error("[wiz] application/xml responses need Bun.XML; this runtime has none");
   }
   if (ct.includes("cbor")) {
-    try {
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      return typeof (globalThis as any).decodeCbor === "function" ? (globalThis as any).decodeCbor(bytes) : bytes;
-    } catch {
-      return text;
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (typeof (globalThis as any).decodeCbor === "function") {
+      return (globalThis as any).decodeCbor(bytes);
     }
+    throw new Error("[wiz] application/cbor responses need globalThis.decodeCbor; this runtime has none");
   }
   if (ct.includes("erlang-binary") || ct.includes("etf")) {
-    try {
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      return typeof (globalThis as any).decodeErlangBinary === "function" ? (globalThis as any).decodeErlangBinary(bytes) : bytes;
-    } catch {
-      return text;
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (typeof (globalThis as any).decodeErlangBinary === "function") {
+      return (globalThis as any).decodeErlangBinary(bytes);
     }
+    throw new Error("[wiz] application/x-erlang-binary responses need globalThis.decodeErlangBinary; this runtime has none");
   }
   if (ct.includes("erlang")) {
-    try {
-      return typeof (globalThis as any).decodeErlangText === "function" ? (globalThis as any).decodeErlangText(text) : text;
-    } catch {
-      return text;
+    if (typeof (globalThis as any).decodeErlangText === "function") {
+      return (globalThis as any).decodeErlangText(text);
     }
+    throw new Error("[wiz] application/x-erlang-text responses need globalThis.decodeErlangText; this runtime has none");
   }
   if (ct.includes("json")) {
-    try {
-      return JSON.parse(text);
-    } catch {
-      return text;
-    }
+    return JSON.parse(text);
   }
   return text;
 }

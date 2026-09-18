@@ -799,3 +799,53 @@ describe("mediaTypes option support in tsClient", () => {
     expect(files["codec.ts"]).toContain("encodeCbor");
   });
 });
+
+describe("malformed response body handling in tsClient", () => {
+  test("throws on malformed JSON responses", async () => {
+    const doc = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "JsonApi", version: "1.0.0" },
+      paths: {
+        "/data": {
+          get: {
+            operationId: "getData",
+            responses: {
+              "200": {
+                description: "ok",
+                content: { "application/json": { schema: { type: "object" } } },
+              },
+            },
+          },
+        },
+      },
+    });
+    const ir = extractApiIR(doc, { format: "json" });
+    const clientFiles = generate(ir, tsClientGenerator, {}, silentLogger);
+    expect(clientFiles["api.ts"]).toContain("JSON.parse(text)");
+    expect(clientFiles["api.ts"]).not.toContain("catch { return text }");
+  });
+
+  test("throws descriptive error when Bun.XML or decoder is missing", () => {
+    const doc = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "XmlApi", version: "1.0.0" },
+      paths: {
+        "/xml": {
+          get: {
+            operationId: "getXml",
+            responses: {
+              "200": {
+                description: "ok",
+                content: { "application/xml": { schema: { type: "object" } } },
+              },
+            },
+          },
+        },
+      },
+    });
+    const ir = extractApiIR(doc, { format: "json" });
+    const clientFiles = generate(ir, tsClientGenerator, { mediaTypes: ["xml"] }, silentLogger);
+    expect(clientFiles["api.ts"]).toContain("[wiz] application/xml responses need Bun.XML");
+    expect(clientFiles["api.ts"]).not.toContain("catch { return text }");
+  });
+});
