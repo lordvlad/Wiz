@@ -1,5 +1,5 @@
 import type { BunPlugin } from "bun";
-import ts from "typescript";
+import * as ts from "typescript";
 import { extractTypeIR } from "./extractors/typescript.ts";
 import {
   collectOperations,
