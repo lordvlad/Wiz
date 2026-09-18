@@ -5,7 +5,7 @@ import { generate } from "../src/generators/generator.ts";
 import { extractApiIR } from "../src/extractors/openapi.ts";
 import type { TypeIR } from "../src/ir/types.ts";
 
-describe("Java Generator (models and Jakarta client)", () => {
+describe("Java Generator (models, Jakarta client, MicroProfile client)", () => {
   const userIR: TypeIR = {
     id: "User",
     name: "User",
@@ -180,6 +180,80 @@ describe("Java Generator (models and Jakarta client)", () => {
     expect(clientSource).toContain("import jakarta.ws.rs.client.ClientBuilder;");
     expect(clientSource).toContain("public java.util.List<Pet> listPets(");
     expect(clientSource).toContain("new GenericType<java.util.List<Pet>>() {}");
+  });
+
+  test("generates MicroProfile REST client interface with @RegisterRestClient when client is 'mp'", () => {
+    const doc = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "PetStore", version: "1.0.0" },
+      components: {
+        schemas: {
+          Pet: {
+            type: "object",
+            required: ["id", "name"],
+            properties: {
+              id: { type: "string" },
+              name: { type: "string" },
+            },
+          },
+          NewPet: {
+            type: "object",
+            required: ["name"],
+            properties: { name: { type: "string" } },
+          },
+        },
+      },
+      paths: {
+        "/pets/{petId}": {
+          get: {
+            operationId: "getPet",
+            parameters: [{ name: "petId", in: "path", required: true, schema: { type: "string" } }],
+            responses: {
+              "200": {
+                description: "A pet",
+                content: { "application/json": { schema: { $ref: "#/components/schemas/Pet" } } },
+              },
+            },
+          },
+          post: {
+            operationId: "createPet",
+            requestBody: {
+              content: { "application/json": { schema: { $ref: "#/components/schemas/NewPet" } } },
+            },
+            responses: {
+              "200": {
+                description: "A pet",
+                content: { "application/json": { schema: { $ref: "#/components/schemas/Pet" } } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const ir = extractApiIR(doc, { format: "json" });
+    const files = generate(
+      ir,
+      javaGenerator,
+      {
+        package: "com.petstore.api",
+        client: "mp",
+      },
+      { trace: () => {}, info: () => {}, warn: () => {}, error: () => {} }
+    );
+
+    expect(Object.keys(files).sort()).toEqual(["NewPet.java", "Pet.java", "PetStoreClient.java"]);
+    const clientSource = files["PetStoreClient.java"]!;
+    expect(clientSource).toContain("import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;");
+    expect(clientSource).toContain("@RegisterRestClient");
+    expect(clientSource).toContain("public interface PetStoreClient {");
+    expect(clientSource).toContain('@GET');
+    expect(clientSource).toContain('@Path("/pets/{petId}")');
+    expect(clientSource).toContain('@Produces(MediaType.APPLICATION_JSON)');
+    expect(clientSource).toContain('Pet getPet(@PathParam("petId") String petId);');
+    expect(clientSource).toContain('@POST');
+    expect(clientSource).toContain('@Consumes("application/json")');
+    expect(clientSource).toContain('Pet createPet(NewPet body);');
   });
 
   test("client emission can be disabled with client: 'off' or client: false", () => {

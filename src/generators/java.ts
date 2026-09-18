@@ -28,9 +28,9 @@ export interface JavaGeneratorOptions {
    */
   lombok?: boolean;
   /**
-   * HTTP Client generator option: "jakarta" (default) or "off" / false.
+   * HTTP Client generator option: "jakarta" (default), "mp" (MicroProfile @RegisterRestClient / @RestClient), or "off" / false.
    */
-  client?: "jakarta" | "off" | false;
+  client?: "jakarta" | "mp" | "off" | false;
   /**
    * Custom client class name override (defaults to `<ServiceName>Client` or `ApiClient`).
    */
@@ -553,6 +553,89 @@ function generateJakartaClientSource(
 }
 
 /**
+ * Emits MicroProfile REST Client interface annotated with @RegisterRestClient.
+ */
+function generateMicroProfileClientSource(
+  service: ServiceIR,
+  options: JavaGeneratorOptions,
+  typeNameMap: Map<string, string>
+): string {
+  const clientName =
+    options.clientName ??
+    (service.name ? `${toPascalCase(service.name)}Client` : "ApiClient");
+  const lines: string[] = [];
+
+  if (options.package) {
+    lines.push(`package ${options.package};`, "");
+  }
+
+  lines.push("import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;");
+  lines.push("import jakarta.ws.rs.*;");
+  lines.push("import jakarta.ws.rs.core.MediaType;");
+  lines.push("");
+
+  lines.push("@RegisterRestClient");
+  lines.push(`public interface ${clientName} {`);
+
+  for (const method of service.methods) {
+    if (!isHttpMethod(method)) continue;
+    const http = method;
+    const methodName = toCamelCase(
+      http.address.methodName ??
+        http.operationId ??
+        `${http.address.method.toLowerCase()}_${http.address.path.replace(/[^a-zA-Z0-9]/g, "_")}`
+    );
+    const httpVerb = http.address.method.toUpperCase();
+    const returnType = resolveMethodReturnType(http, typeNameMap);
+
+    const pathParams = (http.request.parameters ?? []).filter(
+      (p) => p.in === "path"
+    );
+    const queryParams = (http.request.parameters ?? []).filter(
+      (p) => p.in === "query"
+    );
+    const headerParams = (http.request.parameters ?? []).filter(
+      (p) => p.in === "header"
+    );
+    const bodyParam = http.request.body?.[0];
+
+    const methodParams: string[] = [];
+    for (const p of pathParams) {
+      methodParams.push(`@PathParam("${p.name}") ${toJavaType(p.type, typeNameMap)} ${toCamelCase(p.name)}`);
+    }
+    for (const p of queryParams) {
+      methodParams.push(`@QueryParam("${p.name}") ${toJavaType(p.type, typeNameMap)} ${toCamelCase(p.name)}`);
+    }
+    for (const p of headerParams) {
+      methodParams.push(`@HeaderParam("${p.name}") ${toJavaType(p.type, typeNameMap)} ${toCamelCase(p.name)}`);
+    }
+    if (bodyParam) {
+      methodParams.push(`${toJavaType(bodyParam.content, typeNameMap)} body`);
+    }
+
+    if (http.description || http.summary) {
+      lines.push("  /**");
+      if (http.summary) lines.push(`   * ${http.summary}`);
+      if (http.description) lines.push(`   * ${http.description}`);
+      lines.push("   */");
+    }
+
+    lines.push(`  @${httpVerb}`);
+    lines.push(`  @Path(${JSON.stringify(http.address.path)})`);
+    lines.push("  @Produces(MediaType.APPLICATION_JSON)");
+    if (bodyParam) {
+      const contentType = bodyParam.mimetype ?? "application/json";
+      lines.push(`  @Consumes(${JSON.stringify(contentType)})`);
+    }
+    lines.push(`  ${returnType} ${methodName}(${methodParams.join(", ")});`);
+    lines.push("");
+  }
+
+  lines.push("}");
+  return lines.join("\n");
+}
+
+/**
  * Generate Java model and client files from intermediate representations.
  */
 export function generateJavaFiles(
@@ -578,16 +661,25 @@ export function generateJavaFiles(
     }
   }
 
-  const isClientEnabled = options.client !== "off" && options.client !== false;
-  if (isClientEnabled && service && service.methods.length > 0) {
+  const clientOption = options.client ?? "jakarta";
+  if (clientOption !== "off" && clientOption !== false && service && service.methods.length > 0) {
     const clientName =
       options.clientName ??
       (service.name ? `${toPascalCase(service.name)}Client` : "ApiClient");
-    files[`${clientName}.java`] = generateJakartaClientSource(
-      service,
-      options,
-      typeNameMap
-    );
+
+    if (clientOption === "mp") {
+      files[`${clientName}.java`] = generateMicroProfileClientSource(
+        service,
+        options,
+        typeNameMap
+      );
+    } else {
+      files[`${clientName}.java`] = generateJakartaClientSource(
+        service,
+        options,
+        typeNameMap
+      );
+    }
   }
 
   return files;
