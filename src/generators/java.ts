@@ -69,6 +69,23 @@ function toCamelCase(name: string): string {
 }
 
 /**
+ * Derives a suffix based on a mimetype (e.g. "application/json" -> "AsJson", "application/xml" -> "AsXml").
+ */
+function mimetypeToSuffix(mimetype: string): string {
+  const norm = mimetype.toLowerCase();
+  if (norm.includes("json")) return "AsJson";
+  if (norm.includes("xml")) return "AsXml";
+  if (norm.includes("yaml")) return "AsYaml";
+  if (norm.includes("csv")) return "AsCsv";
+  if (norm.includes("octet-stream")) return "AsOctetStream";
+  if (norm.includes("form-data")) return "AsFormData";
+  if (norm.includes("x-www-form-urlencoded")) return "AsUrlEncoded";
+  if (norm.includes("text")) return "AsText";
+  const clean = norm.replace(/[^a-zA-Z0-9]/g, "_");
+  return `As${toPascalCase(clean)}`;
+}
+
+/**
  * Map TypeIR to a Java type name.
  */
 function toJavaType(ir: TypeIR, typeNameMap: Map<string, string>): string {
@@ -385,19 +402,88 @@ function generateClassSource(
   return lines.join("\n");
 }
 
+interface HttpMethodVariant {
+  baseName: string;
+  methodName: string;
+  method: HttpServiceMethodIR;
+  returnType: string;
+  responseMimetype?: string;
+  requestBodyParam?: { mimetype: string; content: TypeIR };
+}
+
 /**
- * Extracts return type for an HTTP method.
+ * Expands an HTTP method into distinct variants if multiple request or response media types are offered.
  */
-function resolveMethodReturnType(
+function collectMethodVariants(
   method: HttpServiceMethodIR,
   typeNameMap: Map<string, string>
-): string {
+): HttpMethodVariant[] {
+  const baseName = toCamelCase(
+    method.address.methodName ??
+      method.operationId ??
+      `${method.address.method.toLowerCase()}_${method.address.path.replace(/[^a-zA-Z0-9]/g, "_")}`
+  );
+
   const isSuccess = (r: HttpResponseIR) =>
     typeof r.status === "number" && r.status >= 200 && r.status < 300;
-  const chosen = method.responses.filter(isSuccess)[0] ?? method.responses[0];
-  const bodyContent = chosen?.body?.[0]?.content;
-  if (!bodyContent) return "void";
-  return toJavaType(bodyContent, typeNameMap);
+  const chosenResp = method.responses.filter(isSuccess)[0] ?? method.responses[0];
+  const responseBodies = chosenResp?.body ?? [];
+
+  const requestBodies = method.request.body ?? [];
+
+  // If there are multiple response representations or multiple request representations
+  const hasMultipleResponses = responseBodies.length > 1;
+  const hasMultipleRequests = requestBodies.length > 1;
+
+  if (!hasMultipleResponses && !hasMultipleRequests) {
+    const respBody = responseBodies[0];
+    const reqBody = requestBodies[0];
+    const returnType = respBody?.content
+      ? toJavaType(respBody.content, typeNameMap)
+      : "void";
+
+    return [
+      {
+        baseName,
+        methodName: baseName,
+        method,
+        returnType,
+        responseMimetype: respBody?.mimetype,
+        requestBodyParam: reqBody,
+      },
+    ];
+  }
+
+  const variants: HttpMethodVariant[] = [];
+
+  const effectiveResponses = responseBodies.length > 0 ? responseBodies : [{ mimetype: "application/json", content: undefined }];
+  const effectiveRequests = requestBodies.length > 0 ? requestBodies : [undefined];
+
+  for (const resp of effectiveResponses) {
+    for (const req of effectiveRequests) {
+      let suffix = "";
+      if (hasMultipleResponses && resp.mimetype) {
+        suffix += mimetypeToSuffix(resp.mimetype);
+      }
+      if (hasMultipleRequests && req?.mimetype) {
+        suffix += mimetypeToSuffix(req.mimetype);
+      }
+
+      const methodName = suffix ? `${baseName}${suffix}` : baseName;
+      const returnType = resp.content ? toJavaType(resp.content, typeNameMap) : "void";
+
+      variants.push({
+        baseName,
+        methodName,
+        method,
+        returnType,
+        responseMimetype: resp.mimetype,
+        requestBodyParam: req,
+      });
+    }
+  }
+
+  return variants;
 }
 
 /**
@@ -425,6 +511,7 @@ function generateJakartaClientSource(
   lines.push("import jakarta.ws.rs.core.MediaType;");
   lines.push("import jakarta.ws.rs.core.Response;");
   lines.push("");
+
   lines.push(`public class ${clientName} implements java.lang.AutoCloseable {`);
   lines.push("  private final WebTarget target;");
   lines.push("  private final Client client;");
@@ -442,103 +529,106 @@ function generateJakartaClientSource(
 
   for (const method of service.methods) {
     if (!isHttpMethod(method)) continue;
-    const http = method;
-    const methodName = toCamelCase(
-      http.address.methodName ??
-        http.operationId ??
-        `${http.address.method.toLowerCase()}_${http.address.path.replace(/[^a-zA-Z0-9]/g, "_")}`
-    );
-    const httpVerb = http.address.method.toUpperCase();
-    const returnType = resolveMethodReturnType(http, typeNameMap);
+    const variants = collectMethodVariants(method, typeNameMap);
 
-    const pathParams = (http.request.parameters ?? []).filter(
-      (p) => p.in === "path"
-    );
-    const queryParams = (http.request.parameters ?? []).filter(
-      (p) => p.in === "query"
-    );
-    const headerParams = (http.request.parameters ?? []).filter(
-      (p) => p.in === "header"
-    );
-    const bodyParam = http.request.body?.[0];
+    for (const v of variants) {
+      const http = v.method;
+      const methodName = v.methodName;
+      const httpVerb = http.address.method.toUpperCase();
+      const returnType = v.returnType;
 
-    const methodArgs: string[] = [];
-    for (const p of pathParams) {
-      methodArgs.push(`${toJavaType(p.type, typeNameMap)} ${toCamelCase(p.name)}`);
+      const pathParams = (http.request.parameters ?? []).filter(
+        (p) => p.in === "path"
+      );
+      const queryParams = (http.request.parameters ?? []).filter(
+        (p) => p.in === "query"
+      );
+      const headerParams = (http.request.parameters ?? []).filter(
+        (p) => p.in === "header"
+      );
+      const bodyParam = v.requestBodyParam;
+
+      const methodArgs: string[] = [];
+      for (const p of pathParams) {
+        methodArgs.push(`${toJavaType(p.type, typeNameMap)} ${toCamelCase(p.name)}`);
+      }
+      for (const p of queryParams) {
+        methodArgs.push(`${toJavaType(p.type, typeNameMap)} ${toCamelCase(p.name)}`);
+      }
+      for (const p of headerParams) {
+        methodArgs.push(`${toJavaType(p.type, typeNameMap)} ${toCamelCase(p.name)}`);
+      }
+      if (bodyParam) {
+        methodArgs.push(`${toJavaType(bodyParam.content, typeNameMap)} body`);
+      }
+
+      if (http.description || http.summary) {
+        lines.push("  /**");
+        if (http.summary) lines.push(`   * ${http.summary}`);
+        if (http.description) lines.push(`   * ${http.description}`);
+        if (v.responseMimetype) lines.push(`   * Accepts: ${v.responseMimetype}`);
+        lines.push("   */");
+      }
+
+      lines.push(`  public ${returnType} ${methodName}(${methodArgs.join(", ")}) {`);
+      lines.push(`    WebTarget resource = this.target.path(${JSON.stringify(http.address.path)});`);
+
+      for (const p of pathParams) {
+        const varName = toCamelCase(p.name);
+        lines.push(`    resource = resource.resolveTemplate("${p.name}", ${varName});`);
+      }
+
+      for (const p of queryParams) {
+        const varName = toCamelCase(p.name);
+        lines.push(`    if (${varName} != null) {`);
+        lines.push(`      resource = resource.queryParam("${p.name}", ${varName});`);
+        lines.push("    }");
+      }
+
+      const acceptMime = v.responseMimetype ?? "application/json";
+      lines.push(`    var builder = resource.request("${acceptMime}");`);
+
+      for (const p of headerParams) {
+        const varName = toCamelCase(p.name);
+        lines.push(`    if (${varName} != null) {`);
+        lines.push(`      builder = builder.header("${p.name}", ${varName});`);
+        lines.push("    }");
+      }
+
+      const isVoid = returnType === "void" || returnType === "Void";
+      const isGeneric = returnType.includes("<");
+      const genericTypeToken = isVoid
+        ? "Response.class"
+        : isGeneric
+          ? `new GenericType<${returnType}>() {}`
+          : `${returnType}.class`;
+
+      let invocation: string;
+      if (bodyParam) {
+        const contentType = bodyParam.mimetype ?? "application/json";
+        invocation = `builder.method("${httpVerb}", Entity.entity(body, "${contentType}"), ${genericTypeToken})`;
+      } else if (httpVerb === "GET") {
+        invocation = `builder.get(${genericTypeToken})`;
+      } else if (httpVerb === "POST") {
+        invocation = `builder.post(Entity.json(null), ${genericTypeToken})`;
+      } else if (httpVerb === "DELETE") {
+        invocation = `builder.delete(${genericTypeToken})`;
+      } else if (httpVerb === "PUT") {
+        invocation = `builder.put(Entity.json(null), ${genericTypeToken})`;
+      } else {
+        invocation = `builder.method("${httpVerb}", ${genericTypeToken})`;
+      }
+
+      if (isVoid) {
+        lines.push(`    try (Response response = ${invocation}) {`);
+        lines.push("      // no-op for void response");
+        lines.push("    }");
+      } else {
+        lines.push(`    return ${invocation};`);
+      }
+
+      lines.push("  }", "");
     }
-    for (const p of queryParams) {
-      methodArgs.push(`${toJavaType(p.type, typeNameMap)} ${toCamelCase(p.name)}`);
-    }
-    for (const p of headerParams) {
-      methodArgs.push(`${toJavaType(p.type, typeNameMap)} ${toCamelCase(p.name)}`);
-    }
-    if (bodyParam) {
-      methodArgs.push(`${toJavaType(bodyParam.content, typeNameMap)} body`);
-    }
-
-    if (http.description || http.summary) {
-      lines.push("  /**");
-      if (http.summary) lines.push(`   * ${http.summary}`);
-      if (http.description) lines.push(`   * ${http.description}`);
-      lines.push("   */");
-    }
-
-    lines.push(`  public ${returnType} ${methodName}(${methodArgs.join(", ")}) {`);
-    lines.push(`    WebTarget resource = this.target.path(${JSON.stringify(http.address.path)});`);
-
-    for (const p of pathParams) {
-      const varName = toCamelCase(p.name);
-      lines.push(`    resource = resource.resolveTemplate("${p.name}", ${varName});`);
-    }
-
-    for (const p of queryParams) {
-      const varName = toCamelCase(p.name);
-      lines.push(`    if (${varName} != null) {`);
-      lines.push(`      resource = resource.queryParam("${p.name}", ${varName});`);
-      lines.push("    }");
-    }
-
-    lines.push("    var builder = resource.request(MediaType.APPLICATION_JSON);");
-
-    for (const p of headerParams) {
-      const varName = toCamelCase(p.name);
-      lines.push(`    if (${varName} != null) {`);
-      lines.push(`      builder = builder.header("${p.name}", ${varName});`);
-      lines.push("    }");
-    }
-
-    const isVoid = returnType === "void" || returnType === "Void";
-    const isGeneric = returnType.includes("<");
-    const genericTypeToken = isVoid
-      ? "Response.class"
-      : isGeneric
-        ? `new GenericType<${returnType}>() {}`
-        : `${returnType}.class`;
-    let invocation: string;
-    if (bodyParam) {
-      const contentType = bodyParam.mimetype ?? "application/json";
-      invocation = `builder.method("${httpVerb}", Entity.entity(body, "${contentType}"), ${genericTypeToken})`;
-    } else if (httpVerb === "GET") {
-      invocation = `builder.get(${genericTypeToken})`;
-    } else if (httpVerb === "POST") {
-      invocation = `builder.post(Entity.json(null), ${genericTypeToken})`;
-    } else if (httpVerb === "DELETE") {
-      invocation = `builder.delete(${genericTypeToken})`;
-    } else if (httpVerb === "PUT") {
-      invocation = `builder.put(Entity.json(null), ${genericTypeToken})`;
-    } else {
-      invocation = `builder.method("${httpVerb}", ${genericTypeToken})`;
-    }
-
-    if (isVoid) {
-      lines.push(`    try (Response response = ${invocation}) {`);
-      lines.push("      // no-op for void response");
-      lines.push("    }");
-    } else {
-      lines.push(`    return ${invocation};`);
-    }
-
-    lines.push("  }", "");
   }
 
   lines.push("  @Override");
@@ -579,56 +669,58 @@ function generateMicroProfileClientSource(
 
   for (const method of service.methods) {
     if (!isHttpMethod(method)) continue;
-    const http = method;
-    const methodName = toCamelCase(
-      http.address.methodName ??
-        http.operationId ??
-        `${http.address.method.toLowerCase()}_${http.address.path.replace(/[^a-zA-Z0-9]/g, "_")}`
-    );
-    const httpVerb = http.address.method.toUpperCase();
-    const returnType = resolveMethodReturnType(http, typeNameMap);
+    const variants = collectMethodVariants(method, typeNameMap);
 
-    const pathParams = (http.request.parameters ?? []).filter(
-      (p) => p.in === "path"
-    );
-    const queryParams = (http.request.parameters ?? []).filter(
-      (p) => p.in === "query"
-    );
-    const headerParams = (http.request.parameters ?? []).filter(
-      (p) => p.in === "header"
-    );
-    const bodyParam = http.request.body?.[0];
+    for (const v of variants) {
+      const http = v.method;
+      const methodName = v.methodName;
+      const httpVerb = http.address.method.toUpperCase();
+      const returnType = v.returnType;
 
-    const methodParams: string[] = [];
-    for (const p of pathParams) {
-      methodParams.push(`@PathParam("${p.name}") ${toJavaType(p.type, typeNameMap)} ${toCamelCase(p.name)}`);
-    }
-    for (const p of queryParams) {
-      methodParams.push(`@QueryParam("${p.name}") ${toJavaType(p.type, typeNameMap)} ${toCamelCase(p.name)}`);
-    }
-    for (const p of headerParams) {
-      methodParams.push(`@HeaderParam("${p.name}") ${toJavaType(p.type, typeNameMap)} ${toCamelCase(p.name)}`);
-    }
-    if (bodyParam) {
-      methodParams.push(`${toJavaType(bodyParam.content, typeNameMap)} body`);
-    }
+      const pathParams = (http.request.parameters ?? []).filter(
+        (p) => p.in === "path"
+      );
+      const queryParams = (http.request.parameters ?? []).filter(
+        (p) => p.in === "query"
+      );
+      const headerParams = (http.request.parameters ?? []).filter(
+        (p) => p.in === "header"
+      );
+      const bodyParam = v.requestBodyParam;
 
-    if (http.description || http.summary) {
-      lines.push("  /**");
-      if (http.summary) lines.push(`   * ${http.summary}`);
-      if (http.description) lines.push(`   * ${http.description}`);
-      lines.push("   */");
-    }
+      const methodParams: string[] = [];
+      for (const p of pathParams) {
+        methodParams.push(`@PathParam("${p.name}") ${toJavaType(p.type, typeNameMap)} ${toCamelCase(p.name)}`);
+      }
+      for (const p of queryParams) {
+        methodParams.push(`@QueryParam("${p.name}") ${toJavaType(p.type, typeNameMap)} ${toCamelCase(p.name)}`);
+      }
+      for (const p of headerParams) {
+        methodParams.push(`@HeaderParam("${p.name}") ${toJavaType(p.type, typeNameMap)} ${toCamelCase(p.name)}`);
+      }
+      if (bodyParam) {
+        methodParams.push(`${toJavaType(bodyParam.content, typeNameMap)} body`);
+      }
 
-    lines.push(`  @${httpVerb}`);
-    lines.push(`  @Path(${JSON.stringify(http.address.path)})`);
-    lines.push("  @Produces(MediaType.APPLICATION_JSON)");
-    if (bodyParam) {
-      const contentType = bodyParam.mimetype ?? "application/json";
-      lines.push(`  @Consumes(${JSON.stringify(contentType)})`);
+      if (http.description || http.summary) {
+        lines.push("  /**");
+        if (http.summary) lines.push(`   * ${http.summary}`);
+        if (http.description) lines.push(`   * ${http.description}`);
+        if (v.responseMimetype) lines.push(`   * Produces: ${v.responseMimetype}`);
+        lines.push("   */");
+      }
+
+      const producesMime = v.responseMimetype ?? "application/json";
+      lines.push(`  @${httpVerb}`);
+      lines.push(`  @Path(${JSON.stringify(http.address.path)})`);
+      lines.push(`  @Produces(${JSON.stringify(producesMime)})`);
+      if (bodyParam) {
+        const contentType = bodyParam.mimetype ?? "application/json";
+        lines.push(`  @Consumes(${JSON.stringify(contentType)})`);
+      }
+      lines.push(`  ${returnType} ${methodName}(${methodParams.join(", ")});`);
+      lines.push("");
     }
-    lines.push(`  ${returnType} ${methodName}(${methodParams.join(", ")});`);
-    lines.push("");
   }
 
   lines.push("}");

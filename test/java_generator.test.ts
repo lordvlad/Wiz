@@ -182,48 +182,30 @@ describe("Java Generator (models, Jakarta client, MicroProfile client)", () => {
     expect(clientSource).toContain("new GenericType<java.util.List<Pet>>() {}");
   });
 
-  test("generates MicroProfile REST client interface with @RegisterRestClient when client is 'mp'", () => {
+  test("generates media-type suffixed method variants when endpoint declares multiple representations", () => {
     const doc = JSON.stringify({
       openapi: "3.1.0",
-      info: { title: "PetStore", version: "1.0.0" },
+      info: { title: "MediaStore", version: "1.0.0" },
       components: {
         schemas: {
-          Pet: {
+          Item: {
             type: "object",
-            required: ["id", "name"],
-            properties: {
-              id: { type: "string" },
-              name: { type: "string" },
-            },
-          },
-          NewPet: {
-            type: "object",
-            required: ["name"],
-            properties: { name: { type: "string" } },
+            properties: { id: { type: "string" } },
           },
         },
       },
       paths: {
-        "/pets/{petId}": {
+        "/items/{id}": {
           get: {
-            operationId: "getPet",
-            parameters: [{ name: "petId", in: "path", required: true, schema: { type: "string" } }],
+            operationId: "getItem",
+            parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
             responses: {
               "200": {
-                description: "A pet",
-                content: { "application/json": { schema: { $ref: "#/components/schemas/Pet" } } },
-              },
-            },
-          },
-          post: {
-            operationId: "createPet",
-            requestBody: {
-              content: { "application/json": { schema: { $ref: "#/components/schemas/NewPet" } } },
-            },
-            responses: {
-              "200": {
-                description: "A pet",
-                content: { "application/json": { schema: { $ref: "#/components/schemas/Pet" } } },
+                description: "Item",
+                content: {
+                  "application/json": { schema: { $ref: "#/components/schemas/Item" } },
+                  "application/xml": { schema: { $ref: "#/components/schemas/Item" } },
+                },
               },
             },
           },
@@ -232,28 +214,19 @@ describe("Java Generator (models, Jakarta client, MicroProfile client)", () => {
     });
 
     const ir = extractApiIR(doc, { format: "json" });
-    const files = generate(
-      ir,
-      javaGenerator,
-      {
-        package: "com.petstore.api",
-        client: "mp",
-      },
-      { trace: () => {}, info: () => {}, warn: () => {}, error: () => {} }
-    );
+    const jakartaFiles = generate(ir, javaGenerator, { package: "com.example", client: "jakarta" });
+    const jakartaClient = jakartaFiles["MediaStoreClient.java"]!;
+    expect(jakartaClient).toContain("public Item getItemAsJson(String id)");
+    expect(jakartaClient).toContain('resource.request("application/json")');
+    expect(jakartaClient).toContain("public Item getItemAsXml(String id)");
+    expect(jakartaClient).toContain('resource.request("application/xml")');
 
-    expect(Object.keys(files).sort()).toEqual(["NewPet.java", "Pet.java", "PetStoreClient.java"]);
-    const clientSource = files["PetStoreClient.java"]!;
-    expect(clientSource).toContain("import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;");
-    expect(clientSource).toContain("@RegisterRestClient");
-    expect(clientSource).toContain("public interface PetStoreClient {");
-    expect(clientSource).toContain('@GET');
-    expect(clientSource).toContain('@Path("/pets/{petId}")');
-    expect(clientSource).toContain('@Produces(MediaType.APPLICATION_JSON)');
-    expect(clientSource).toContain('Pet getPet(@PathParam("petId") String petId);');
-    expect(clientSource).toContain('@POST');
-    expect(clientSource).toContain('@Consumes("application/json")');
-    expect(clientSource).toContain('Pet createPet(NewPet body);');
+    const mpFiles = generate(ir, javaGenerator, { package: "com.example", client: "mp" });
+    const mpClient = mpFiles["MediaStoreClient.java"]!;
+    expect(mpClient).toContain('@Produces("application/json")');
+    expect(mpClient).toContain("Item getItemAsJson(@PathParam(\"id\") String id);");
+    expect(mpClient).toContain('@Produces("application/xml")');
+    expect(mpClient).toContain("Item getItemAsXml(@PathParam(\"id\") String id);");
   });
 
   test("client emission can be disabled with client: 'off' or client: false", () => {

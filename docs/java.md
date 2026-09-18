@@ -124,18 +124,47 @@ public record Dog(String name, Double barkVolume) implements Pet {}
 
 ## Client Operations & HTTP Behaviors
 
-### 1. Multiple Media Types (`Content-Type` / `Accept`)
-Endpoints declaring multiple request or response representations generate appropriate `@Consumes` and `@Produces` media types or overloaded methods:
-- Standard JSON endpoints use `MediaType.APPLICATION_JSON` (`application/json`).
-- Binary, multipart, and stream endpoints specify exact media types (e.g. `multipart/form-data`, `application/octet-stream`, `application/xml`).
+### 1. Multiple Media Types & Variant Method Naming
 
-In Jakarta REST clients, the request builder applies the exact target media type:
+When an OpenAPI operation declares multiple request or response content representations (e.g. `application/json` and `application/xml` under `responses.200.content`, or `multipart/form-data` vs `application/json` under `requestBody.content`), `wiz` generates distinct, type-safe method variants:
+
+#### Method Naming Convention
+- **Single Representation**: Uses the standard operation name (e.g. `getPetById(...)`, `uploadFile(...)`).
+- **Multiple Representations**: Appends a media-type suffix (`AsJson`, `AsXml`, `AsYaml`, `AsFormData`, `AsOctetStream`, `AsText`, etc.) to distinguish the variants:
+  - `getPetByIdAsJson(...)` — Requests `Accept: application/json`
+  - `getPetByIdAsXml(...)` — Requests `Accept: application/xml`
+
+#### Jakarta REST Client Implementation
+In Jakarta REST clients, the request builder applies the exact target `Accept` header and `Entity` content type:
 ```java
-// JSON payload
-builder.method("POST", Entity.entity(body, "application/json"), Pet.class);
+// JSON variant
+public Pet getPetByIdAsJson(String petId) {
+  WebTarget resource = this.target.path("/pets/{petId}").resolveTemplate("petId", petId);
+  return resource.request("application/json").get(Pet.class);
+}
 
-// Multipart payload
-builder.method("POST", Entity.entity(formData, "multipart/form-data"), Pet.class);
+// XML variant
+public Pet getPetByIdAsXml(String petId) {
+  WebTarget resource = this.target.path("/pets/{petId}").resolveTemplate("petId", petId);
+  return resource.request("application/xml").get(Pet.class);
+}
+```
+
+#### MicroProfile REST Client Implementation
+In MicroProfile REST client interfaces (`@RegisterRestClient`), separate method declarations are generated with their respective `@Produces` and `@Consumes` annotations:
+```java
+@RegisterRestClient
+public interface PetStoreClient {
+  @GET
+  @Path("/pets/{petId}")
+  @Produces("application/json")
+  Pet getPetByIdAsJson(@PathParam("petId") String petId);
+
+  @GET
+  @Path("/pets/{petId}")
+  @Produces("application/xml")
+  Pet getPetByIdAsXml(@PathParam("petId") String petId);
+}
 ```
 
 ### 2. Status Codes & Error Handling
