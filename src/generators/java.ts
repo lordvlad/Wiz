@@ -284,7 +284,15 @@ function generateClassSource(
     if (includeJackson) {
       lines.push("import lombok.extern.jackson.Jacksonized;");
     }
-    lines.push("");
+  }
+
+  if (includeJackson) {
+    lines.push("import com.fasterxml.jackson.annotation.JsonProperty;");
+    lines.push("import com.fasterxml.jackson.annotation.JsonInclude;");
+  }
+  lines.push("");
+
+  if (options.lombok) {
     lines.push("@Data");
     lines.push("@Builder");
     lines.push("@NoArgsConstructor");
@@ -296,13 +304,10 @@ function generateClassSource(
   }
 
   if (includeJackson) {
-    lines.push("import com.fasterxml.jackson.annotation.JsonProperty;");
-    lines.push("import com.fasterxml.jackson.annotation.JsonInclude;");
     lines.push("@JsonInclude(JsonInclude.Include.NON_NULL)");
   }
 
   lines.push(`public class ${className} {`);
-
   // Fields
   for (const prop of properties) {
     const fieldName = toCamelCase(prop.name);
