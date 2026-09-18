@@ -195,16 +195,20 @@ export function irToOpenApiSchema(
     case "tuple": {
       schema.type = "array";
       if (version === "3.1") {
-        schema.prefixItems = ir.elements.map((e) =>
-          irToOpenApiSchema(e.type, version, false)
-        );
+        if (ir.elements.length > 0) {
+          schema.prefixItems = ir.elements.map((e) =>
+            irToOpenApiSchema(e.type, version, false)
+          );
+        }
         if (ir.rest) {
           schema.items = irToOpenApiSchema(ir.rest, version, false);
         }
       } else {
-        schema.items = ir.elements.map((e) =>
-          irToOpenApiSchema(e.type, version, false)
-        );
+        if (ir.elements.length > 0) {
+          schema.items = ir.elements.map((e) =>
+            irToOpenApiSchema(e.type, version, false)
+          );
+        }
       }
       break;
     }
@@ -447,10 +451,15 @@ function typesReferencedBy(method: HttpServiceMethodIR): TypeIR[] {
   return referenced;
 }
 
+export interface OpenApiGeneratorOptions {
+  validate?: boolean;
+}
+
 export function generateOpenApiSchemaCode(
   types: Array<{ name: string; ir: TypeIR }>,
   version: "3.0" | "3.1",
-  service: ServiceIR = emptyService()
+  service: ServiceIR = emptyService(),
+  options: OpenApiGeneratorOptions = {}
 ): string {
   const schemasObj: Record<string, unknown> = {};
   const allNamedTypes = new Map<string, TypeIR>();
@@ -489,7 +498,9 @@ export function generateOpenApiSchemaCode(
     ...(version === "3.0" ? { paths: {} } : {}),
     components: { schemas: schemasObj }
   };
-  assertValidSpecDocumentSync(sampleDoc, "OpenAPI");
+  if (options.validate !== false) {
+    assertValidSpecDocumentSync(sampleDoc, "OpenAPI");
+  }
 
   const buildDocument = [
     `function buildDocument(baseSchema = {}) {`,

@@ -71,6 +71,24 @@ describe("JSON Schema Validator Utility for OpenAPI, OpenRPC, and AsyncAPI", () 
     expect(validateSpecDocumentSync(doc30).valid).toBe(true);
   });
 
+  test("validates JSON Schema Draft 2020-12 and Draft 07 documents", () => {
+    const schema2020 = {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      properties: { name: { type: "string" } },
+    };
+    expect(validateSpecDocumentSync(schema2020).valid).toBe(true);
+    expect(() => assertValidSpecDocumentSync(schema2020, "JSON Schema")).not.toThrow();
+
+    const schema07 = {
+      $schema: "http://json-schema.org/draft-07/schema#",
+      type: "object",
+      properties: { name: { type: "string" } },
+    };
+    expect(validateSpecDocumentSync(schema07).valid).toBe(true);
+    expect(() => assertValidSpecDocumentSync(schema07, "JSON Schema")).not.toThrow();
+  });
+
   test("rejects invalid document shapes with helpful errors", () => {
     const invalidDoc = {
       openapi: "3.0.0",
@@ -82,6 +100,44 @@ describe("JSON Schema Validator Utility for OpenAPI, OpenRPC, and AsyncAPI", () 
     expect(res.errors?.length).toBeGreaterThan(0);
     expect(() => assertValidSpecDocumentSync(invalidDoc, "OpenAPI")).toThrow(
       /Generated OpenAPI document is invalid/
+    );
+  });
+
+  test("rejects corrupt OpenAPI, OpenRPC, AsyncAPI and JSON Schema documents", () => {
+    // Invalid OpenAPI 3.0: missing response description / invalid paths structure
+    const corruptOpenApi = {
+      openapi: "3.0.3",
+      info: { title: "API", version: "1.0.0" },
+      paths: {
+        "/test": {
+          get: {
+            responses: {
+              "200": { description: 123 }, // description must be string
+            },
+          },
+        },
+      },
+    };
+    expect(validateSpecDocumentSync(corruptOpenApi).valid).toBe(false);
+    expect(() => assertValidSpecDocumentSync(corruptOpenApi, "OpenAPI")).toThrow(
+      /Generated OpenAPI document is invalid/
+    );
+
+    // Invalid JSON Schema: invalid type keyword value
+    const corruptJsonSchema = {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "not-a-valid-type",
+    };
+    expect(validateSpecDocumentSync(corruptJsonSchema).valid).toBe(false);
+    expect(() => assertValidSpecDocumentSync(corruptJsonSchema, "JSON Schema")).toThrow(
+      /Generated JSON Schema document is invalid/
+    );
+
+    // Unrecognised document
+    const unrecognisedDoc = { randomKey: "randomValue" };
+    expect(validateSpecDocumentSync(unrecognisedDoc).valid).toBe(false);
+    expect(() => assertValidSpecDocumentSync(unrecognisedDoc, "Unknown")).toThrow(
+      /Generated Unknown document is invalid: Unrecognised spec document/
     );
   });
 });

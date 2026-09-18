@@ -179,14 +179,20 @@ export function irToJsonSchema(
       const requiredItems = ir.elements.findIndex((element) => element.optional);
       if (requiredItems >= 0) schema.minItems = requiredItems;
       if (draft === "draft-2020-12") {
-        schema.prefixItems = ir.elements.map((e) => irToJsonSchema(e.type, draft));
+        if (ir.elements.length > 0) {
+          schema.prefixItems = ir.elements.map((e) => irToJsonSchema(e.type, draft));
+        }
         if (ir.rest) {
           schema.items = irToJsonSchema(ir.rest, draft);
         } else {
           schema.items = false;
         }
       } else {
-        schema.items = ir.elements.map((e) => irToJsonSchema(e.type, draft));
+        if (ir.elements.length > 0) {
+          schema.items = ir.elements.map((e) => irToJsonSchema(e.type, draft));
+        } else {
+          schema.items = false;
+        }
         if (ir.rest) {
           schema.additionalItems = irToJsonSchema(ir.rest, draft);
         } else {

@@ -17,7 +17,7 @@ import { evalModule } from "./helpers.ts";
 const TIMEOUT = 30_000;
 
 interface OpenApiDoc {
-  paths: Record<string, Record<string, unknown>>;
+  paths: Record<string, Record<string, { parameters?: Array<{ name: string; in: string }> }>>;
 }
 
 interface AsyncApiDoc {
@@ -375,7 +375,7 @@ describe("OpenAPI parameter slot parsing", () => {
         export const schema = openapiSchema<[FileService]>(${OPENAPI_BASE});
       `).openapiSchema();
 
-      const params = doc.paths["/file"]!.get.parameters as Array<{ name: string; in: string }>;
+      const params = doc.paths["/file"]?.get?.parameters ?? [];
       expect(params).toHaveLength(2);
       expect(params[0]!.name).toBe("path");
       expect(params[0]!.in).toBe("query");

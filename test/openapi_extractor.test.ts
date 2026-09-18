@@ -431,10 +431,16 @@ describe("individual schema mappings", () => {
     // OpenAPI 3.0 does not actually permit this shape, so it is checked on its
     // own rather than inside a document that has to validate.
     const items = [{ type: "string" }, { type: "number" }];
-    const { ir, regenerated } = regenerate(
-      wrap({ type: "array", items }, "3.0")
-    );
+    const rawDoc = wrap({ type: "array", items }, "3.0");
+    const ir = extractApiIR(JSON.stringify(rawDoc));
     expect(ir.types.get("X")).toMatchObject({ kind: "tuple" });
+    const types = [...ir.types].map(([name, typeIR]) => ({ name, ir: typeIR }));
+    const code = generateOpenApiSchemaCode(types, ir.version as "3.0" | "3.1", ir.service, { validate: false });
+    const regenerated = evalModule<{
+      openapiSchema: (base?: unknown) => Record<string, any>;
+    }>(code).openapiSchema({
+      info: (rawDoc as Record<string, any>).info,
+    });
     expect(regenerated.components.schemas.X).toEqual({
       type: "array",
       items,
