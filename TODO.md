@@ -14,7 +14,7 @@ deserves a decision rather than a paragraph.
 - [x] [The MCP generator builds a document it never validates](#the-mcp-generator-builds-a-document-it-never-validates)
 - [x] [`harvest.ts` reads TypeScript compiler internals](#harvestts-reads-typescript-compiler-internals)
 - [x] [MCP smuggles fields the IR does not declare](#mcp-smuggles-fields-the-ir-does-not-declare)
-- [ ] [`as any` where a narrowing guard already exists](#as-any-where-a-narrowing-guard-already-exists)
+- [x] [`as any` where a narrowing guard already exists](#as-any-where-a-narrowing-guard-already-exists)
 - [ ] [Generated react-query hooks launder their options through `any`](#generated-react-query-hooks-launder-their-options-through-any)
 - [ ] [`tsClient` degrades silently when a Bun global is absent](#tsclient-degrades-silently-when-a-bun-global-is-absent)
 - [ ] [The OpenRPC server and transports are untyped glue](#the-openrpc-server-and-transports-are-untyped-glue)

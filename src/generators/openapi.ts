@@ -340,7 +340,7 @@ function operationSource(
 
   const pkg = method.address.package;
   const svc = method.address.service;
-  const methodName = (method.address as any).methodName ?? (method.address as any).method;
+  const methodName = method.address.methodName ?? method.address.method;
   if (method.operationId ?? methodName) operation.operationId = method.operationId ?? methodName;
   if (pkg) operation["x-package"] = pkg;
   if (svc) {

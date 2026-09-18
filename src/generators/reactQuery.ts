@@ -75,8 +75,8 @@ function emitReactQueryFiles(
     const httpMethod = isHttp ? method.address.method.toUpperCase() : "POST";
     const pathTemplate = isHttp
       ? method.address.path
-      : (method.address as any).service
-        ? `${(method.address as any).service}/${(method.address as any).method}`
+      : "service" in method.address && method.address.service && "method" in method.address && method.address.method
+        ? `${method.address.service}/${method.address.method}`
         : "call";
 
     const isQuery = isHttp && ["GET", "HEAD", "OPTIONS"].includes(httpMethod);
