@@ -260,12 +260,19 @@ function normalizeMediaTypes(mediaTypes?: string[] | "all"): Set<string> | "all"
 
 function isMimetypeSupported(mimetype: string, mediaTypes?: string[] | "all"): boolean {
   const norm = mimetype.toLowerCase().trim();
-
-  // JSON is always supported
+  // JSON, multipart/form-data, and application/x-www-form-urlencoded are always supported
   if (norm === "application/json" || norm.endsWith("+json") || norm === "json") {
     return true;
   }
-
+  if (norm.includes("multipart/form-data") || norm.includes("form-data")) {
+    return true;
+  }
+  if (norm.includes("application/x-www-form-urlencoded") || norm.includes("x-www-form-urlencoded") || norm.includes("urlencoded")) {
+    return true;
+  }
+  if (norm.includes("application/octet-stream") || norm.includes("octet-stream")) {
+    return true;
+  }
   const enabled = normalizeMediaTypes(mediaTypes);
   const isAll = enabled === "all";
   const has = (key: string) => isAll || (enabled instanceof Set && enabled.has(key));
@@ -335,6 +342,15 @@ function selectBody(
 
 function bodySerializer(mimetype: string, access: string, encode?: string): string {
   const norm = mimetype.toLowerCase().trim();
+  if (norm.includes("multipart/form-data") || norm.includes("form-data")) {
+    return `serializeFormData(${access}.body)`;
+  }
+  if (norm.includes("application/x-www-form-urlencoded") || norm.includes("x-www-form-urlencoded") || norm.includes("urlencoded")) {
+    return `serializeUrlEncoded(${access}.body)`;
+  }
+  if (norm.includes("application/octet-stream") || norm.includes("octet-stream")) {
+    return `${access}.body`;
+  }
   if (norm.includes("jsonl") || norm.includes("json-lines") || norm.includes("x-jsonlines")) {
     return `(${access}.body).map((row: any) => JSON.stringify(row)).join("\\n")`;
   }
@@ -364,7 +380,6 @@ function bodySerializer(mimetype: string, access: string, encode?: string): stri
   }
   return encode ? `${encode}(${access}.body)` : `JSON.stringify(${access}.body)`;
 }
-
 function jsonBody(
   bodies: ServiceMethodBodyIR[] | undefined,
   options: TsClientOptions,
@@ -1399,13 +1414,58 @@ function queryString(
   return text ? \`?\${text}\` : "";
 }
 
+function serializeFormData(body: unknown): FormData {
+  if (body instanceof FormData) return body;
+  const form = new FormData();
+  if (typeof body === "object" && body !== null) {
+    for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
+      if (value === undefined || value === null) continue;
+      if (value instanceof Blob || (typeof File !== "undefined" && value instanceof File)) {
+        form.append(key, value);
+      } else if (Array.isArray(value)) {
+        for (const item of value) {
+          if (item instanceof Blob || (typeof File !== "undefined" && item instanceof File)) {
+            form.append(key, item);
+          } else {
+            form.append(key, String(item));
+          }
+        }
+      } else {
+        form.append(key, String(value));
+      }
+    }
+  }
+  return form;
+}
+
+function serializeUrlEncoded(body: unknown): string {
+  if (typeof body === "string") return body;
+  const search = new URLSearchParams();
+  if (typeof body === "object" && body !== null) {
+    for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
+      if (value === undefined || value === null) continue;
+      if (Array.isArray(value)) {
+        for (const item of value) search.append(key, String(item));
+      } else {
+        search.append(key, String(value));
+      }
+    }
+  }
+  return search.toString();
+}
+
 function headerRecord(
   headers: Record<string, unknown> | undefined,
   cookie: Record<string, unknown> | undefined,
   contentType: string | undefined
 ): Record<string, string> {
   const record: Record<string, string> = {};
-  if (contentType) record["content-type"] = contentType;
+  // When sending multipart/form-data via fetch with a FormData body, the browser/runtime
+  // sets Content-Type along with the multipart boundary. Explicitly setting content-type
+  // without boundary breaks multipart parsing.
+  if (contentType && !contentType.toLowerCase().includes("multipart/form-data")) {
+    record["content-type"] = contentType;
+  }
 
   for (const [key, value] of Object.entries(headers ?? {})) {
     if (value === undefined || value === null) continue;

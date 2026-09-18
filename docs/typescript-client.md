@@ -774,13 +774,9 @@ protobuf entry name or a wire format.
 
 ## Limitations
 
-**JSON only.** `jsonBody` picks `application/json` and warns for everything
-else: `[wiz] application/xml payloads are not emitted; the client speaks
-application/json`. Multipart, form-encoded, octet-stream and XML operations
-still emit — with the JSON schema if there is one, otherwise the first body
-listed — but nothing encodes those media types. A file upload needs a
-hand-written call.
-
+**Supported Request Bodies.** `application/json` (and `+json` formats), `multipart/form-data`,
+`application/x-www-form-urlencoded`, and `application/octet-stream` are supported out of the box.
+Pass [`mediaTypes`](#custom-media-types) to enable additional formats like YAML, XML, HTML, CBOR, or Erlang.
 **No validation by default.** The response is cast, not checked:
 `(await send(…)) as Pet`, so a server that returns something else produces a
 value that lies about its type. Pass

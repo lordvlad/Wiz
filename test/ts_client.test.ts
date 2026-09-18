@@ -900,3 +900,93 @@ describe("parameter serialization styles (style and explode)", () => {
     expect(clientFiles["api.ts"]).toContain("serializeParam");
   });
 });
+
+describe("multipart/form-data and application/x-www-form-urlencoded request body serialization", () => {
+  test("emits client with FormData serializer for multipart request bodies", async () => {
+    const doc = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "UploadApi", version: "1.0.0" },
+      components: {
+        schemas: {
+          UploadRequest: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              file: { type: "string", format: "binary" },
+            },
+          },
+        },
+      },
+      paths: {
+        "/upload": {
+          post: {
+            operationId: "uploadFile",
+            requestBody: {
+              required: true,
+              content: {
+                "multipart/form-data": {
+                  schema: { $ref: "#/components/schemas/UploadRequest" },
+                },
+              },
+            },
+            responses: {
+              "200": {
+                description: "ok",
+                content: { "application/json": { schema: { type: "string" } } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const ir = extractApiIR(doc, { format: "json" });
+    const clientFiles = generate(ir, tsClientGenerator, {}, silentLogger);
+    expect(clientFiles["api.ts"]).toContain("serializeFormData(options.body)");
+    expect(clientFiles["api.ts"]).toContain("function serializeFormData");
+  });
+
+  test("emits client with urlencoded serializer for form urlencoded request bodies", async () => {
+    const doc = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "FormApi", version: "1.0.0" },
+      components: {
+        schemas: {
+          FormRequest: {
+            type: "object",
+            properties: {
+              username: { type: "string" },
+              password: { type: "string" },
+            },
+          },
+        },
+      },
+      paths: {
+        "/login": {
+          post: {
+            operationId: "login",
+            requestBody: {
+              required: true,
+              content: {
+                "application/x-www-form-urlencoded": {
+                  schema: { $ref: "#/components/schemas/FormRequest" },
+                },
+              },
+            },
+            responses: {
+              "200": {
+                description: "ok",
+                content: { "application/json": { schema: { type: "string" } } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const ir = extractApiIR(doc, { format: "json" });
+    const clientFiles = generate(ir, tsClientGenerator, {}, silentLogger);
+    expect(clientFiles["api.ts"]).toContain("serializeUrlEncoded(options.body)");
+    expect(clientFiles["api.ts"]).toContain("function serializeUrlEncoded");
+  });
+});
