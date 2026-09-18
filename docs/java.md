@@ -1,25 +1,26 @@
-# Java Model Generator
+# Java Code Generator
 
-`wiz` provides a Java model code generator that emits Java Record or POJO class definitions from OpenAPI, AsyncAPI, and JSON Schema models.
+`wiz` provides a Java code generator that emits Java Records/POJOs and Jakarta REST client classes from OpenAPI, AsyncAPI, and JSON Schema definitions.
 
 ## Usage
 
 Via CLI:
 ```bash
-wiz generate -g java openapi.json -o ./src/main/java/com/example/model
+wiz generate -g java openapi.json -o ./src/main/java/com/example
 ```
 
 Programmatic:
 ```ts
-import { generateJavaModels, javaGenerator } from "wiz";
+import { generateJavaFiles, javaGenerator } from "wiz";
 import { generate } from "wiz";
 
-const files = generateJavaModels(types, {
-  style: "record", // "record" (default) | "pojo"
-  package: "com.example.model",
-  jackson: true,   // default: true
-  validation: true, // default: true (Jakarta validation)
-  lombok: true,    // default: false (when true on POJOs, skips explicit getters/setters/constructors)
+const files = generate(apiIR, javaGenerator, {
+  style: "record",       // "record" (default) | "pojo"
+  package: "com.example",
+  jackson: true,         // default: true
+  validation: true,      // default: true (Jakarta validation annotations)
+  lombok: false,         // default: false (when true on POJOs, omits explicit getters/setters/constructors)
+  client: "jakarta",     // "jakarta" (default) | "off" | false
 });
 ```
 
@@ -32,7 +33,16 @@ const files = generateJavaModels(types, {
 | `jackson` | `boolean` | `true` | Emits `@JsonProperty`, `@JsonInclude`, `@JsonValue`, `@JsonCreator` annotations. |
 | `validation` | `boolean` | `true` | Emits `@jakarta.validation.constraints.*` (`@NotNull`, `@Size`, `@Min`, `@Max`, `@Pattern`, etc.). |
 | `lombok` | `boolean` | `false` | Emits `@Data`, `@Builder`, `@NoArgsConstructor`, `@AllArgsConstructor`, `@Jacksonized` on POJOs and omits hand-written getters/setters. |
+| `client` | `"jakarta"` \| `"off"` \| `false` | `"jakarta"` | Generates a Jakarta REST client (`jakarta.ws.rs.client.*`) implementing `AutoCloseable`. |
+| `clientName` | `string` | `undefined` | Custom client class name override (defaults to `<ServiceName>Client` or `ApiClient`). |
 
-## Notes & Verification Status
+## Jakarta REST Client
 
-> **Note**: The Java generator currently performs code emission and shallow structural assertions. Generated Java code is not compiled or runtime-tested against the Java compiler / JVM in this test suite.
+When `client: "jakarta"` (default) is enabled on an API document containing HTTP operations, a typed client class is emitted implementing `AutoCloseable`:
+- Uses standard Jakarta REST Client APIs (`jakarta.ws.rs.client.Client`, `ClientBuilder`, `WebTarget`, `Entity`, `GenericType`).
+- Automatically resolves path templates, query parameters, headers, and request bodies.
+- Handles generic return types (such as `java.util.List<Pet>`) using `new GenericType<...>() {}`.
+
+## Verification Status
+
+> **Note**: Test suite runs structural/emission unit tests in Bun. One-off compilation and execution has been verified with Java 25 (`javac` and `java` 25.0.4) against standard Jackson, Jakarta Validation, and Jakarta WS-RS client libraries.

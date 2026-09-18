@@ -1,6 +1,7 @@
 import type { Generator, GeneratorContext, GeneratedFiles } from "./generator.ts";
 import type { ApiIR } from "../ir/api.ts";
 import type { TypeIR, PropertyIR, EnumMemberIR, Constraint } from "../ir/types.ts";
+import { isHttpMethod, type HttpServiceMethodIR, type ServiceIR, type HttpResponseIR } from "../ir/service.ts";
 
 export interface JavaGeneratorOptions {
   /**
@@ -26,6 +27,14 @@ export interface JavaGeneratorOptions {
    * When enabled on POJOs, explicit getters/setters/constructors are omitted in favor of Lombok annotations.
    */
   lombok?: boolean;
+  /**
+   * HTTP Client generator option: "jakarta" (default) or "off" / false.
+   */
+  client?: "jakarta" | "off" | false;
+  /**
+   * Custom client class name override (defaults to `<ServiceName>Client` or `ApiClient`).
+   */
+  clientName?: string;
 }
 
 /**
@@ -42,15 +51,17 @@ function sanitizeIdentifier(name: string): string {
  */
 function toPascalCase(name: string): string {
   const clean = sanitizeIdentifier(name);
-  return clean
-    .split("_")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join("") || "Model";
+  return (
+    clean
+      .split("_")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join("") || "Model"
+  );
 }
 
 /**
- * Converts a string to camelCase for Java field names.
+ * Converts a string to camelCase for Java field/method names.
  */
 function toCamelCase(name: string): string {
   const pascal = toPascalCase(name);
@@ -140,10 +151,14 @@ function getValidationAnnotations(prop: PropertyIR): string[] {
         annotations.push(`@jakarta.validation.constraints.Max(${c.value})`);
         break;
       case "exclusiveMinimum":
-        annotations.push(`@jakarta.validation.constraints.DecimalMin(value = "${c.value}", inclusive = false)`);
+        annotations.push(
+          `@jakarta.validation.constraints.DecimalMin(value = "${c.value}", inclusive = false)`
+        );
         break;
       case "exclusiveMaximum":
-        annotations.push(`@jakarta.validation.constraints.DecimalMax(value = "${c.value}", inclusive = false)`);
+        annotations.push(
+          `@jakarta.validation.constraints.DecimalMax(value = "${c.value}", inclusive = false)`
+        );
         break;
       case "minLength":
       case "minItems":
@@ -154,7 +169,9 @@ function getValidationAnnotations(prop: PropertyIR): string[] {
         annotations.push(`@jakarta.validation.constraints.Size(max = ${c.value})`);
         break;
       case "pattern":
-        annotations.push(`@jakarta.validation.constraints.Pattern(regexp = ${JSON.stringify(String(c.value))})`);
+        annotations.push(
+          `@jakarta.validation.constraints.Pattern(regexp = ${JSON.stringify(String(c.value))})`
+        );
         break;
     }
   }
@@ -185,7 +202,8 @@ function generateEnumSource(
 
   const memberEntries = members.map((m) => {
     const enumId = sanitizeIdentifier(String(m.name)).toUpperCase();
-    const valLit = typeof m.value === "string" ? JSON.stringify(m.value) : String(m.value);
+    const valLit =
+      typeof m.value === "string" ? JSON.stringify(m.value) : String(m.value);
     return `  ${enumId}(${valLit})`;
   });
 
@@ -210,7 +228,9 @@ function generateEnumSource(
     lines.push("        return b;");
     lines.push("      }");
     lines.push("    }");
-    lines.push(`    throw new IllegalArgumentException("Unexpected value '" + value + "'");`);
+    lines.push(
+      `    throw new IllegalArgumentException("Unexpected value '" + value + "'");`
+    );
     lines.push("  }");
   }
 
@@ -237,7 +257,6 @@ function generateClassSource(
   }
 
   if (ir.kind !== "object") {
-    // Wrapper class or type alias
     lines.push(`public class ${className} {`);
     lines.push("}");
     return lines.join("\n");
@@ -250,6 +269,9 @@ function generateClassSource(
     if (includeJackson) {
       lines.push("import com.fasterxml.jackson.annotation.JsonProperty;");
       lines.push("import com.fasterxml.jackson.annotation.JsonInclude;");
+    }
+    lines.push("");
+    if (includeJackson) {
       lines.push("@JsonInclude(JsonInclude.Include.NON_NULL)");
     }
 
@@ -298,7 +320,6 @@ function generateClassSource(
     lines.push("@NoArgsConstructor");
     lines.push("@AllArgsConstructor");
     if (includeJackson) {
-      // @Jacksonized configures Lombok's @Builder to work seamlessly with Jackson deserialization
       lines.push("@Jacksonized");
     }
   }
@@ -308,6 +329,7 @@ function generateClassSource(
   }
 
   lines.push(`public class ${className} {`);
+
   // Fields
   for (const prop of properties) {
     const fieldName = toCamelCase(prop.name);
@@ -327,13 +349,14 @@ function generateClassSource(
 
   // When Lombok is NOT used, generate explicit constructors, getters, and setters
   if (!options.lombok) {
-    // Default constructor
     lines.push(`  public ${className}() {}`, "");
 
-    // All-args constructor
     if (properties.length > 0) {
       const ctorParams = properties
-        .map((prop) => `${toJavaType(prop.type, typeNameMap)} ${toCamelCase(prop.name)}`)
+        .map(
+          (prop) =>
+            `${toJavaType(prop.type, typeNameMap)} ${toCamelCase(prop.name)}`
+        )
         .join(", ");
       lines.push(`  public ${className}(${ctorParams}) {`);
       for (const prop of properties) {
@@ -343,7 +366,6 @@ function generateClassSource(
       lines.push("  }", "");
     }
 
-    // Getters and Setters
     for (const prop of properties) {
       const fieldName = toCamelCase(prop.name);
       const fieldType = toJavaType(prop.type, typeNameMap);
@@ -364,10 +386,178 @@ function generateClassSource(
 }
 
 /**
- * Generate Java model files from intermediate representations.
+ * Extracts return type for an HTTP method.
  */
-export function generateJavaModels(
+function resolveMethodReturnType(
+  method: HttpServiceMethodIR,
+  typeNameMap: Map<string, string>
+): string {
+  const isSuccess = (r: HttpResponseIR) =>
+    typeof r.status === "number" && r.status >= 200 && r.status < 300;
+  const chosen = method.responses.filter(isSuccess)[0] ?? method.responses[0];
+  const bodyContent = chosen?.body?.[0]?.content;
+  if (!bodyContent) return "void";
+  return toJavaType(bodyContent, typeNameMap);
+}
+
+/**
+ * Emits Jakarta REST Client class.
+ */
+function generateJakartaClientSource(
+  service: ServiceIR,
+  options: JavaGeneratorOptions,
+  typeNameMap: Map<string, string>
+): string {
+  const clientName =
+    options.clientName ??
+    (service.name ? `${toPascalCase(service.name)}Client` : "ApiClient");
+  const lines: string[] = [];
+
+  if (options.package) {
+    lines.push(`package ${options.package};`, "");
+  }
+
+  lines.push("import jakarta.ws.rs.client.Client;");
+  lines.push("import jakarta.ws.rs.client.ClientBuilder;");
+  lines.push("import jakarta.ws.rs.client.Entity;");
+  lines.push("import jakarta.ws.rs.client.WebTarget;");
+  lines.push("import jakarta.ws.rs.core.GenericType;");
+  lines.push("import jakarta.ws.rs.core.MediaType;");
+  lines.push("import jakarta.ws.rs.core.Response;");
+  lines.push("");
+  lines.push(`public class ${clientName} implements java.lang.AutoCloseable {`);
+  lines.push("  private final WebTarget target;");
+  lines.push("  private final Client client;");
+  lines.push("");
+  lines.push(`  public ${clientName}(String baseUrl) {`);
+  lines.push("    this.client = ClientBuilder.newClient();");
+  lines.push("    this.target = this.client.target(baseUrl);");
+  lines.push("  }");
+  lines.push("");
+  lines.push(`  public ${clientName}(WebTarget target) {`);
+  lines.push("    this.client = null;");
+  lines.push("    this.target = target;");
+  lines.push("  }");
+  lines.push("");
+
+  for (const method of service.methods) {
+    if (!isHttpMethod(method)) continue;
+    const http = method;
+    const methodName = toCamelCase(
+      http.address.methodName ??
+        http.operationId ??
+        `${http.address.method.toLowerCase()}_${http.address.path.replace(/[^a-zA-Z0-9]/g, "_")}`
+    );
+    const httpVerb = http.address.method.toUpperCase();
+    const returnType = resolveMethodReturnType(http, typeNameMap);
+
+    const pathParams = (http.request.parameters ?? []).filter(
+      (p) => p.in === "path"
+    );
+    const queryParams = (http.request.parameters ?? []).filter(
+      (p) => p.in === "query"
+    );
+    const headerParams = (http.request.parameters ?? []).filter(
+      (p) => p.in === "header"
+    );
+    const bodyParam = http.request.body?.[0];
+
+    const methodArgs: string[] = [];
+    for (const p of pathParams) {
+      methodArgs.push(`${toJavaType(p.type, typeNameMap)} ${toCamelCase(p.name)}`);
+    }
+    for (const p of queryParams) {
+      methodArgs.push(`${toJavaType(p.type, typeNameMap)} ${toCamelCase(p.name)}`);
+    }
+    for (const p of headerParams) {
+      methodArgs.push(`${toJavaType(p.type, typeNameMap)} ${toCamelCase(p.name)}`);
+    }
+    if (bodyParam) {
+      methodArgs.push(`${toJavaType(bodyParam.content, typeNameMap)} body`);
+    }
+
+    if (http.description || http.summary) {
+      lines.push("  /**");
+      if (http.summary) lines.push(`   * ${http.summary}`);
+      if (http.description) lines.push(`   * ${http.description}`);
+      lines.push("   */");
+    }
+
+    lines.push(`  public ${returnType} ${methodName}(${methodArgs.join(", ")}) {`);
+    lines.push(`    WebTarget resource = this.target.path(${JSON.stringify(http.address.path)});`);
+
+    for (const p of pathParams) {
+      const varName = toCamelCase(p.name);
+      lines.push(`    resource = resource.resolveTemplate("${p.name}", ${varName});`);
+    }
+
+    for (const p of queryParams) {
+      const varName = toCamelCase(p.name);
+      lines.push(`    if (${varName} != null) {`);
+      lines.push(`      resource = resource.queryParam("${p.name}", ${varName});`);
+      lines.push("    }");
+    }
+
+    lines.push("    var builder = resource.request(MediaType.APPLICATION_JSON);");
+
+    for (const p of headerParams) {
+      const varName = toCamelCase(p.name);
+      lines.push(`    if (${varName} != null) {`);
+      lines.push(`      builder = builder.header("${p.name}", ${varName});`);
+      lines.push("    }");
+    }
+
+    const isVoid = returnType === "void" || returnType === "Void";
+    const isGeneric = returnType.includes("<");
+    const genericTypeToken = isVoid
+      ? "Response.class"
+      : isGeneric
+        ? `new GenericType<${returnType}>() {}`
+        : `${returnType}.class`;
+    let invocation: string;
+    if (bodyParam) {
+      const contentType = bodyParam.mimetype ?? "application/json";
+      invocation = `builder.method("${httpVerb}", Entity.entity(body, "${contentType}"), ${genericTypeToken})`;
+    } else if (httpVerb === "GET") {
+      invocation = `builder.get(${genericTypeToken})`;
+    } else if (httpVerb === "POST") {
+      invocation = `builder.post(Entity.json(null), ${genericTypeToken})`;
+    } else if (httpVerb === "DELETE") {
+      invocation = `builder.delete(${genericTypeToken})`;
+    } else if (httpVerb === "PUT") {
+      invocation = `builder.put(Entity.json(null), ${genericTypeToken})`;
+    } else {
+      invocation = `builder.method("${httpVerb}", ${genericTypeToken})`;
+    }
+
+    if (isVoid) {
+      lines.push(`    try (Response response = ${invocation}) {`);
+      lines.push("      // no-op for void response");
+      lines.push("    }");
+    } else {
+      lines.push(`    return ${invocation};`);
+    }
+
+    lines.push("  }", "");
+  }
+
+  lines.push("  @Override");
+  lines.push("  public void close() {");
+  lines.push("    if (this.client != null) {");
+  lines.push("      this.client.close();");
+  lines.push("    }");
+  lines.push("  }");
+  lines.push("}");
+
+  return lines.join("\n");
+}
+
+/**
+ * Generate Java model and client files from intermediate representations.
+ */
+export function generateJavaFiles(
   types: Iterable<readonly [string, TypeIR]>,
+  service?: ServiceIR,
   options: JavaGeneratorOptions = {}
 ): GeneratedFiles {
   const files: GeneratedFiles = {};
@@ -388,18 +578,41 @@ export function generateJavaModels(
     }
   }
 
+  const isClientEnabled = options.client !== "off" && options.client !== false;
+  if (isClientEnabled && service && service.methods.length > 0) {
+    const clientName =
+      options.clientName ??
+      (service.name ? `${toPascalCase(service.name)}Client` : "ApiClient");
+    files[`${clientName}.java`] = generateJakartaClientSource(
+      service,
+      options,
+      typeNameMap
+    );
+  }
+
   return files;
 }
 
+export function generateJavaModels(
+  types: Iterable<readonly [string, TypeIR]>,
+  options: JavaGeneratorOptions = {}
+): GeneratedFiles {
+  return generateJavaFiles(types, undefined, options);
+}
+
 export const javaGenerator: Generator<JavaGeneratorOptions> = {
-  name: "java-models",
+  name: "java",
 
   api(ir: ApiIR, context: GeneratorContext<JavaGeneratorOptions>): GeneratedFiles {
-    return generateJavaModels(ir.types, context.options);
+    return generateJavaFiles(ir.types, ir.service, context.options);
+  },
+
+  service(ir: ServiceIR, context: GeneratorContext<JavaGeneratorOptions>): GeneratedFiles {
+    return generateJavaFiles([], ir, context.options);
   },
 
   type(ir: TypeIR, context: GeneratorContext<JavaGeneratorOptions>): GeneratedFiles {
     const name = ir.name ?? "Model";
-    return generateJavaModels([[name, ir]], context.options);
+    return generateJavaFiles([[name, ir]], undefined, context.options);
   },
 };

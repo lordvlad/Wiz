@@ -1,11 +1,11 @@
 // @wiz-ignore
 import { describe, expect, test } from "bun:test";
-import { generateJavaModels, javaGenerator } from "../src/generators/java.ts";
+import { generateJavaFiles, generateJavaModels, javaGenerator } from "../src/generators/java.ts";
 import { generate } from "../src/generators/generator.ts";
 import { extractApiIR } from "../src/extractors/openapi.ts";
 import type { TypeIR } from "../src/ir/types.ts";
 
-describe("Java Model Generator (shallow tests)", () => {
+describe("Java Generator (models and Jakarta client)", () => {
   const userIR: TypeIR = {
     id: "User",
     name: "User",
@@ -132,7 +132,7 @@ describe("Java Model Generator (shallow tests)", () => {
     expect(source).not.toContain("@jakarta.validation");
   });
 
-  test("works with generator.ts api() and extractApiIR", () => {
+  test("generates Jakarta REST client by default when generating from ApiIR", () => {
     const doc = JSON.stringify({
       openapi: "3.1.0",
       info: { title: "PetStore", version: "1.0.0" },
@@ -148,7 +148,19 @@ describe("Java Model Generator (shallow tests)", () => {
           },
         },
       },
-      paths: {},
+      paths: {
+        "/pets": {
+          get: {
+            operationId: "listPets",
+            responses: {
+              "200": {
+                description: "List of pets",
+                content: { "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/Pet" } } } },
+              },
+            },
+          },
+        },
+      },
     });
 
     const ir = extractApiIR(doc, { format: "json" });
@@ -156,14 +168,53 @@ describe("Java Model Generator (shallow tests)", () => {
       ir,
       javaGenerator,
       {
-        style: "record",
-        package: "com.petstore.model",
+        package: "com.petstore.api",
+      },
+      { trace: () => {}, info: () => {}, warn: () => {}, error: () => {} }
+    );
+
+    expect(Object.keys(files).sort()).toEqual(["Pet.java", "PetStoreClient.java"]);
+    const clientSource = files["PetStoreClient.java"]!;
+    expect(clientSource).toContain("package com.petstore.api;");
+    expect(clientSource).toContain("public class PetStoreClient implements java.lang.AutoCloseable");
+    expect(clientSource).toContain("import jakarta.ws.rs.client.ClientBuilder;");
+    expect(clientSource).toContain("public java.util.List<Pet> listPets(");
+    expect(clientSource).toContain("new GenericType<java.util.List<Pet>>() {}");
+  });
+
+  test("client emission can be disabled with client: 'off' or client: false", () => {
+    const doc = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "PetStore", version: "1.0.0" },
+      components: {
+        schemas: {
+          Pet: {
+            type: "object",
+            properties: { id: { type: "string" } },
+          },
+        },
+      },
+      paths: {
+        "/pets": {
+          get: {
+            operationId: "listPets",
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    });
+
+    const ir = extractApiIR(doc, { format: "json" });
+    const files = generate(
+      ir,
+      javaGenerator,
+      {
+        package: "com.petstore.api",
+        client: "off",
       },
       { trace: () => {}, info: () => {}, warn: () => {}, error: () => {} }
     );
 
     expect(Object.keys(files)).toEqual(["Pet.java"]);
-    expect(files["Pet.java"]).toContain("package com.petstore.model;");
-    expect(files["Pet.java"]).toContain("public record Pet(");
   });
 });
