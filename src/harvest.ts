@@ -22,6 +22,10 @@ import {
 import { silentLogger, type WizLogger } from "./logger.ts";
 import { flattenObjectProperties, isUserNamedType, type TypeIR } from "./types.ts";
 
+import {
+  getSourceFileInternalSymbol,
+  getSignatureSymbol,
+} from "./tsInternal.ts";
 /**
  * Reading declarations out of source: the operations a spec macro's type
  * arguments describe, and the merged document `openapiDocument()` is replaced
@@ -533,9 +537,7 @@ function resolveTypeByName(
     if (sym) break;
   }
   if (!sym && sourceFile) {
-    sym =
-      (sourceFile as any).locals?.get(typeName) ??
-      (sourceFile as any).symbol?.exports?.get(typeName as any);
+    sym = getSourceFileInternalSymbol(sourceFile, typeName);
   }
   if (!sym) return undefined;
 
@@ -590,7 +592,7 @@ export function harvestOpenApiOperationsFromTypeArgs(
     const signatures = elemType.getCallSignatures();
     if (signatures.length > 0) {
       const sig = signatures[0]!;
-      const sym = elemType.aliasSymbol ?? elemType.symbol ?? (sig.declaration as any)?.symbol;
+      const sym = elemType.aliasSymbol ?? elemType.symbol ?? getSignatureSymbol(sig, checker);
       const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
       const method = parseOpenApiMethodFromSignature(sig, sym, jsDoc, checker, undefined, undefined, undefined, sourceFile);
       if (method) methods.push(method);
@@ -938,7 +940,7 @@ export function harvestAsyncApiOperationsFromTypeArgs(
     const signatures = elemType.getCallSignatures();
     if (signatures.length > 0) {
       const sig = signatures[0]!;
-      const sym = elemType.aliasSymbol ?? elemType.symbol ?? (sig.declaration as any)?.symbol;
+      const sym = elemType.aliasSymbol ?? elemType.symbol ?? getSignatureSymbol(sig, checker);
       const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
       const method = parseAsyncApiMethodFromSignature(sig, sym, jsDoc, checker, undefined, undefined);
       if (method) methods.push(method);
@@ -1091,7 +1093,7 @@ export function harvestOpenRpcOperationsFromTypeArgs(
       const sym =
         elemType.aliasSymbol ??
         elemType.symbol ??
-        (sig.declaration as any)?.symbol;
+        getSignatureSymbol(sig, checker);
       const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
       const rpcTag = jsDoc?.meta?.["rpc"] ?? jsDoc?.meta?.["RPC"];
       if (!rpcTag) {
@@ -1295,7 +1297,7 @@ export function harvestMcpOperationsFromTypeArgs(
       const sym =
         elemType.aliasSymbol ??
         elemType.symbol ??
-        (sig.declaration as any)?.symbol;
+        getSignatureSymbol(sig, checker);
       const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
       const rawName = jsDoc?.meta?.["name"]?.[0] ?? jsDoc?.meta?.["Name"]?.[0];
       const symName = sym && !sym.name.startsWith("__") ? sym.name : undefined;
@@ -1574,7 +1576,7 @@ export function harvestGrpcOperationsFromTypeArgs(
       const sym =
         elemType.aliasSymbol ??
         elemType.symbol ??
-        (sig.declaration as any)?.symbol;
+        getSignatureSymbol(sig, checker);
       const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
       const grpcTag =
         jsDoc?.meta?.["grpc"] ?? jsDoc?.meta?.["gRPC"] ?? jsDoc?.meta?.["GRPC"];
