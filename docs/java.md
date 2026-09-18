@@ -47,6 +47,107 @@ const mpFiles = generate(apiIR, javaGenerator, {
 | `client` | `"jakarta"` \| `"mp"` \| `"off"` \| `false` | `"jakarta"` | Generates a Jakarta REST client class (`"jakarta"`), a MicroProfile `@RegisterRestClient` interface (`"mp"`), or disables client generation (`"off"` / `false`). |
 | `clientName` | `string` | `undefined` | Custom client class name override (defaults to `<ServiceName>Client` or `ApiClient`). |
 
+---
+
+## Type Mapping & Schemas
+
+### 1. Enums
+OpenAPI string/number enums are emitted as type-safe Java enums equipped with Jackson serialization and creator methods:
+- `@JsonValue` on `getValue()` guarantees exact wire value preservation.
+- `@JsonCreator` on `fromValue(...)` handles dynamic parsing and deserialization.
+
+```java
+package com.example.model;
+
+import com.fasterxml.jackson.annotation.JsonValue;
+import com.fasterxml.jackson.annotation.JsonCreator;
+
+public enum Status {
+  ACTIVE("active"),
+  PENDING("pending"),
+  ARCHIVED("archived");
+
+  private final Object value;
+
+  Status(Object value) {
+    this.value = value;
+  }
+
+  @JsonValue
+  public Object getValue() {
+    return this.value;
+  }
+
+  @JsonCreator
+  public static Status fromValue(Object value) {
+    for (Status b : Status.values()) {
+      if (java.util.Objects.equals(b.value, value)) {
+        return b;
+      }
+    }
+    throw new IllegalArgumentException("Unexpected value '" + value + "'");
+  }
+}
+```
+
+### 2. Unions & Polymorphism
+TypeScript and OpenAPI union types (`oneOf`, `anyOf`) and discriminated unions map to Java type hierarchies:
+
+#### Untyped / Ad-hoc Unions
+Unions of arbitrary unrelated types (e.g. `string | number`) map to `Object` or container classes to allow heterogeneous JSON payloads.
+
+#### Discriminated Polymorphism
+When models define an OpenAPI `discriminator.propertyName` across `oneOf` schemas (e.g. `Pet` with `Cat` and `Dog` variants), polymorphism is expressed using Jackson sub-type annotations or sealed interfaces:
+- **Base Type**: Decorated with Jackson `@JsonTypeInfo` and `@JsonSubTypes`.
+- **Subtypes**: Extended or implemented by the variant Records or POJOs.
+
+```java
+// Base interface / class
+@JsonTypeInfo(
+  use = JsonTypeInfo.Id.NAME,
+  include = JsonTypeInfo.As.PROPERTY,
+  property = "petType"
+)
+@JsonSubTypes({
+  @JsonSubTypes.Type(value = Dog.class, name = "dog"),
+  @JsonSubTypes.Type(value = Cat.class, name = "cat")
+})
+public sealed interface Pet permits Dog, Cat {
+  String name();
+}
+
+// Sealed variant record
+public record Dog(String name, Double barkVolume) implements Pet {}
+```
+
+---
+
+## Client Operations & HTTP Behaviors
+
+### 1. Multiple Media Types (`Content-Type` / `Accept`)
+Endpoints declaring multiple request or response representations generate appropriate `@Consumes` and `@Produces` media types or overloaded methods:
+- Standard JSON endpoints use `MediaType.APPLICATION_JSON` (`application/json`).
+- Binary, multipart, and stream endpoints specify exact media types (e.g. `multipart/form-data`, `application/octet-stream`, `application/xml`).
+
+In Jakarta REST clients, the request builder applies the exact target media type:
+```java
+// JSON payload
+builder.method("POST", Entity.entity(body, "application/json"), Pet.class);
+
+// Multipart payload
+builder.method("POST", Entity.entity(formData, "multipart/form-data"), Pet.class);
+```
+
+### 2. Status Codes & Error Handling
+OpenAPI responses define both success codes and error responses:
+- **Success Statuses (`200 OK`, `201 Created`, `202 Accepted`)**: Unwrapped directly into the declared return type (`Pet`, `List<Pet>`, etc.).
+- **No-Content Statuses (`204 No Content`)**: Generated with `void` return type using `Response.class` consumption and automatic stream closure.
+- **Error Statuses (`400`, `404`, `500`)**:
+  - In Jakarta REST client: Responses with HTTP status `>= 400` can be captured via `WebApplicationException` or inspected directly on standard `Response`.
+  - In MicroProfile REST client: Exceptions are mapped using MicroProfile `ResponseExceptionMapper` providers or standard `WebApplicationException` sub-classes (`NotFoundException`, `BadRequestException`, etc.).
+
+---
+
 ## Client Styles
 
 ### 1. Jakarta REST Client (`client: "jakarta"`, default)
@@ -54,6 +155,13 @@ Emits a typed implementation class implementing `java.lang.AutoCloseable`:
 - Built on standard Jakarta REST Client APIs (`jakarta.ws.rs.client.Client`, `ClientBuilder`, `WebTarget`, `Entity`, `GenericType`).
 - Automatically manages path template resolution, query parameters, headers, and request bodies.
 - Handles generic and collection responses (`java.util.List<T>`, etc.) using `new GenericType<...>() {}`.
+
+```java
+try (PetStoreClient client = new PetStoreClient("https://api.petstore.com")) {
+  List<Pet> pets = client.listPets(10.0);
+  Pet created = client.createPet(new NewPet("Fido"));
+}
+```
 
 ### 2. MicroProfile REST Client (`client: "mp"`)
 Emits a declarative `@RegisterRestClient` interface designed for CDI injection via `@RestClient`:
@@ -82,6 +190,8 @@ public interface PetStoreClient {
   Pet createPet(NewPet body);
 }
 ```
+
+---
 
 ## Verification Status
 
