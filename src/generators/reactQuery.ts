@@ -156,8 +156,8 @@ function emitReactQueryFiles(
         ? `options: ${op.optionsTypeName}`
         : `options?: ${op.optionsTypeName}`;
       const callArgs = op.hasSlots
-        ? `options as any, { signal }`
-        : `{ ...options, signal } as any`;
+        ? `options, { signal }`
+        : `{ signal }`;
 
       const optionsFnDoc = op.doc
         ? op.doc
@@ -247,8 +247,8 @@ function emitReactQueryFiles(
         ") {",
         "  return {",
         `    mutationKey: [${pathLit}, ${methodLit}] as const,`,
-        `    mutationFn: (options: ${op.optionsTypeName}) =>`,
-        `      client.${op.name}(options as any),`,
+        `    mutationFn: (${op.hasSlots ? `options: ${op.optionsTypeName}` : `options?: ${op.optionsTypeName}`}) =>`,
+        `      client.${op.name}(${op.hasSlots ? "options" : "undefined"}),`,
         "    ...mutationOptions,",
         "  };",
         "}",

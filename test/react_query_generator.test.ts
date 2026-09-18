@@ -182,6 +182,13 @@ describe("reactQueryGenerator basic code generation", () => {
     expect(mutations).toContain('mutationKey: ["/pets", "POST"] as const');
     expect(mutations).toContain('mutationKey: ["/pets/{petId}", "DELETE"] as const');
   });
+
+  test("emitted queries.ts and mutations.ts contain no 'as any'", () => {
+    const queries = files["queries.ts"]!;
+    const mutations = files["mutations.ts"]!;
+    expect(queries).not.toContain("as any");
+    expect(mutations).not.toContain("as any");
+  });
 });
 
 describe("Multi-tenancy & query options verification", () => {

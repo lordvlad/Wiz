@@ -15,7 +15,7 @@ deserves a decision rather than a paragraph.
 - [x] [`harvest.ts` reads TypeScript compiler internals](#harvestts-reads-typescript-compiler-internals)
 - [x] [MCP smuggles fields the IR does not declare](#mcp-smuggles-fields-the-ir-does-not-declare)
 - [x] [`as any` where a narrowing guard already exists](#as-any-where-a-narrowing-guard-already-exists)
-- [ ] [Generated react-query hooks launder their options through `any`](#generated-react-query-hooks-launder-their-options-through-any)
+- [x] [Generated react-query hooks launder their options through `any`](#generated-react-query-hooks-launder-their-options-through-any)
 - [ ] [`tsClient` degrades silently when a Bun global is absent](#tsclient-degrades-silently-when-a-bun-global-is-absent)
 - [ ] [The OpenRPC server and transports are untyped glue](#the-openrpc-server-and-transports-are-untyped-glue)
 - [ ] [`document.ts` merges responses through a hardcoded `204`](#documentts-merges-responses-through-a-hardcoded-204)
