@@ -94,6 +94,10 @@ export interface ParameterIR {
   type: TypeIR;
   description?: string;
   deprecated?: boolean;
+  /** Serialization style for query/path/header/cookie parameters. */
+  style?: string;
+  /** Whether array/object parameter values are exploded into separate parameters. */
+  explode?: boolean;
   /** Set when declared under `components.parameters` or `components.headers`. */
   component?: string;
 }

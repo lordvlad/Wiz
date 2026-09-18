@@ -849,3 +849,54 @@ describe("malformed response body handling in tsClient", () => {
     expect(clientFiles["api.ts"]).not.toContain("catch { return text }");
   });
 });
+
+describe("parameter serialization styles (style and explode)", () => {
+  test("emits queries with style and explode query specs", () => {
+    const doc = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "StylesApi", version: "1.0.0" },
+      paths: {
+        "/test": {
+          get: {
+            operationId: "getStyled",
+            parameters: [
+              {
+                name: "tags",
+                in: "query",
+                style: "form",
+                explode: false,
+                schema: { type: "array", items: { type: "string" } },
+              },
+              {
+                name: "filter",
+                in: "query",
+                style: "deepObject",
+                explode: true,
+                schema: { type: "object", properties: { age: { type: "integer" } } },
+              },
+              {
+                name: "pipes",
+                in: "query",
+                style: "pipeDelimited",
+                explode: false,
+                schema: { type: "array", items: { type: "string" } },
+              },
+            ],
+            responses: {
+              "200": {
+                description: "ok",
+                content: { "application/json": { schema: { type: "string" } } },
+              },
+            },
+          },
+        },
+      },
+    });
+    const ir = extractApiIR(doc, { format: "json" });
+    const clientFiles = generate(ir, tsClientGenerator, {}, silentLogger);
+    expect(clientFiles["api.ts"]).toContain('"tags":{"style":"form","explode":false}');
+    expect(clientFiles["api.ts"]).toContain('"filter":{"style":"deepObject","explode":true}');
+    expect(clientFiles["api.ts"]).toContain('"pipes":{"style":"pipeDelimited","explode":false}');
+    expect(clientFiles["api.ts"]).toContain("serializeParam");
+  });
+});

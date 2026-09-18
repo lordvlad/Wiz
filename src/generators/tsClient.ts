@@ -588,8 +588,20 @@ function urlTemplate(
     }
   );
 
+  const queryParams = (method.request.parameters ?? []).filter((p) => p.in === "query");
+  const querySpecs: Record<string, { style?: string; explode?: boolean }> = {};
+  for (const qp of queryParams) {
+    if (qp.style || qp.explode !== undefined) {
+      querySpecs[qp.name] = {
+        ...(qp.style ? { style: qp.style } : {}),
+        ...(qp.explode !== undefined ? { explode: qp.explode } : {}),
+      };
+    }
+  }
+  const specsArg = Object.keys(querySpecs).length > 0 ? `, ${JSON.stringify(querySpecs)}` : "";
+
   return hasQuery
-    ? `\`\${config.baseUrl}${path}\${queryString(${access}.query)}\``
+    ? `\`\${config.baseUrl}${path}\${queryString(${access}.query${specsArg})}\``
     : `\`\${config.baseUrl}${path}\``;
 }
 
@@ -1322,17 +1334,66 @@ const HTTP_ENCODING = `function encodePath(value: string | number | boolean): st
   return encodeURIComponent(String(value));
 }
 
-function queryString(query: Record<string, unknown> | undefined): string {
+function serializeParam(
+  key: string,
+  value: unknown,
+  spec: { style?: string; explode?: boolean } | undefined,
+  search: URLSearchParams
+): void {
+  if (value === undefined || value === null) return;
+  const style = spec?.style ?? "form";
+  const explode = spec?.explode ?? (style === "form");
+
+  if (Array.isArray(value)) {
+    if (explode) {
+      for (const item of value) {
+        if (item !== undefined && item !== null) search.append(key, String(item));
+      }
+    } else {
+      const delim = style === "pipeDelimited" ? "|" : style === "spaceDelimited" ? " " : ",";
+      search.append(key, value.map(String).join(delim));
+    }
+    return;
+  }
+
+  if (typeof value === "object") {
+    if (style === "deepObject") {
+      for (const [subKey, subVal] of Object.entries(value as Record<string, unknown>)) {
+        if (subVal !== undefined && subVal !== null) {
+          search.append(\`\${key}[\${subKey}]\`, String(subVal));
+        }
+      }
+      return;
+    }
+    if (explode) {
+      for (const [subKey, subVal] of Object.entries(value as Record<string, unknown>)) {
+        if (subVal !== undefined && subVal !== null) {
+          search.append(subKey, String(subVal));
+        }
+      }
+      return;
+    }
+    const flatPairs: string[] = [];
+    for (const [subKey, subVal] of Object.entries(value as Record<string, unknown>)) {
+      if (subVal !== undefined && subVal !== null) {
+        flatPairs.push(subKey, String(subVal));
+      }
+    }
+    search.append(key, flatPairs.join(","));
+    return;
+  }
+
+  search.append(key, String(value));
+}
+
+function queryString(
+  query: Record<string, unknown> | undefined,
+  specs?: Record<string, { style?: string; explode?: boolean }>
+): string {
   if (!query) return "";
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
-    if (value === undefined || value === null) continue;
-    // A repeated key is how every OpenAPI serialisation style spells an array.
-    if (Array.isArray(value)) {
-      for (const item of value) search.append(key, String(item));
-      continue;
-    }
-    search.append(key, String(value));
+    serializeParam(key, value, specs?.[key], search);
   }
   const text = search.toString();
   return text ? \`?\${text}\` : "";
@@ -1351,19 +1412,22 @@ function headerRecord(
     record[key] = String(value);
   }
 
-  // Cookie parameters travel in one header, which is the only way HTTP has.
-  const crumbs = Object.entries(cookie ?? {}).filter(
-    ([, value]) => value !== undefined && value !== null
-  );
+  // Cookie parameters travel in one header.
+  const crumbs: string[] = [];
+  for (const [key, value] of Object.entries(cookie ?? {})) {
+    if (value === undefined || value === null) continue;
+    if (Array.isArray(value)) {
+      crumbs.push(\`\${key}=\${encodeURIComponent(value.join(","))}\`);
+    } else {
+      crumbs.push(\`\${key}=\${encodeURIComponent(String(value))}\`);
+    }
+  }
   if (crumbs.length > 0) {
-    record["cookie"] = crumbs
-      .map(([key, value]) => \`\${key}=\${encodeURIComponent(String(value))}\`)
-      .join("; ");
+    record["cookie"] = crumbs.join("; ");
   }
 
   return record;
 }`;
-
 /**
  * The JSON-RPC envelope, for a document that declares methods rather than
  * paths. The call itself is an ordinary HTTP one, so nothing here duplicates

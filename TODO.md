@@ -26,7 +26,7 @@ deserves a decision rather than a paragraph.
 - [ ] [Request bodies that are not JSON](#request-bodies-that-are-not-json)
 - [ ] [Streaming and server-sent events](#streaming-and-server-sent-events)
 - [ ] [`securitySchemes` reaches no generated client](#securityschemes-reaches-no-generated-client)
-- [ ] [Parameter serialisation ignores `style` and `explode`](#parameter-serialisation-ignores-style-and-explode)
+- [x] [Parameter serialisation ignores `style` and `explode`](#parameter-serialisation-ignores-style-and-explode)
 - [ ] [GraphQL](#graphql)
 - [ ] [Nothing works without the plugin, and nothing says so at build time](#nothing-works-without-the-plugin-and-nothing-says-so-at-build-time)
 

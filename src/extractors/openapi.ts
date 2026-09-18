@@ -692,9 +692,10 @@ function parameterToIR(
     parameter.description = raw.description;
   }
   if (raw.deprecated === true) parameter.deprecated = true;
+  if (typeof raw.style === "string") parameter.style = raw.style;
+  if (typeof raw.explode === "boolean") parameter.explode = raw.explode;
   return parameter;
 }
-
 function bodiesFor(
   content: unknown,
   ctx: Ctx,
