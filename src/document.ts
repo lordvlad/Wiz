@@ -31,15 +31,24 @@ function mergeInto(target: OpenApiDocument, source: OpenApiDocument): void {
             const exOp = existing[verb] as Record<string, unknown> | undefined;
             const newOp = op as Record<string, unknown> | undefined;
             if (isPlainObject(exOp) && isPlainObject(newOp)) {
-              const mergedOp = { ...exOp, ...newOp };
+              const mergedOp: Record<string, unknown> = { ...exOp, ...newOp };
               if (exOp.parameters && !newOp.parameters) {
                 mergedOp.parameters = exOp.parameters;
               }
               if (exOp.requestBody && !newOp.requestBody) {
                 mergedOp.requestBody = exOp.requestBody;
               }
-              if (exOp.responses && newOp.responses && (newOp.responses as any)["204"] && !(exOp.responses as any)["204"]) {
-                mergedOp.responses = exOp.responses;
+              const exResponses = isPlainObject(exOp.responses)
+                ? (exOp.responses as Record<string, unknown>)
+                : undefined;
+              const newResponses = isPlainObject(newOp.responses)
+                ? (newOp.responses as Record<string, unknown>)
+                : undefined;
+              // When an existing operation has rich response definitions (e.g. 200 with body)
+              // and a new fragment only has a default void/no-content 204, preserve the
+              // richer response definition.
+              if (exResponses && newResponses && ("204" in newResponses) && !("204" in exResponses)) {
+                mergedOp.responses = exResponses;
               }
               mergedPath[verb] = mergedOp;
             } else {

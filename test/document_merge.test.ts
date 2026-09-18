@@ -35,5 +35,44 @@ describe("merging document fragments", () => {
     const doc = mergeDocuments([{ tags: [{ name: "a" }] }, { tags: [{ name: "b" }] }]);
     expect(doc.tags).toEqual([{ name: "a" }, { name: "b" }]);
   });
+
+  test("preserves existing rich response definition when new fragment provides void 204", () => {
+    const doc = mergeDocuments([
+      {
+        openapi: "3.1.0",
+        info: { title: "API", version: "1" },
+        paths: {
+          "/items": {
+            get: {
+              operationId: "getItems",
+              responses: {
+                "200": {
+                  description: "Items list",
+                  content: { "application/json": { schema: { type: "array" } } },
+                },
+              },
+            },
+          },
+        },
+      },
+      {
+        paths: {
+          "/items": {
+            get: {
+              summary: "Updated summary",
+              responses: {
+                "204": { description: "No content" },
+              },
+            },
+          },
+        },
+      },
+    ]);
+
+    const getOp = (doc.paths as Record<string, any>)["/items"].get;
+    expect(getOp.summary).toBe("Updated summary");
+    expect(getOp.responses["200"]).toBeDefined();
+    expect(getOp.responses["204"]).toBeUndefined();
+  });
 });
 
