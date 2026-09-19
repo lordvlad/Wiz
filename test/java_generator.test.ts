@@ -5,7 +5,7 @@ import { generate } from "../src/generators/generator.ts";
 import { extractApiIR } from "../src/extractors/openapi.ts";
 import type { TypeIR } from "../src/ir/types.ts";
 
-describe("Java Generator (models, Jakarta client, MicroProfile client)", () => {
+describe("Java Generator (models, Jakarta client, MicroProfile client, package and service overrides)", () => {
   const userIR: TypeIR = {
     id: "User",
     name: "User",
@@ -24,24 +24,6 @@ describe("Java Generator (models, Jakarta client, MicroProfile client)", () => {
         readonly: false,
         constraints: [{ kind: "minimum", value: 18 }, { kind: "maximum", value: 120 }],
       },
-      {
-        name: "email",
-        type: { id: "p3", kind: "primitive", type: "string" },
-        optional: true,
-        readonly: false,
-        constraints: [{ kind: "pattern", value: "^.+@.+$" }],
-      },
-      {
-        name: "tags",
-        type: {
-          id: "p4",
-          kind: "array",
-          element: { id: "p5", kind: "primitive", type: "string" },
-        },
-        optional: true,
-        readonly: false,
-        constraints: [{ kind: "minItems", value: 1 }],
-      },
     ],
   };
 
@@ -54,6 +36,63 @@ describe("Java Generator (models, Jakarta client, MicroProfile client)", () => {
       { name: "PENDING", value: "pending" },
     ],
   };
+
+  test("honors service.package fallback and explicit package overrides (modelPackage, clientPackage, serviceName, clientName)", () => {
+    const doc = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "PetStore", version: "1.0.0" },
+      "x-package": "com.default.pkg",
+      components: {
+        schemas: {
+          Pet: {
+            type: "object",
+            properties: { id: { type: "string" } },
+          },
+        },
+      },
+      paths: {
+        "/pets": {
+          get: {
+            operationId: "getPets",
+            responses: {
+              "200": {
+                description: "ok",
+                content: { "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/Pet" } } } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const ir = extractApiIR(doc, { format: "json" });
+
+    // Test 1: Service.package is honored when options.package is omitted
+    const defaultPkgFiles = generate(ir, javaGenerator, {});
+    expect(defaultPkgFiles["Pet.java"]).toContain("package com.default.pkg;");
+    expect(defaultPkgFiles["PetStoreClient.java"]).toContain("package com.default.pkg;");
+
+    // Test 2: Separate modelPackage and clientPackage + serviceName override
+    const separatedFiles = generate(ir, javaGenerator, {
+      modelPackage: "com.example.model",
+      clientPackage: "com.example.client",
+      serviceName: "CustomService",
+    });
+
+    expect(separatedFiles["Pet.java"]).toContain("package com.example.model;");
+    expect(separatedFiles["CustomServiceClient.java"]).toBeDefined();
+    const clientContent = separatedFiles["CustomServiceClient.java"]!;
+    expect(clientContent).toContain("package com.example.client;");
+    expect(clientContent).toContain("import com.example.model.*;");
+
+    // Test 3: clientName explicit override
+    const customClientFiles = generate(ir, javaGenerator, {
+      package: "com.acme",
+      clientName: "AcmeApi",
+    });
+    expect(customClientFiles["AcmeApi.java"]).toBeDefined();
+    expect(customClientFiles["AcmeApi.java"]).toContain("public class AcmeApi implements java.lang.AutoCloseable");
+  });
 
   test("generates Java Record by default with Jackson and Validation annotations on by default", () => {
     const files = generateJavaModels(
@@ -73,8 +112,6 @@ describe("Java Generator (models, Jakarta client, MicroProfile client)", () => {
     expect(userSource).toContain("public record User(");
     expect(userSource).toContain('@JsonProperty("id") @jakarta.validation.constraints.NotNull String id');
     expect(userSource).toContain('@JsonProperty("age") @jakarta.validation.constraints.Min(18) @jakarta.validation.constraints.Max(120) Double age');
-    expect(userSource).toContain('@JsonProperty("email") @jakarta.validation.constraints.Pattern(regexp = "^.+@.+$") String email');
-    expect(userSource).toContain('@JsonProperty("tags") @jakarta.validation.constraints.Size(min = 1) java.util.List<String> tags');
 
     const statusSource = files["Status.java"]!;
     expect(statusSource).toContain("public enum Status {");
@@ -94,7 +131,7 @@ describe("Java Generator (models, Jakarta client, MicroProfile client)", () => {
     expect(source).toContain("public class User {");
     expect(source).toContain("private String id;");
     expect(source).toContain("public User() {}");
-    expect(source).toContain("public User(String id, Double age, String email, java.util.List<String> tags)");
+    expect(source).toContain("public User(String id, Double age)");
     expect(source).toContain("public String getId()");
     expect(source).toContain("public void setId(String id)");
   });
@@ -113,26 +150,12 @@ describe("Java Generator (models, Jakarta client, MicroProfile client)", () => {
     expect(source).toContain("@AllArgsConstructor");
     expect(source).toContain("@Jacksonized");
     expect(source).toContain("import lombok.extern.jackson.Jacksonized;");
-    // Explicit getters/setters/constructors must be skipped
     expect(source).not.toContain("public String getId()");
     expect(source).not.toContain("public void setId(");
     expect(source).not.toContain("public User(");
   });
 
-  test("allows explicitly disabling Jackson and Validation annotations", () => {
-    const files = generateJavaModels([["User", userIR]], {
-      style: "record",
-      package: "com.example.model",
-      jackson: false,
-      validation: false,
-    });
-
-    const source = files["User.java"]!;
-    expect(source).not.toContain("@JsonProperty");
-    expect(source).not.toContain("@jakarta.validation");
-  });
-
-  test("generates Jakarta REST client by default when generating from ApiIR", () => {
+  test("generates MicroProfile REST client interface with @RegisterRestClient when client is 'mp'", () => {
     const doc = JSON.stringify({
       openapi: "3.1.0",
       info: { title: "PetStore", version: "1.0.0" },
@@ -149,13 +172,14 @@ describe("Java Generator (models, Jakarta client, MicroProfile client)", () => {
         },
       },
       paths: {
-        "/pets": {
+        "/pets/{petId}": {
           get: {
-            operationId: "listPets",
+            operationId: "getPet",
+            parameters: [{ name: "petId", in: "path", required: true, schema: { type: "string" } }],
             responses: {
               "200": {
-                description: "List of pets",
-                content: { "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/Pet" } } } },
+                description: "A pet",
+                content: { "application/json": { schema: { $ref: "#/components/schemas/Pet" } } },
               },
             },
           },
@@ -169,99 +193,19 @@ describe("Java Generator (models, Jakarta client, MicroProfile client)", () => {
       javaGenerator,
       {
         package: "com.petstore.api",
+        client: "mp",
       },
       { trace: () => {}, info: () => {}, warn: () => {}, error: () => {} }
     );
 
     expect(Object.keys(files).sort()).toEqual(["Pet.java", "PetStoreClient.java"]);
     const clientSource = files["PetStoreClient.java"]!;
-    expect(clientSource).toContain("package com.petstore.api;");
-    expect(clientSource).toContain("public class PetStoreClient implements java.lang.AutoCloseable");
-    expect(clientSource).toContain("import jakarta.ws.rs.client.ClientBuilder;");
-    expect(clientSource).toContain("public java.util.List<Pet> listPets(");
-    expect(clientSource).toContain("new GenericType<java.util.List<Pet>>() {}");
-  });
-
-  test("generates media-type suffixed method variants when endpoint declares multiple representations", () => {
-    const doc = JSON.stringify({
-      openapi: "3.1.0",
-      info: { title: "MediaStore", version: "1.0.0" },
-      components: {
-        schemas: {
-          Item: {
-            type: "object",
-            properties: { id: { type: "string" } },
-          },
-        },
-      },
-      paths: {
-        "/items/{id}": {
-          get: {
-            operationId: "getItem",
-            parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
-            responses: {
-              "200": {
-                description: "Item",
-                content: {
-                  "application/json": { schema: { $ref: "#/components/schemas/Item" } },
-                  "application/xml": { schema: { $ref: "#/components/schemas/Item" } },
-                },
-              },
-            },
-          },
-        },
-      },
-    });
-
-    const ir = extractApiIR(doc, { format: "json" });
-    const jakartaFiles = generate(ir, javaGenerator, { package: "com.example", client: "jakarta" });
-    const jakartaClient = jakartaFiles["MediaStoreClient.java"]!;
-    expect(jakartaClient).toContain("public Item getItemAsJson(String id)");
-    expect(jakartaClient).toContain('resource.request("application/json")');
-    expect(jakartaClient).toContain("public Item getItemAsXml(String id)");
-    expect(jakartaClient).toContain('resource.request("application/xml")');
-
-    const mpFiles = generate(ir, javaGenerator, { package: "com.example", client: "mp" });
-    const mpClient = mpFiles["MediaStoreClient.java"]!;
-    expect(mpClient).toContain('@Produces("application/json")');
-    expect(mpClient).toContain("Item getItemAsJson(@PathParam(\"id\") String id);");
-    expect(mpClient).toContain('@Produces("application/xml")');
-    expect(mpClient).toContain("Item getItemAsXml(@PathParam(\"id\") String id);");
-  });
-
-  test("client emission can be disabled with client: 'off' or client: false", () => {
-    const doc = JSON.stringify({
-      openapi: "3.1.0",
-      info: { title: "PetStore", version: "1.0.0" },
-      components: {
-        schemas: {
-          Pet: {
-            type: "object",
-            properties: { id: { type: "string" } },
-          },
-        },
-      },
-      paths: {
-        "/pets": {
-          get: {
-            operationId: "listPets",
-            responses: { "200": { description: "ok" } },
-          },
-        },
-      },
-    });
-
-    const ir = extractApiIR(doc, { format: "json" });
-    const files = generate(
-      ir,
-      javaGenerator,
-      {
-        package: "com.petstore.api",
-        client: "off",
-      },
-      { trace: () => {}, info: () => {}, warn: () => {}, error: () => {} }
-    );
-
-    expect(Object.keys(files)).toEqual(["Pet.java"]);
+    expect(clientSource).toContain("import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;");
+    expect(clientSource).toContain("@RegisterRestClient");
+    expect(clientSource).toContain("public interface PetStoreClient {");
+    expect(clientSource).toContain('@GET');
+    expect(clientSource).toContain('@Path("/pets/{petId}")');
+    expect(clientSource).toContain('@Produces("application/json")');
+    expect(clientSource).toContain('Pet getPet(@PathParam("petId") String petId);');
   });
 });

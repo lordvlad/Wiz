@@ -985,6 +985,12 @@ function pathsToService(ctx: Ctx): ServiceIR {
       service.description = info.description;
     }
   }
+  if (typeof ctx.document["x-package"] === "string") {
+    service.package = ctx.document["x-package"] as string;
+  }
+  if (typeof ctx.document["x-service"] === "string") {
+    service.name = ctx.document["x-service"] as string;
+  }
 
   const paths = ctx.document.paths;
   if (!isObject(paths)) return service;

@@ -9,9 +9,27 @@ export interface JavaGeneratorOptions {
    */
   style?: "record" | "pojo";
   /**
-   * Package name for generated classes (e.g. "com.example.model").
+   * Base package name for generated classes (e.g. "com.example").
+   * When specified, models and clients default to this package unless overridden by modelPackage / clientPackage.
+   * Falls back to service.package if omitted.
    */
   package?: string;
+  /**
+   * Override package name for model classes specifically (e.g. "com.example.model").
+   */
+  modelPackage?: string;
+  /**
+   * Override package name for client classes specifically (e.g. "com.example.client").
+   */
+  clientPackage?: string;
+  /**
+   * Service name override (overrides service.name when deriving client class names).
+   */
+  serviceName?: string;
+  /**
+   * Custom client class name override (defaults to `<ServiceName>Client` or `ApiClient`).
+   */
+  clientName?: string;
   /**
    * Whether to include Jackson annotations (@JsonProperty, @JsonInclude, @JsonCreator, etc.).
    * Defaults to true.
@@ -31,10 +49,6 @@ export interface JavaGeneratorOptions {
    * HTTP Client generator option: "jakarta" (default), "mp" (MicroProfile @RegisterRestClient / @RestClient), or "off" / false.
    */
   client?: "jakarta" | "mp" | "off" | false;
-  /**
-   * Custom client class name override (defaults to `<ServiceName>Client` or `ApiClient`).
-   */
-  clientName?: string;
 }
 
 /**
@@ -202,14 +216,14 @@ function getValidationAnnotations(prop: PropertyIR): string[] {
 function generateEnumSource(
   name: string,
   members: EnumMemberIR[],
-  options: JavaGeneratorOptions
+  options: JavaGeneratorOptions,
+  effectivePackage?: string
 ): string {
   const includeJackson = options.jackson !== false;
   const lines: string[] = [];
-  if (options.package) {
-    lines.push(`package ${options.package};`, "");
+  if (effectivePackage) {
+    lines.push(`package ${effectivePackage};`, "");
   }
-
   if (includeJackson) {
     lines.push("import com.fasterxml.jackson.annotation.JsonValue;");
     lines.push("import com.fasterxml.jackson.annotation.JsonCreator;");
@@ -262,15 +276,57 @@ function generateClassSource(
   className: string,
   ir: TypeIR,
   options: JavaGeneratorOptions,
-  typeNameMap: Map<string, string>
+  typeNameMap: Map<string, string>,
+  interfaces: string[],
+  effectivePackage?: string
 ): string {
   const style = options.style ?? "record";
   const includeJackson = options.jackson !== false;
   const includeValidation = options.validation !== false;
   const lines: string[] = [];
 
-  if (options.package) {
-    lines.push(`package ${options.package};`, "");
+  if (effectivePackage) {
+    lines.push(`package ${effectivePackage};`, "");
+  }
+  if (ir.kind === "union" && ir.discriminator) {
+    const propName = ir.discriminator.propertyName;
+    if (includeJackson) {
+      lines.push("import com.fasterxml.jackson.annotation.JsonTypeInfo;");
+      lines.push("import com.fasterxml.jackson.annotation.JsonSubTypes;");
+      lines.push("");
+      lines.push("@JsonTypeInfo(");
+      lines.push("  use = JsonTypeInfo.Id.NAME,");
+      lines.push("  include = JsonTypeInfo.As.PROPERTY,");
+      lines.push(`  property = "${propName}"`);
+      lines.push(")");
+
+      const subtypes: string[] = [];
+      const permitted: string[] = [];
+
+      for (const t of ir.types) {
+        if (t.kind === "ref" && t.name) {
+          const subClassName = typeNameMap.get(t.targetId) ?? toPascalCase(t.name);
+          subtypes.push(`  @JsonSubTypes.Type(value = ${subClassName}.class, name = "${t.name}")`);
+          permitted.push(subClassName);
+        }
+      }
+
+      if (subtypes.length > 0) {
+        lines.push("@JsonSubTypes({");
+        lines.push(subtypes.join(",\n"));
+        lines.push("})");
+      }
+      
+      if (permitted.length > 0) {
+        lines.push(`public sealed interface ${className} permits ${permitted.join(", ")} {`);
+      } else {
+        lines.push(`public interface ${className} {`);
+      }
+    } else {
+      lines.push(`public interface ${className} {`);
+    }
+    lines.push("}");
+    return lines.join("\n");
   }
 
   if (ir.kind !== "object") {
@@ -308,9 +364,10 @@ function generateClassSource(
       return `    ${prefix}${fieldType} ${fieldName}`;
     });
 
+    const implementsClause = interfaces.length > 0 ? ` implements ${interfaces.join(", ")}` : "";
     lines.push(`public record ${className}(`);
     lines.push(componentDecls.join(",\n"));
-    lines.push(") {}");
+    lines.push(`)${implementsClause} {}`);
     return lines.join("\n");
   }
 
@@ -345,7 +402,8 @@ function generateClassSource(
     lines.push("@JsonInclude(JsonInclude.Include.NON_NULL)");
   }
 
-  lines.push(`public class ${className} {`);
+  const implementsClause = interfaces.length > 0 ? ` implements ${interfaces.join(", ")}` : "";
+  lines.push(`public class ${className}${implementsClause} {`);
 
   // Fields
   for (const prop of properties) {
@@ -492,17 +550,23 @@ function collectMethodVariants(
 function generateJakartaClientSource(
   service: ServiceIR,
   options: JavaGeneratorOptions,
-  typeNameMap: Map<string, string>
+  typeNameMap: Map<string, string>,
+  effectivePackage?: string,
+  modelPackage?: string
 ): string {
+  const effectiveServiceName = options.serviceName ?? service.name;
   const clientName =
     options.clientName ??
-    (service.name ? `${toPascalCase(service.name)}Client` : "ApiClient");
+    (effectiveServiceName ? `${toPascalCase(effectiveServiceName)}Client` : "ApiClient");
   const lines: string[] = [];
 
-  if (options.package) {
-    lines.push(`package ${options.package};`, "");
+  if (effectivePackage) {
+    lines.push(`package ${effectivePackage};`, "");
   }
 
+  if (modelPackage && modelPackage !== effectivePackage) {
+    lines.push(`import ${modelPackage}.*;`, "");
+  }
   lines.push("import jakarta.ws.rs.client.Client;");
   lines.push("import jakarta.ws.rs.client.ClientBuilder;");
   lines.push("import jakarta.ws.rs.client.Entity;");
@@ -648,17 +712,23 @@ function generateJakartaClientSource(
 function generateMicroProfileClientSource(
   service: ServiceIR,
   options: JavaGeneratorOptions,
-  typeNameMap: Map<string, string>
+  typeNameMap: Map<string, string>,
+  effectivePackage?: string,
+  modelPackage?: string
 ): string {
+  const effectiveServiceName = options.serviceName ?? service.name;
   const clientName =
     options.clientName ??
-    (service.name ? `${toPascalCase(service.name)}Client` : "ApiClient");
+    (effectiveServiceName ? `${toPascalCase(effectiveServiceName)}Client` : "ApiClient");
   const lines: string[] = [];
 
-  if (options.package) {
-    lines.push(`package ${options.package};`, "");
+  if (effectivePackage) {
+    lines.push(`package ${effectivePackage};`, "");
   }
 
+  if (modelPackage && modelPackage !== effectivePackage) {
+    lines.push(`import ${modelPackage}.*;`, "");
+  }
   lines.push("import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;");
   lines.push("import jakarta.ws.rs.*;");
   lines.push("import jakarta.ws.rs.core.MediaType;");
@@ -741,35 +811,59 @@ export function generateJavaFiles(
   for (const [name] of types) {
     typeNameMap.set(name, toPascalCase(name));
   }
+  const implementsMap = new Map<string, string[]>();
+  for (const [name, ir] of types) {
+    if (ir.kind === "union" && ir.discriminator) {
+      const baseClassName = typeNameMap.get(name) ?? toPascalCase(name);
+      for (const t of ir.types) {
+        if (t.kind === "ref" && t.name) {
+          const subClassName = typeNameMap.get(t.targetId) ?? toPascalCase(t.name);
+          const existing = implementsMap.get(subClassName) ?? [];
+          existing.push(baseClassName);
+          implementsMap.set(subClassName, existing);
+        }
+      }
+    }
+  }
+
+  const defaultPackage = options.package ?? service?.package;
+  const modelPackage = options.modelPackage ?? defaultPackage;
+  const clientPackage = options.clientPackage ?? defaultPackage;
 
   for (const [name, ir] of types) {
     const className = typeNameMap.get(name) ?? toPascalCase(name);
     const fileName = `${className}.java`;
 
     if (ir.kind === "enum") {
-      files[fileName] = generateEnumSource(className, ir.members, options);
+      files[fileName] = generateEnumSource(className, ir.members, options, modelPackage);
     } else {
-      files[fileName] = generateClassSource(className, ir, options, typeNameMap);
+      const interfaces = implementsMap.get(className) ?? [];
+      files[fileName] = generateClassSource(className, ir, options, typeNameMap, interfaces, modelPackage);
     }
   }
 
   const clientOption = options.client ?? "jakarta";
   if (clientOption !== "off" && clientOption !== false && service && service.methods.length > 0) {
+    const effectiveServiceName = options.serviceName ?? service.name;
     const clientName =
       options.clientName ??
-      (service.name ? `${toPascalCase(service.name)}Client` : "ApiClient");
+      (effectiveServiceName ? `${toPascalCase(effectiveServiceName)}Client` : "ApiClient");
 
     if (clientOption === "mp") {
       files[`${clientName}.java`] = generateMicroProfileClientSource(
         service,
         options,
-        typeNameMap
+        typeNameMap,
+        clientPackage,
+        modelPackage
       );
     } else {
       files[`${clientName}.java`] = generateJakartaClientSource(
         service,
         options,
-        typeNameMap
+        typeNameMap,
+        clientPackage,
+        modelPackage
       );
     }
   }

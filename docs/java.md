@@ -21,31 +21,46 @@ import { generate } from "wiz";
 // Default configuration (Records + Jakarta REST client)
 const files = generate(apiIR, javaGenerator, {
   style: "record",       // "record" (default) | "pojo"
-  package: "com.example",
+  package: "com.example", // Base package (falls back to service.package if omitted)
+  modelPackage: "com.example.model",   // Optional override for models
+  clientPackage: "com.example.client", // Optional override for client classes
+  serviceName: "PetStore",             // Optional service name override
+  clientName: "PetStoreRestClient",    // Optional client class name override
   jackson: true,         // default: true
   validation: true,      // default: true (Jakarta validation annotations)
   lombok: false,         // default: false (when true on POJOs, omits explicit getters/setters/constructors)
   client: "jakarta",     // "jakarta" (default) | "mp" | "off" | false
 });
-
-// MicroProfile REST Client interface generation
-const mpFiles = generate(apiIR, javaGenerator, {
-  package: "com.example",
-  client: "mp",          // emits @RegisterRestClient interface for CDI injection (@RestClient)
-});
 ```
 
-## Options
+## Options & Overrides
 
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `style` | `"record"` \| `"pojo"` | `"record"` | Emits Java 17+ Records or traditional POJO classes. |
-| `package` | `string` | `undefined` | Package declaration header for generated files. |
+| `package` | `string` | `service.package` | Base package declaration header for generated files (falls back to `service.package` if omitted). |
+| `modelPackage` | `string` | `package` | Explicit package name override for model classes (e.g. `"com.example.model"`). |
+| `clientPackage` | `string` | `package` | Explicit package name override for client classes (e.g. `"com.example.client"`). When different from `modelPackage`, imports `modelPackage.*`. |
+| `serviceName` | `string` | `service.name` | Explicit service name override used to name the client class (e.g. `"PetStore"` -> `PetStoreClient`). |
+| `clientName` | `string` | `<ServiceName>Client` | Explicit class name override for the client. |
 | `jackson` | `boolean` | `true` | Emits `@JsonProperty`, `@JsonInclude`, `@JsonValue`, `@JsonCreator` annotations. |
 | `validation` | `boolean` | `true` | Emits `@jakarta.validation.constraints.*` (`@NotNull`, `@Size`, `@Min`, `@Max`, `@Pattern`, etc.). |
 | `lombok` | `boolean` | `false` | Emits `@Data`, `@Builder`, `@NoArgsConstructor`, `@AllArgsConstructor`, `@Jacksonized` on POJOs and omits hand-written getters/setters. |
 | `client` | `"jakarta"` \| `"mp"` \| `"off"` \| `false` | `"jakarta"` | Generates a Jakarta REST client class (`"jakarta"`), a MicroProfile `@RegisterRestClient` interface (`"mp"`), or disables client generation (`"off"` / `false`). |
-| `clientName` | `string` | `undefined` | Custom client class name override (defaults to `<ServiceName>Client` or `ApiClient`). |
+
+---
+
+## Package, Namespace & Service Name Resolution
+
+`wiz` honors OpenAPI / JSDoc `@package` and `@service` tags as well as generator option overrides:
+1. **Package Resolution**:
+   - If `options.package` is set, it is used as the base package.
+   - If `options.package` is omitted, `service.package` (harvested from JSDoc `@package` or spec metadata) is used.
+   - Separate package layouts are supported via `modelPackage` and `clientPackage`. When `clientPackage` differs from `modelPackage`, the generated client automatically imports `modelPackage.*`.
+2. **Service & Client Name Resolution**:
+   - Client class name defaults to `<ServiceName>Client` (e.g. `PetStoreClient` from `@service PetStore` or `service.name`).
+   - If `options.serviceName` is set, it overrides the service name when deriving the client class.
+   - `options.clientName` can directly override the complete class name (e.g. `clientName: "PetStoreApi"`).
 
 ---
 
@@ -97,9 +112,9 @@ TypeScript and OpenAPI union types (`oneOf`, `anyOf`) and discriminated unions m
 Unions of arbitrary unrelated types (e.g. `string | number`) map to `Object` or container classes to allow heterogeneous JSON payloads.
 
 #### Discriminated Polymorphism
-When models define an OpenAPI `discriminator.propertyName` across `oneOf` schemas (e.g. `Pet` with `Cat` and `Dog` variants), polymorphism is expressed using Jackson sub-type annotations or sealed interfaces:
+When models define an OpenAPI `discriminator.propertyName` across `oneOf` schemas (e.g. `Pet` with `Cat` and `Dog` variants), polymorphism is expressed using Jackson sub-type annotations and sealed interfaces:
 - **Base Type**: Decorated with Jackson `@JsonTypeInfo` and `@JsonSubTypes`.
-- **Subtypes**: Extended or implemented by the variant Records or POJOs.
+- **Subtypes**: Extended or implemented by the variant Records or POJOs (`implements Pet`).
 
 ```java
 // Base interface / class
@@ -109,15 +124,17 @@ When models define an OpenAPI `discriminator.propertyName` across `oneOf` schema
   property = "petType"
 )
 @JsonSubTypes({
-  @JsonSubTypes.Type(value = Dog.class, name = "dog"),
-  @JsonSubTypes.Type(value = Cat.class, name = "cat")
+  @JsonSubTypes.Type(value = Dog.class, name = "Dog"),
+  @JsonSubTypes.Type(value = Cat.class, name = "Cat")
 })
 public sealed interface Pet permits Dog, Cat {
-  String name();
 }
 
-// Sealed variant record
-public record Dog(String name, Double barkVolume) implements Pet {}
+// Sealed variant record implementing base interface
+public record Dog(
+    @JsonProperty("name") String name,
+    @JsonProperty("barkVolume") Double barkVolume
+) implements Pet {}
 ```
 
 ---
