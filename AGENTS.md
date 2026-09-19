@@ -84,7 +84,7 @@ wiz/
   `import openApi30Schema from "../schemas/openapi-3.0.json";`
   Do not use manual `fs.readFile` or `fetch` for bundled schema files.
 - **Spec Pre-Validation**:
-  All spec generators (`openapi.ts`, `asyncapi.ts`, `openrpc.ts`, `schema.ts`) must run `assertValidSpecDocumentSync(document, specName)` before emitting code.
+  All spec generators with bundled meta-schemas (`openapi.ts`, `asyncapi.ts`, `openrpc.ts`, `schema.ts`) must run `assertValidSpecDocumentSync(document, specName)` before emitting code. Generators for formats without formal JSON meta-schemas (e.g. `mcp.ts`, `protobuf.ts`) are exempt.
 - **Clean Cutover**:
   When updating an API or codec, migrate every callsite, test, and documentation file. Do not introduce shims or deprecated fallback paths.
 - **Dynamic Best-Effort Fallbacks**:
