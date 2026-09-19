@@ -88,7 +88,7 @@ wiz/
 - **Clean Cutover**:
   When updating an API or codec, migrate every callsite, test, and documentation file. Do not introduce shims or deprecated fallback paths.
 - **Dynamic Best-Effort Fallbacks**:
-  Erlang, JSON, and validator codecs support `T = unknown` or `any` by emitting dynamic runtime best-effort encoders/decoders (`__wizEncodeErlangTextUnknown`, etc.).
+  Non-JS target codecs (like Erlang and CBOR) support `T = unknown` or `any` by emitting dynamic runtime best-effort encoders/decoders (`__wizEncodeErlangTextUnknown`, etc.). Targets executing in native JS environments (JSON and Validator) rely on built-in mechanics (e.g., `JSON.stringify` serialization, unconditional `true` validation) for unconstrained types.
 
 ---
 
