@@ -1,6 +1,6 @@
 // @wiz-ignore
 import { describe, expect, test } from "bun:test";
-import { generateJavaFiles, generateJavaModels, javaGenerator } from "../src/generators/java.ts";
+import { generateJavaFiles, generateJavaModels, javaGenerator, toJavaType, mimetypeToSuffix } from "../src/generators/java.ts";
 import { generate } from "../src/generators/generator.ts";
 import { extractApiIR } from "../src/extractors/openapi.ts";
 import type { TypeIR } from "../src/ir/types.ts";
@@ -207,5 +207,37 @@ describe("Java Generator (models, Jakarta client, MicroProfile client, package a
     expect(clientSource).toContain('@Path("/pets/{petId}")');
     expect(clientSource).toContain('@Produces("application/json")');
     expect(clientSource).toContain('Pet getPet(@PathParam("petId") String petId);');
+  });
+
+  describe("toJavaType", () => {
+    const typeNameMap = new Map<string, string>();
+
+    test("maps primitive types correctly", () => {
+      expect(toJavaType({ kind: "primitive", type: "string" }, typeNameMap)).toBe("String");
+      expect(toJavaType({ kind: "primitive", type: "number" }, typeNameMap)).toBe("Double");
+      expect(toJavaType({ kind: "primitive", type: "boolean" }, typeNameMap)).toBe("Boolean");
+      expect(toJavaType({ kind: "primitive", type: "bigint" }, typeNameMap)).toBe("Long");
+      expect(toJavaType({ kind: "primitive", type: "date" }, typeNameMap)).toBe("java.time.OffsetDateTime");
+      expect(toJavaType({ kind: "primitive", type: "null" }, typeNameMap)).toBe("Object");
+      expect(toJavaType({ kind: "primitive", type: "undefined" }, typeNameMap)).toBe("Void");
+      expect(toJavaType({ kind: "primitive", type: "void" }, typeNameMap)).toBe("Void");
+      expect(toJavaType({ kind: "primitive", type: "unknown" }, typeNameMap)).toBe("Object");
+      expect(toJavaType({ kind: "primitive", type: "any" }, typeNameMap)).toBe("Object");
+      expect(toJavaType({ kind: "primitive", type: "never" }, typeNameMap)).toBe("Object");
+    });
+  });
+
+  describe("mimetypeToSuffix", () => {
+    test("derives correct suffixes", () => {
+      expect(mimetypeToSuffix("application/json")).toBe("AsJson");
+      expect(mimetypeToSuffix("application/xml")).toBe("AsXml");
+      expect(mimetypeToSuffix("application/yaml")).toBe("AsYaml");
+      expect(mimetypeToSuffix("text/csv")).toBe("AsCsv");
+      expect(mimetypeToSuffix("application/octet-stream")).toBe("AsOctetStream");
+      expect(mimetypeToSuffix("multipart/form-data")).toBe("AsFormData");
+      expect(mimetypeToSuffix("application/x-www-form-urlencoded")).toBe("AsUrlEncoded");
+      expect(mimetypeToSuffix("text/plain")).toBe("AsText");
+      expect(mimetypeToSuffix("image/png")).toBe("AsImagePng");
+    });
   });
 });

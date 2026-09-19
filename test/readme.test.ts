@@ -35,4 +35,11 @@ describe("README", () => {
   test("validate reports a path per failure", () => {
     expect(fixture.errors.map((e) => e.path)).toEqual(["id", "name"]);
   });
+
+  test("nameOf narrows unknown payloads", () => {
+    expect(fixture.nameOf({ id: "1", name: "Ada" })).toBe("Ada");
+    expect(fixture.nameOf({ id: 1, name: "Ada" })).toBe("anonymous");
+    expect(fixture.nameOf({ id: "2" })).toBe("anonymous");
+    expect(fixture.nameOf(null)).toBe("anonymous");
+  });
 });

@@ -70,6 +70,33 @@ describe("TypeIR Extractor & Normalization", () => {
     }
   });
 
+  test("extracts any, unknown, and symbol primitives", () => {
+    const code = `
+      export interface OddTypes {
+        a: any;
+        u: unknown;
+        s: symbol;
+      }
+    `;
+
+    const ir = getIRForSource(code, "OddTypes");
+    expect(ir.kind).toBe("object");
+
+    if (ir.kind === "object") {
+      const aProp = ir.properties.find((p) => p.name === "a")!;
+      expect(aProp.type.kind).toBe("primitive");
+      if (aProp.type.kind === "primitive") expect(aProp.type.type).toBe("any");
+
+      const uProp = ir.properties.find((p) => p.name === "u")!;
+      expect(uProp.type.kind).toBe("primitive");
+      if (uProp.type.kind === "primitive") expect(uProp.type.type).toBe("unknown");
+
+      const sProp = ir.properties.find((p) => p.name === "s")!;
+      expect(sProp.type.kind).toBe("primitive");
+      if (sProp.type.kind === "primitive") expect(sProp.type.type).toBe("symbol");
+    }
+  });
+
   test("extracts Enums, Tuples, Intersections, Records, Literals, and Recursive Refs", () => {
     const code = `
       export enum Status {

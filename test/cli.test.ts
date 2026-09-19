@@ -548,4 +548,81 @@ describe("wiz generate through the binary", () => {
     const opts2 = JSON.parse(files2["options.json"]);
     expect(opts2.mediaTypes).toBe("all");
   });
+  test("an unknown format throws an error", async () => {
+    const cwd = await workspace();
+    const result = await run(["generate", "-g", "gen.ts", "api.json", "--format", "nope"], cwd);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("unknown format 'nope'; expected json, jsonc, json5, yaml");
+  });
+
+  test("parses --media-types array correctly", async () => {
+    const cwd = await workspace();
+    await Bun.write(
+      join(cwd, "gen_media_test.ts"),
+      `export default {
+  name: "test-gen",
+  api(ir, context) {
+    return { "options.json": JSON.stringify(context.options) + "\\n" };
+  },
+};`
+    );
+
+    const result1 = await run(
+      ["generate", "-g", "gen_media_test.ts", "api.json", "--media-types", "jsonl, yaml "],
+      cwd
+    );
+    expect(result1.code).toBe(0);
+    const files1 = JSON.parse(result1.stdout);
+    const opts1 = JSON.parse(files1["options.json"]);
+    expect(opts1.mediaTypes).toEqual(["jsonl", "yaml"]);
+  });
+
+  test("parses --media-types=all correctly", async () => {
+    const cwd = await workspace();
+    await Bun.write(
+      join(cwd, "gen_media_test_all.ts"),
+      `export default {
+  name: "test-gen",
+  api(ir, context) {
+    return { "options.json": JSON.stringify(context.options) + "\\n" };
+  },
+};`
+    );
+
+    const result = await run(
+      ["generate", "-g", "gen_media_test_all.ts", "api.json", "--media-types=all"],
+      cwd
+    );
+    expect(result.code).toBe(0);
+    const files = JSON.parse(result.stdout);
+    const opts = JSON.parse(files["options.json"]);
+    expect(opts.mediaTypes).toBe("all");
+  });
+
+  test("passes --lenient flag when provided", async () => {
+    const cwd = await workspace();
+    await Bun.write(
+      join(cwd, "gen_lenient.ts"),
+      `export default {
+  name: "test-gen",
+  api(ir, context) {
+    return { "options.json": JSON.stringify(context.options) + "\\n" };
+  },
+};`
+    );
+
+    // Without lenient
+    const result1 = await run(["generate", "-g", "gen_lenient.ts", "api.json"], cwd);
+    expect(result1.code).toBe(0);
+    const files1 = JSON.parse(result1.stdout);
+    const opts1 = JSON.parse(files1["options.json"]);
+    expect(opts1.lenient).toBe(false);
+
+    // With lenient
+    const result2 = await run(["generate", "-g", "gen_lenient.ts", "api.json", "--lenient"], cwd);
+    expect(result2.code).toBe(0);
+    const files2 = JSON.parse(result2.stdout);
+    const opts2 = JSON.parse(files2["options.json"]);
+    expect(opts2.lenient).toBe(true);
+  });
 });
