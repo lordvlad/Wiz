@@ -3,6 +3,7 @@ import asyncApi26Schema from "../../schemas/asyncapi-2.6.json";
 import asyncApi30Schema from "../../schemas/asyncapi-3.0.json";
 import openApi30Schema from "../../schemas/openapi-3.0.json";
 import openApi31Schema from "../../schemas/openapi-3.1.json";
+import mcpSchema from "../../schemas/mcp-2024-11-05.json";
 
 import { generateValidationBlock } from "../generators/validator.ts";
 import type { TypeIR } from "../ir/types.ts";
@@ -293,6 +294,11 @@ const validateAsyncApi26 = buildValidatorFunction(
 const validateAsyncApi30 = buildValidatorFunction(
   asyncApi30Schema as unknown as Record<string, unknown>
 );
+const validateMcp = buildValidatorFunction({
+  $ref: "#/definitions/ListToolsResult",
+  definitions: (mcpSchema as unknown as Record<string, Record<string, unknown>>).definitions,
+});
+
 
 const JSON_SCHEMA_TYPES = [
   "string",
@@ -342,42 +348,44 @@ function formatErrors(
 /**
  * Synchronously validates a spec document object against schema definitions.
  */
-export function validateSpecDocumentSync(doc: unknown): ValidationResult {
+export function validateSpecDocumentSync(
+  doc: unknown,
+  schemaHint?: string
+): ValidationResult {
   if (!isObject(doc)) {
-    return { valid: false, errors: ["Document must be an object"] };
+    return {
+      valid: false,
+      errors: ["Document is not an object"],
+    };
   }
 
-  if (typeof doc.openapi === "string") {
-    const version = String(doc.openapi);
-    if (!version.startsWith("3.0") && !version.startsWith("3.1")) {
-      return {
-        valid: false,
-        errors: [`Unsupported OpenAPI version '${version}'`],
-      };
+  if (schemaHint === "mcp") {
+    return formatErrors(validateMcp(doc));
+  }
+
+  // Schema sniffing heuristics...
+  if ("openapi" in doc) {
+    const ver = String(doc.openapi);
+    if (ver.startsWith("3.1")) {
+      return formatErrors(validateOpenApi31(doc));
     }
-    const validator = version.startsWith("3.0") ? validateOpenApi30 : validateOpenApi31;
-    return formatErrors(validator(doc));
-  }
-
-  if (typeof doc.openrpc === "string") {
+    return formatErrors(validateOpenApi30(doc));
+  } else if ("openrpc" in doc) {
     return formatErrors(validateOpenRpc13(doc));
-  }
-
-  if (typeof doc.asyncapi === "string") {
-    const version = String(doc.asyncapi);
-    const validator = version.startsWith("2.") ? validateAsyncApi26 : validateAsyncApi30;
-    return formatErrors(validator(doc));
-  }
-
-  if (typeof doc.$schema === "string") {
+  } else if ("asyncapi" in doc) {
+    const ver = String(doc.asyncapi);
+    if (ver.startsWith("3.")) {
+      return formatErrors(validateAsyncApi30(doc));
+    }
+    return formatErrors(validateAsyncApi26(doc));
+  } else if ("$schema" in doc) {
+    // It looks like a raw JSON Schema. We validate using a basic schema-for-schemas.
     return formatErrors(validateJsonSchema(doc));
   }
 
   return {
     valid: false,
-    errors: [
-      "Unrecognised spec document: missing 'openapi', 'openrpc', 'asyncapi', or '$schema' key",
-    ],
+    errors: ["Unrecognised spec document"],
   };
 }
 
@@ -385,9 +393,10 @@ export function validateSpecDocumentSync(doc: unknown): ValidationResult {
  * Asynchronously validates a spec document against official JSON schema meta-schemas.
  */
 export async function validateSpecDocument(
-  doc: unknown
+  doc: unknown,
+  schemaHint?: string
 ): Promise<ValidationResult> {
-  return validateSpecDocumentSync(doc);
+  return validateSpecDocumentSync(doc, schemaHint);
 }
 
 /**
@@ -395,9 +404,10 @@ export async function validateSpecDocument(
  */
 export function assertValidSpecDocumentSync(
   doc: unknown,
-  contextName = "Spec"
+  contextName = "Spec",
+  schemaHint?: string
 ): void {
-  const result = validateSpecDocumentSync(doc);
+  const result = validateSpecDocumentSync(doc, schemaHint);
   if (!result.valid) {
     throw new Error(`[wiz] Generated ${contextName} document is invalid: ${(result.errors ?? []).join("; ")}`);
   }
@@ -408,10 +418,9 @@ export function assertValidSpecDocumentSync(
  */
 export async function assertValidSpecDocument(
   doc: unknown,
-  contextName = "Spec"
+  contextName = "Spec",
+  schemaHint?: string
 ): Promise<void> {
-  const result = await validateSpecDocument(doc);
-  if (!result.valid) {
-    throw new Error(`[wiz] Generated ${contextName} document is invalid: ${(result.errors ?? []).join("; ")}`);
-  }
+  assertValidSpecDocumentSync(doc, contextName, schemaHint);
 }
+

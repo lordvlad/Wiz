@@ -1,7 +1,10 @@
 import { toSnakeCase, type TypeIR } from "../types.ts";
 import { irToJsonSchema } from "./schema.ts";
 import { emptyService, isMcpMethod, type ServiceIR } from "../ir/service.ts";
+import { assertValidSpecDocumentSync } from "../validators/jsonSchema.ts";
+
 export interface McpGeneratorOptions {
+  validate?: boolean;
   info?: {
     title?: string;
     version?: string;
@@ -92,6 +95,10 @@ export function generateMcpSchemaCode(
     }
   }
 
+  if (options.validate !== false) {
+    const sampleDoc = { tools: toolsList };
+    assertValidSpecDocumentSync(sampleDoc, "MCP", "mcp");
+  }
 
   const buildDocument = [
     `function buildMcpDocument(baseSchema = {}) {`,

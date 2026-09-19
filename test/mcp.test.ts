@@ -92,6 +92,30 @@ describe("MCP Schema Generator", () => {
     expect(doc.tools[0].outputSchema.type).toBe("array");
   });
 
+  test("generateMcpSchemaCode throws validation error on malformed input schema", () => {
+    const service: ServiceIR = {
+      kind: "service",
+      methods: [
+        {
+          kind: "serviceMethod",
+          protocol: "mcp",
+          address: { protocol: "mcp", name: "bad_tool" },
+          description: 123 as any, // Invalid: MCP requires description to be a string
+          request: {
+            protocol: "mcp",
+            input: {
+              id: "t_in",
+              kind: "object",
+              properties: [],
+            },
+          },
+          responses: [],
+        },
+      ],
+    };
+    expect(() => generateMcpSchemaCode([], service)).toThrow(/\[wiz\] Generated MCP document is invalid/);
+  });
+
   test("mcpSchema stub throws PluginInactiveError when plugin is not active", () => {
     expect(() => mcpSchema()).toThrow("without active Bun plugin");
   });
