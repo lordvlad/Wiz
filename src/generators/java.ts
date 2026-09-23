@@ -85,7 +85,7 @@ function toCamelCase(name: string): string {
 /**
  * Derives a suffix based on a mimetype (e.g. "application/json" -> "AsJson", "application/xml" -> "AsXml").
  */
-function mimetypeToSuffix(mimetype: string): string {
+export function mimetypeToSuffix(mimetype: string): string {
   const norm = mimetype.toLowerCase();
   if (norm.includes("json")) return "AsJson";
   if (norm.includes("xml")) return "AsXml";
@@ -102,7 +102,7 @@ function mimetypeToSuffix(mimetype: string): string {
 /**
  * Map TypeIR to a Java type name.
  */
-function toJavaType(ir: TypeIR, typeNameMap: Map<string, string>): string {
+export function toJavaType(ir: TypeIR, typeNameMap: Map<string, string>): string {
   switch (ir.kind) {
     case "primitive": {
       switch (ir.type) {

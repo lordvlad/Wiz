@@ -260,8 +260,16 @@ function normalizeMediaTypes(mediaTypes?: string[] | "all"): Set<string> | "all"
 
 function isMimetypeSupported(mimetype: string, mediaTypes?: string[] | "all"): boolean {
   const norm = mimetype.toLowerCase().trim();
-  // JSON, multipart/form-data, and application/x-www-form-urlencoded are always supported
-  if (norm === "application/json" || norm.endsWith("+json") || norm === "json") {
+  // JSON, SSE, NDJSON, multipart/form-data, and application/x-www-form-urlencoded are always supported
+  if (
+    norm === "application/json" ||
+    norm.endsWith("+json") ||
+    norm === "json" ||
+    norm === "text/event-stream" ||
+    norm.includes("ndjson") ||
+    norm.includes("event-stream") ||
+    norm.includes("stream")
+  ) {
     return true;
   }
   if (norm.includes("multipart/form-data") || norm.includes("form-data")) {
@@ -709,13 +717,18 @@ function httpOperation(
         ]
       : []),
   ].join("\n");
-
-  const send = `send(config, {\n${call}\n      }, callOptions)`;
+  const isStreamResponse = chosen.some(
+    (r) =>
+      r.streaming ||
+      r.body?.some((b) => b.mimetype.includes("event-stream") || b.mimetype.includes("ndjson"))
+  );
+  const send = isStreamResponse
+    ? `sendStream(config, {\n${call}\n      }, callOptions)`
+    : `send(config, {\n${call}\n      }, callOptions)`;
 
   const parameters = method.request.parameters ?? [];
   const grouped = (location: ParameterIR["in"]) =>
     parameters.filter((parameter) => parameter.in === location);
-
   const resolved = (ir: TypeIR | undefined): TypeIR | undefined =>
     ir ? inlineRefs(ir, declared) : undefined;
 
@@ -833,7 +846,10 @@ function httpOperation(
     applied.responseBody(name, chosen[0]?.extensions, value);
 
   let body: string;
-  if (returns === "void") {
+  if (isStreamResponse) {
+    const yieldExpr = decode ? `${decode}(chunk as string)` : `chunk as ${returns}`;
+    body = `${valPrefix}      for await (const chunk of ${send}) {\n        yield ${yieldExpr};\n      }`;
+  } else if (returns === "void") {
     body = `${valPrefix}      await ${send};`;
   } else if (decode) {
     const value = selected(`${decode}(await ${send} as string)`);
@@ -863,20 +879,24 @@ function httpOperation(
       slots.length === 0 ? ["callOptions"] : ["options", "callOptions"],
     optionsType: optionsType ?? "HttpCallOptions",
     resultType: returns,
-    returns: returns === "void" ? "Promise<void>" : `Promise<${aliases.result}>`,
+    returns: isStreamResponse
+      ? `AsyncIterable<${aliases.result}>`
+      : returns === "void"
+        ? "Promise<void>"
+        : `Promise<${aliases.result}>`,
     // Parameters are left unannotated: the object literal is contextually typed
     // by `Client`, so the signature has exactly one source of truth.
-    implementation: `    async ${name}(${slots.length === 0 ? "callOptions" : "options, callOptions"}) {\n${body}\n    },`,
-    streaming: false,
+    implementation: isStreamResponse
+      ? `    async *${name}(${slots.length === 0 ? "callOptions" : "options, callOptions"}) {\n${body}\n    },`
+      : `    async ${name}(${slots.length === 0 ? "callOptions" : "options, callOptions"}) {\n${body}\n    },`,
+    streaming: isStreamResponse,
   };
 }
-
 /** `encodePet`, from the identifier the model declares the message under. */
 function codecName(kind: "encode" | "decode", identifier: string): string {
   return `${kind}${identifier.charAt(0).toUpperCase()}${identifier.slice(1)}`;
 }
 
-/** `/pets.Pets/GetPet`, which is the whole of a gRPC address on the wire. */
 function grpcPath(method: GrpcServiceMethodIR): string {
   const qualified = method.address.package
     ? `${method.address.package}.${method.address.service}`
@@ -1311,9 +1331,6 @@ async function send(
 ): Promise<unknown> {
   const http = httpTransport(config);
 
-  // The signal is built inside the attempt, not once per call, so an
-  // interceptor that calls \`next\` again gets a fresh deadline rather than one
-  // that has already fired. The caller's own signal spans every attempt.
   const invoke = async (outgoing: Call): Promise<CallResult> => {
     const activeCall: Call = {
       ...outgoing,
@@ -1327,8 +1344,6 @@ async function send(
       response: await http.call(activeCall),
     };
   };
-  // The status is judged after the chain, so an interceptor sees the response
-  // that a retry or a token refresh has to look at, not an exception.
   const settled = await __HTTP_CHAIN__(call);
 
   const body = await parseBody(settled.response);
@@ -1338,17 +1353,100 @@ async function send(
   return body;
 }`;
 
-/**
- * The URL and header encoding rules, which only an HTTP method calls.
- *
- * They are a segment of their own so a client that speaks only JSON-RPC - one
- * POST, no path or query to build - does not carry three functions nothing in
- * the file reads.
- */
-const HTTP_ENCODING = `function encodePath(value: string | number | boolean): string {
-  return encodeURIComponent(String(value));
+const HTTP_ENCODING = `async function* parseStream(response: Response): AsyncGenerator<unknown, void, unknown> {
+  if (!response.body) return;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const ct = (response.headers.get("content-type") ?? "").toLowerCase();
+  const isSse = ct.includes("event-stream") || ct.includes("text/event-stream");
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (isSse) {
+          if (trimmed.startsWith("data:")) {
+            const data = trimmed.slice(5).trim();
+            if (data === "[DONE]") return;
+            try {
+              yield JSON.parse(data);
+            } catch {
+              yield data;
+            }
+          }
+        } else {
+          try {
+            yield JSON.parse(trimmed);
+          } catch {
+            yield trimmed;
+          }
+        }
+      }
+    }
+    if (buffer.trim()) {
+      const trimmed = buffer.trim();
+      if (isSse && trimmed.startsWith("data:")) {
+        const data = trimmed.slice(5).trim();
+        if (data !== "[DONE]") {
+          try {
+            yield JSON.parse(data);
+          } catch {
+            yield data;
+          }
+        }
+      } else if (!isSse) {
+        try {
+          yield JSON.parse(trimmed);
+        } catch {
+          yield trimmed;
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
+async function* sendStream(
+  config: ClientConfig,
+  call: Call,
+  options: HttpCallOptions | undefined
+): AsyncGenerator<unknown, void, unknown> {
+  const http = httpTransport(config);
+
+  const invoke = async (outgoing: Call): Promise<CallResult> => {
+    const activeCall: Call = {
+      ...outgoing,
+      signal: effectiveSignal(
+        options?.signal,
+        options?.timeoutMs ?? config.timeoutMs
+      ),
+    };
+    return {
+      call: activeCall,
+      response: await http.call(activeCall),
+    };
+  };
+  const settled = await __HTTP_CHAIN__(call);
+  if (!settled.response.ok) {
+    const body = await parseBody(settled.response);
+    throw new ApiError(settled.response.status, body, settled.response);
+  }
+  for await (const chunk of parseStream(settled.response)) {
+    yield chunk;
+  }
+}
+
+function encodePath(value: string | number | boolean): string {
+  return encodeURIComponent(String(value));
+}
 function serializeParam(
   key: string,
   value: unknown,
@@ -2720,7 +2818,7 @@ ${valHelpers.size > 0 ? `${[...valHelpers].join("\n\n")}\n` : ""}`
         "\n__HTTP_ENCODING__\n",
         speaksHttp ? `\n${HTTP_ENCODING}\n` : ""
       )
-      .replace(
+      .replaceAll(
         "__HTTP_CHAIN__",
         usesHttpChain ? "chain(config.interceptors?.http, invoke)" : "invoke"
       )}\n`,

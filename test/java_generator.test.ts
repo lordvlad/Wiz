@@ -213,17 +213,17 @@ describe("Java Generator (models, Jakarta client, MicroProfile client, package a
     const typeNameMap = new Map<string, string>();
 
     test("maps primitive types correctly", () => {
-      expect(toJavaType({ kind: "primitive", type: "string" }, typeNameMap)).toBe("String");
-      expect(toJavaType({ kind: "primitive", type: "number" }, typeNameMap)).toBe("Double");
-      expect(toJavaType({ kind: "primitive", type: "boolean" }, typeNameMap)).toBe("Boolean");
-      expect(toJavaType({ kind: "primitive", type: "bigint" }, typeNameMap)).toBe("Long");
-      expect(toJavaType({ kind: "primitive", type: "date" }, typeNameMap)).toBe("java.time.OffsetDateTime");
-      expect(toJavaType({ kind: "primitive", type: "null" }, typeNameMap)).toBe("Object");
-      expect(toJavaType({ kind: "primitive", type: "undefined" }, typeNameMap)).toBe("Void");
-      expect(toJavaType({ kind: "primitive", type: "void" }, typeNameMap)).toBe("Void");
-      expect(toJavaType({ kind: "primitive", type: "unknown" }, typeNameMap)).toBe("Object");
-      expect(toJavaType({ kind: "primitive", type: "any" }, typeNameMap)).toBe("Object");
-      expect(toJavaType({ kind: "primitive", type: "never" }, typeNameMap)).toBe("Object");
+      expect(toJavaType({ id: "1", kind: "primitive", type: "string" }, typeNameMap)).toBe("String");
+      expect(toJavaType({ id: "2", kind: "primitive", type: "number" }, typeNameMap)).toBe("Double");
+      expect(toJavaType({ id: "3", kind: "primitive", type: "boolean" }, typeNameMap)).toBe("Boolean");
+      expect(toJavaType({ id: "4", kind: "primitive", type: "bigint" }, typeNameMap)).toBe("Long");
+      expect(toJavaType({ id: "5", kind: "primitive", type: "date" }, typeNameMap)).toBe("java.time.OffsetDateTime");
+      expect(toJavaType({ id: "6", kind: "primitive", type: "null" }, typeNameMap)).toBe("Object");
+      expect(toJavaType({ id: "7", kind: "primitive", type: "undefined" }, typeNameMap)).toBe("Void");
+      expect(toJavaType({ id: "8", kind: "primitive", type: "void" }, typeNameMap)).toBe("Void");
+      expect(toJavaType({ id: "9", kind: "primitive", type: "unknown" }, typeNameMap)).toBe("Object");
+      expect(toJavaType({ id: "10", kind: "primitive", type: "any" }, typeNameMap)).toBe("Object");
+      expect(toJavaType({ id: "11", kind: "primitive", type: "never" }, typeNameMap)).toBe("Object");
     });
   });
 

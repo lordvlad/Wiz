@@ -24,7 +24,7 @@ deserves a decision rather than a paragraph.
 ## Shared gaps
 
 - [x] [Request bodies that are not JSON](#request-bodies-that-are-not-json)
-- [ ] [Streaming and server-sent events](#streaming-and-server-sent-events)
+- [x] [Streaming and server-sent events](#streaming-and-server-sent-events)
 - [ ] [`securitySchemes` reaches no generated client](#securityschemes-reaches-no-generated-client)
 - [x] [Parameter serialisation ignores `style` and `explode`](#parameter-serialisation-ignores-style-and-explode)
 - [ ] [GraphQL](#graphql)

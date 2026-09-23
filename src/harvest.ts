@@ -872,9 +872,11 @@ function parseOpenApiMethodFromSignature(
           }
         }
         const description = descParts.length > 0 ? descParts.join(" ") : undefined;
+        const isStreamMime = mimetype === "text/event-stream" || mimetype.includes("stream") || mimetype.includes("ndjson") || mimetype.includes("jsonl");
         responses.push({
           protocol: "http",
           status,
+          ...(isStreamMime ? { streaming: true } : {}),
           ...(description ? { description } : {}),
           ...(bodyIR ? { body: [{ mimetype, content: bodyIR }] } : {}),
         });
@@ -884,21 +886,18 @@ function parseOpenApiMethodFromSignature(
 
   if (responses.length === 0) {
     const returnType = sig.getReturnType();
-    let targetType = returnType;
-    if (
-      (returnType.symbol?.name === "Promise" || returnType.aliasSymbol?.name === "Promise") &&
-      (returnType as ts.TypeReference).typeArguments?.length
-    ) {
-      targetType = (returnType as ts.TypeReference).typeArguments![0]!;
-    }
+    const unwrappedPromise = unwrapPromiseType(returnType);
+    const { streaming, type: targetType } = unwrapStreamingType(unwrappedPromise);
     if (targetType.flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined | ts.TypeFlags.Never)) {
       responses.push({ protocol: "http", status: 204 });
     } else {
       const resIR = extractTypeIR(targetType, checker);
+      const mimetype = streaming ? "text/event-stream" : JSON_MIME;
       responses.push({
         protocol: "http",
         status: 200,
-        body: [{ mimetype: JSON_MIME, content: resIR }],
+        ...(streaming ? { streaming: true } : {}),
+        body: [{ mimetype, content: resIR }],
       });
     }
   }

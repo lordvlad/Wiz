@@ -160,7 +160,8 @@ export interface HttpResponseIR {
    * Schema extensions ride on `Annotated`; these belong to the response as a
    * whole - what to unwrap from the payload, for instance - and have no
    * schema to hang off.
-   */
+  /** Set to true when the response body is streamed (e.g. SSE or chunked stream). */
+  streaming?: boolean;
   extensions?: Record<string, unknown>;
 }
 

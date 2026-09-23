@@ -72,6 +72,11 @@ function emitReactQueryFiles(
     const doc = methodDoc(method);
 
     const isHttp = isHttpMethod(method);
+    if (isHttp) {
+      const http = method as HttpServiceMethodIR;
+      const isStreaming = http.responses.some((r) => r.streaming || r.body?.some((b) => b.mimetype.includes("event-stream") || b.mimetype.includes("ndjson")));
+      if (isStreaming) continue;
+    }
     const httpMethod = isHttp ? method.address.method.toUpperCase() : "POST";
     const pathTemplate = isHttp
       ? method.address.path
