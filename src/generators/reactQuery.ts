@@ -8,6 +8,8 @@ import {
   methodNames,
   declaredTypes,
   operationTypeNames,
+  requestSlots,
+  type Slot,
   type TsClientOptions,
 } from "./tsClient.ts";
 import { docComment, typeIdentifiers } from "./tsTypes.ts";
@@ -18,8 +20,7 @@ interface QueryOp {
   name: string;
   capitalName: string;
   pathTemplate: string;
-  hasSlots: boolean;
-  hasRequiredSlots: boolean;
+  slots: Slot[];
   optionsTypeName: string;
   resultTypeName: string;
   doc?: string;
@@ -30,7 +31,7 @@ interface MutationOp {
   capitalName: string;
   pathTemplate: string;
   method: string;
-  hasSlots: boolean;
+  slots: Slot[];
   optionsTypeName: string;
   resultTypeName: string;
   doc?: string;
@@ -74,7 +75,11 @@ function emitReactQueryFiles(
     const isHttp = isHttpMethod(method);
     if (isHttp) {
       const http = method as HttpServiceMethodIR;
-      const isStreaming = http.responses.some((r) => r.streaming || r.body?.some((b) => b.mimetype.includes("event-stream") || b.mimetype.includes("ndjson")));
+      const isStreaming = http.responses.some(
+        (r) =>
+          r.streaming ||
+          r.body?.some((b) => b.mimetype.includes("event-stream") || b.mimetype.includes("ndjson"))
+      );
       if (isStreaming) continue;
     }
     const httpMethod = isHttp ? method.address.method.toUpperCase() : "POST";
@@ -86,32 +91,16 @@ function emitReactQueryFiles(
 
     const isQuery = isHttp && ["GET", "HEAD", "OPTIONS"].includes(httpMethod);
 
-    let hasSlots = false;
-    let hasRequiredSlots = false;
-
-    if (isHttp) {
-      const http = method as HttpServiceMethodIR;
-      const params = http.request.parameters ?? [];
-      const hasBody = Boolean(http.request.body && http.request.body.length > 0);
-      hasSlots = params.length > 0 || hasBody;
-
-      const hasPath = params.some((p) => p.in === "path");
-      const hasReqParam = params.some((p) => p.required);
-      const hasReqBody = hasBody && http.request.bodyRequired !== false;
-
-      hasRequiredSlots = hasPath || hasReqParam || hasReqBody;
-    } else {
-      hasSlots = true;
-      hasRequiredSlots = true;
-    }
+    const slots = isHttp
+      ? requestSlots(method as HttpServiceMethodIR, identifiers, context.options)
+      : [];
 
     if (isQuery) {
       queryOps.push({
         name,
         capitalName,
         pathTemplate,
-        hasSlots,
-        hasRequiredSlots,
+        slots,
         optionsTypeName: aliases.options,
         resultTypeName: aliases.result,
         doc,
@@ -122,7 +111,7 @@ function emitReactQueryFiles(
         capitalName,
         pathTemplate,
         method: httpMethod,
-        hasSlots,
+        slots,
         optionsTypeName: aliases.options,
         resultTypeName: aliases.result,
         doc,
@@ -149,20 +138,42 @@ function emitReactQueryFiles(
     .map((name) => `, type ${name}`)
     .join("");
 
+  const allQueryCode = queryOps.map((op) => `${op.slots.map((s) => s.type).join(" ")} ${op.resultTypeName}`).join(" ");
+  const modelQueryImports = [...identifiers.values()]
+    .filter((identifier) => new RegExp(`\\b${identifier}\\b`).test(allQueryCode))
+    .sort();
+  const modelQueryImportLine = modelQueryImports.length > 0
+    ? `import type { ${modelQueryImports.join(", ")} } from "./model.ts";\n`
+    : "";
+
+  const allMutationCode = mutationOps.map((op) => `${op.slots.map((s) => s.type).join(" ")} ${op.resultTypeName}`).join(" ");
+  const modelMutationImports = [...identifiers.values()]
+    .filter((identifier) => new RegExp(`\\b${identifier}\\b`).test(allMutationCode))
+    .sort();
+  const modelMutationImportLine = modelMutationImports.length > 0
+    ? `import type { ${modelMutationImports.join(", ")} } from "./model.ts";\n`
+    : "";
+
   const queryCode = [
     banner("React Query options getters and hooks for query operations."),
     'import { useQuery, type UseQueryOptions } from "@tanstack/react-query";',
+    ...(modelQueryImportLine ? [modelQueryImportLine.trim()] : []),
     `import { defaultClient, type Client${queryAliases} } from "./api.ts";`,
     'import { createMutations } from "./mutations.ts";',
     "",
     ...queryOps.flatMap((op) => {
       const pathLit = JSON.stringify(op.pathTemplate);
-      const optParamDecl = op.hasRequiredSlots
-        ? `options: ${op.optionsTypeName}`
-        : `options?: ${op.optionsTypeName}`;
-      const callArgs = op.hasSlots
-        ? `options, { signal }`
-        : `{ signal }`;
+      const positionalParams: string[] = [];
+      const paramNames: string[] = [];
+      for (const slot of op.slots) {
+        const opt = slot.required ? "" : "?";
+        positionalParams.push(`${slot.name}${opt}: ${slot.type}`);
+        paramNames.push(slot.name);
+      }
+      const optParamDecl = positionalParams.length > 0 ? `${positionalParams.join(", ")}, ` : "";
+      const callArgs = paramNames.length > 0 ? `${paramNames.join(", ")}, { signal }` : "{ signal }";
+      const queryKeyParts = [pathLit, ...paramNames].join(", ");
+      const forwardArgs = paramNames.join(", ");
 
       const optionsFnDoc = op.doc
         ? op.doc
@@ -174,12 +185,11 @@ function emitReactQueryFiles(
         `  TData = ${op.resultTypeName},`,
         "  TError = unknown",
         ">(",
-        `  ${optParamDecl},`,
-        `  queryOptions?: Omit<UseQueryOptions<${op.resultTypeName}, TError, TData>, "queryKey" | "queryFn">,`,
+        `  ${optParamDecl}queryOptions?: Omit<UseQueryOptions<${op.resultTypeName}, TError, TData>, "queryKey" | "queryFn">,`,
         "  client: Client = defaultClient()",
         ") {",
         "  return {",
-        `    queryKey: [${pathLit}, options] as const,`,
+        `    queryKey: [${queryKeyParts}] as const,`,
         "    queryFn: ({ signal }: { signal?: AbortSignal }) =>",
         `      client.${op.name}(${callArgs}),`,
         "    ...queryOptions,",
@@ -190,11 +200,10 @@ function emitReactQueryFiles(
         `  TData = ${op.resultTypeName},`,
         "  TError = unknown",
         ">(",
-        `  ${optParamDecl},`,
-        `  queryOptions?: Omit<UseQueryOptions<${op.resultTypeName}, TError, TData>, "queryKey" | "queryFn">,`,
+        `  ${optParamDecl}queryOptions?: Omit<UseQueryOptions<${op.resultTypeName}, TError, TData>, "queryKey" | "queryFn">,`,
         "  client: Client = defaultClient()",
         ") {",
-        `  return useQuery(get${op.capitalName}QueryOptions(options${op.hasRequiredSlots ? "" : "!"}, queryOptions, client));`,
+        `  return useQuery(get${op.capitalName}QueryOptions(${forwardArgs ? `${forwardArgs}, ` : ""}queryOptions, client));`,
         "}",
         "",
       ];
@@ -203,18 +212,22 @@ function emitReactQueryFiles(
     "export function createQueries(client: Client = defaultClient()) {",
     "  return {",
     ...queryOps.map((op) => {
-      const optParamDecl = op.hasRequiredSlots
-        ? `options: ${op.optionsTypeName}`
-        : `options?: ${op.optionsTypeName}`;
+      const positionalParams: string[] = [];
+      const paramNames: string[] = [];
+      for (const slot of op.slots) {
+        const opt = slot.required ? "" : "?";
+        positionalParams.push(`${slot.name}${opt}: ${slot.type}`);
+        paramNames.push(slot.name);
+      }
+      const optParamDecl = positionalParams.length > 0 ? `${positionalParams.join(", ")}, ` : "";
+      const forwardArgs = paramNames.join(", ");
       return [
         `    get${op.capitalName}QueryOptions: <TData = ${op.resultTypeName}, TError = unknown>(`,
-        `      ${optParamDecl},`,
-        `      queryOptions?: Omit<UseQueryOptions<${op.resultTypeName}, TError, TData>, "queryKey" | "queryFn">`,
-        `    ) => get${op.capitalName}QueryOptions<TData, TError>(options${op.hasRequiredSlots ? "" : "!"}, queryOptions, client),`,
+        `      ${optParamDecl}queryOptions?: Omit<UseQueryOptions<${op.resultTypeName}, TError, TData>, "queryKey" | "queryFn">`,
+        `    ) => get${op.capitalName}QueryOptions<TData, TError>(${forwardArgs ? `${forwardArgs}, ` : ""}queryOptions, client),`,
         `    use${op.capitalName}: <TData = ${op.resultTypeName}, TError = unknown>(`,
-        `      ${optParamDecl},`,
-        `      queryOptions?: Omit<UseQueryOptions<${op.resultTypeName}, TError, TData>, "queryKey" | "queryFn">`,
-        `    ) => use${op.capitalName}<TData, TError>(options${op.hasRequiredSlots ? "" : "!"}, queryOptions, client),`,
+        `      ${optParamDecl}queryOptions?: Omit<UseQueryOptions<${op.resultTypeName}, TError, TData>, "queryKey" | "queryFn">`,
+        `    ) => use${op.capitalName}<TData, TError>(${forwardArgs ? `${forwardArgs}, ` : ""}queryOptions, client),`,
       ].join("\n");
     }),
     "  };",
@@ -233,6 +246,7 @@ function emitReactQueryFiles(
   const mutationCode = [
     banner("React Query options getters and hooks for mutation operations."),
     'import { useMutation, type UseMutationOptions } from "@tanstack/react-query";',
+    ...(modelMutationImportLine ? [modelMutationImportLine.trim()] : []),
     `import { defaultClient, type Client${mutationAliases} } from "./api.ts";`,
     "",
     ...mutationOps.flatMap((op) => {
@@ -243,17 +257,35 @@ function emitReactQueryFiles(
         : `/** Mutation options getter for \`${op.name}\`. */\n`;
       const hookDoc = `/** React Query hook for \`${op.name}\`. */\n`;
 
+      const paramNames: string[] = op.slots.map((s) => s.name);
+      const hasParams = paramNames.length > 0;
+      const mutationArgType = hasParams
+        ? paramNames.length === 1
+          ? op.slots[0]!.type
+          : `[${op.slots.map((s) => s.type).join(", ")}]`
+        : "void";
+      const mutationFnArg = hasParams
+        ? paramNames.length === 1
+          ? `arg: ${op.slots[0]!.type}`
+          : `[${paramNames.join(", ")}]: [${op.slots.map((s) => s.type).join(", ")}]`
+        : "";
+      const clientCallArgs = hasParams
+        ? paramNames.length === 1
+          ? "arg"
+          : paramNames.join(", ")
+        : "";
+
       return [
         `${optionsFnDoc}export function get${op.capitalName}MutationOptions<`,
         "  TError = unknown",
         ">(",
-        `  mutationOptions?: Omit<UseMutationOptions<${op.resultTypeName}, TError, ${op.optionsTypeName}>, "mutationFn">,`,
+        `  mutationOptions?: Omit<UseMutationOptions<${op.resultTypeName}, TError, ${mutationArgType}>, "mutationFn">,`,
         "  client: Client = defaultClient()",
         ") {",
         "  return {",
         `    mutationKey: [${pathLit}, ${methodLit}] as const,`,
-        `    mutationFn: (${op.hasSlots ? `options: ${op.optionsTypeName}` : `options?: ${op.optionsTypeName}`}) =>`,
-        `      client.${op.name}(${op.hasSlots ? "options" : "undefined"}),`,
+        `    mutationFn: (${mutationFnArg}) =>`,
+        `      client.${op.name}(${clientCallArgs}),`,
         "    ...mutationOptions,",
         "  };",
         "}",
@@ -261,7 +293,7 @@ function emitReactQueryFiles(
         `${hookDoc}export function use${op.capitalName}<`,
         "  TError = unknown",
         ">(",
-        `  mutationOptions?: Omit<UseMutationOptions<${op.resultTypeName}, TError, ${op.optionsTypeName}>, "mutationFn">,`,
+        `  mutationOptions?: Omit<UseMutationOptions<${op.resultTypeName}, TError, ${mutationArgType}>, "mutationFn">,`,
         "  client: Client = defaultClient()",
         ") {",
         `  return useMutation(get${op.capitalName}MutationOptions<TError>(mutationOptions, client));`,
@@ -273,12 +305,18 @@ function emitReactQueryFiles(
     "export function createMutations(client: Client = defaultClient()) {",
     "  return {",
     ...mutationOps.map((op) => {
+      const hasParams = op.slots.length > 0;
+      const mutationArgType = hasParams
+        ? op.slots.length === 1
+          ? op.slots[0]!.type
+          : `[${op.slots.map((s) => s.type).join(", ")}]`
+        : "void";
       return [
         `    get${op.capitalName}MutationOptions: <TError = unknown>(`,
-        `      mutationOptions?: Omit<UseMutationOptions<${op.resultTypeName}, TError, ${op.optionsTypeName}>, "mutationFn">`,
+        `      mutationOptions?: Omit<UseMutationOptions<${op.resultTypeName}, TError, ${mutationArgType}>, "mutationFn">`,
         `    ) => get${op.capitalName}MutationOptions<TError>(mutationOptions, client),`,
         `    use${op.capitalName}: <TError = unknown>(`,
-        `      mutationOptions?: Omit<UseMutationOptions<${op.resultTypeName}, TError, ${op.optionsTypeName}>, "mutationFn">`,
+        `      mutationOptions?: Omit<UseMutationOptions<${op.resultTypeName}, TError, ${mutationArgType}>, "mutationFn">`,
         `    ) => use${op.capitalName}<TError>(mutationOptions, client),`,
       ].join("\n");
     }),

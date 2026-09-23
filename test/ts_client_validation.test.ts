@@ -242,14 +242,9 @@ describe("emitted code compiles and runs", () => {
 
     expect(diagnostics).toEqual([]);
   });
-
   interface Client {
-    getPet(options: unknown): Promise<unknown>;
-    createPet(options: unknown): Promise<unknown>;
-  }
-
-  interface ClientModule {
-    createClient(config: Record<string, unknown>): Client;
+    getPet(path: { petId: string }, headers: { "x-token": string }, query?: { limit?: number }): Promise<unknown>;
+    createPet(path: { petId: string }, body: { id: string; name: string }): Promise<unknown>;
   }
 
   /** A client whose transport answers with `pet`, so only the checks can fail. */
@@ -283,7 +278,7 @@ describe("emitted code compiles and runs", () => {
     const client = await load(valid);
 
     expect(
-      await client.getPet({ path: { petId: "abcdef" }, headers: { "x-token": "t" } })
+      await client.getPet({ petId: "abcdef" }, { "x-token": "t" })
     ).toEqual(valid);
   });
 
@@ -294,7 +289,7 @@ describe("emitted code compiles and runs", () => {
   test("a path parameter breaking its constraint is rejected", async () => {
     const client = await load(valid);
     const error = await rejection(() =>
-      client.getPet({ path: { petId: "abc" }, headers: { "x-token": "t" } })
+      client.getPet({ petId: "abc" }, { "x-token": "t" })
     );
 
     expect(error?.name).toBe("ClientValidationError");
@@ -305,11 +300,11 @@ describe("emitted code compiles and runs", () => {
   test("a query parameter breaking its constraint is rejected", async () => {
     const client = await load(valid);
     const error = await rejection(() =>
-      client.getPet({
-        path: { petId: "abcdef" },
-        query: { limit: 0 },
-        headers: { "x-token": "t" },
-      })
+      client.getPet(
+        { petId: "abcdef" },
+        { "x-token": "t" },
+        { limit: 0 }
+      )
     );
 
     expect(error?.target).toBe("query");
@@ -318,7 +313,7 @@ describe("emitted code compiles and runs", () => {
 
   test("an absent required header is rejected", async () => {
     const client = await load(valid);
-    const error = await rejection(() => client.getPet({ path: { petId: "abcdef" } }));
+    const error = await rejection(() => client.getPet({ petId: "abcdef" }, undefined as any));
 
     expect(error?.target).toBe("headers");
   });
@@ -327,14 +322,14 @@ describe("emitted code compiles and runs", () => {
     const client = await load(valid);
 
     expect(
-      await client.getPet({ path: { petId: "abcdef" }, headers: { "x-token": "t" } })
+      await client.getPet({ petId: "abcdef" }, { "x-token": "t" })
     ).toEqual(valid);
   });
 
   test("a request body breaking its constraint is rejected", async () => {
     const client = await load(valid);
     const error = await rejection(() =>
-      client.createPet({ path: { petId: "p1" }, body: { id: "1", name: "ab" } })
+      client.createPet({ petId: "p1" }, { id: "1", name: "ab" })
     );
 
     expect(error?.target).toBe("body");
@@ -348,7 +343,7 @@ describe("emitted code compiles and runs", () => {
   test("a response the server got wrong is rejected", async () => {
     const client = await load({ id: "p1", name: "R" });
     const error = await rejection(() =>
-      client.getPet({ path: { petId: "abcdef" }, headers: { "x-token": "t" } })
+      client.getPet({ petId: "abcdef" }, { "x-token": "t" })
     );
 
     expect(error?.target).toBe("response");
@@ -358,7 +353,7 @@ describe("emitted code compiles and runs", () => {
   test("a response missing a required property is rejected", async () => {
     const client = await load({ id: "p1" });
     const error = await rejection(() =>
-      client.getPet({ path: { petId: "abcdef" }, headers: { "x-token": "t" } })
+      client.getPet({ petId: "abcdef" }, { "x-token": "t" })
     );
 
     expect(error?.target).toBe("response");

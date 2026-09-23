@@ -348,45 +348,46 @@ function selectBody(
   return chosen;
 }
 
-function bodySerializer(mimetype: string, access: string, encode?: string): string {
+function bodySerializer(mimetype: string, expr = "body", encode?: string): string {
   const norm = mimetype.toLowerCase().trim();
   if (norm.includes("multipart/form-data") || norm.includes("form-data")) {
-    return `serializeFormData(${access}.body)`;
+    return `serializeFormData(${expr})`;
   }
   if (norm.includes("application/x-www-form-urlencoded") || norm.includes("x-www-form-urlencoded") || norm.includes("urlencoded")) {
-    return `serializeUrlEncoded(${access}.body)`;
+    return `serializeUrlEncoded(${expr})`;
   }
   if (norm.includes("application/octet-stream") || norm.includes("octet-stream")) {
-    return `${access}.body`;
+    return `${expr}`;
   }
   if (norm.includes("jsonl") || norm.includes("json-lines") || norm.includes("x-jsonlines")) {
-    return `(${access}.body).map((row: any) => JSON.stringify(row)).join("\\n")`;
+    return `(${expr}).map((row: any) => JSON.stringify(row)).join("\\n")`;
   }
   if (norm.includes("jsonc")) {
-    return `JSON.stringify(${access}.body)`;
+    return `JSON.stringify(${expr})`;
   }
   if (norm.includes("json5")) {
-    return `((globalThis as any).Bun?.JSON5 ?? JSON).stringify(${access}.body)`;
+    return `((globalThis as any).Bun?.JSON5 ?? JSON).stringify(${expr})`;
   }
   if (norm.includes("yaml") || norm.includes("x-yaml")) {
-    return `((globalThis as any).Bun?.YAML ?? JSON).stringify(${access}.body)`;
+    return `((globalThis as any).Bun?.YAML ?? JSON).stringify(${expr})`;
   }
   if (norm.includes("xml")) {
-    return `((globalThis as any).Bun?.XML ? (globalThis as any).Bun.XML.stringify(${access}.body) : (() => { throw new Error("[wiz] application/xml requests need Bun.XML; this runtime has none"); })())`;
+    return `((globalThis as any).Bun?.XML ? (globalThis as any).Bun.XML.stringify(${expr}) : (() => { throw new Error("[wiz] application/xml requests need Bun.XML; this runtime has none"); })())`;
   }
   if (norm.includes("html")) {
-    return `typeof ${access}.body === "string" ? ${access}.body : ((globalThis as any).Bun?.escapeHTML ? (globalThis as any).Bun.escapeHTML(String(${access}.body)) : (() => { throw new Error("[wiz] non-string HTML request bodies need Bun.escapeHTML; this runtime has none"); })())`;
+    return `typeof ${expr} === "string" ? ${expr} : ((globalThis as any).Bun?.escapeHTML ? (globalThis as any).Bun.escapeHTML(String(${expr})) : (() => { throw new Error("[wiz] non-string HTML request bodies need Bun.escapeHTML; this runtime has none"); })())`;
   }
   if (norm.includes("cbor")) {
-    return `encodeCbor(${access}.body)`;
+    return `typeof (globalThis as any).encodeCbor === "function" ? (globalThis as any).encodeCbor(${expr}) : (() => { throw new Error("[wiz] application/cbor requests need globalThis.encodeCbor; this runtime has none"); })()`;
   }
   if (norm.includes("erlang-binary") || norm.includes("x-erlang-binary") || norm.includes("etf")) {
-    return `encodeErlangBinary(${access}.body)`;
+    return `typeof (globalThis as any).encodeErlangBinary === "function" ? (globalThis as any).encodeErlangBinary(${expr}) : (() => { throw new Error("[wiz] application/x-erlang-binary requests need globalThis.encodeErlangBinary; this runtime has none"); })()`;
   }
   if (norm.includes("erlang")) {
-    return `encodeErlangText(${access}.body)`;
+    return `typeof (globalThis as any).encodeErlangText === "function" ? (globalThis as any).encodeErlangText(${expr}) : (() => { throw new Error("[wiz] application/x-erlang-text requests need globalThis.encodeErlangText; this runtime has none"); })()`;
   }
-  return encode ? `${encode}(${access}.body)` : `JSON.stringify(${access}.body)`;
+  if (encode) return `${encode}(${expr})`;
+  return `JSON.stringify(${expr})`;
 }
 function jsonBody(
   bodies: ServiceMethodBodyIR[] | undefined,
@@ -496,71 +497,98 @@ function slotMembers(
   };
 }
 
-interface Slot {
+export interface Slot {
   name: string;
   type: string;
   required: boolean;
 }
 
-function requestSlots(
+export function requestSlots(
   method: HttpServiceMethodIR,
   identifiers: ReadonlyMap<string, string>,
   options: TsClientOptions,
-  onSkipped: (mimetype: string) => void
+  onSkipped?: (mimetype: string) => void
 ): Slot[] {
   const parameters = method.request.parameters ?? [];
   const grouped = (location: ParameterIR["in"]) =>
     parameters.filter((parameter) => parameter.in === location);
-
   const slots: Slot[] = [];
 
   const path = slotMembers(grouped("path"), identifiers);
   // Path parameters are part of the URL, so they are never optional.
   if (path) slots.push({ name: "path", type: path.text, required: true });
 
+  const body = jsonBody(method.request.body, options, onSkipped);
+  const bodyRequired = method.request.bodyRequired !== false;
+  if (body && bodyRequired) {
+    slots.push({
+      name: "body",
+      type: typeText(body, identifiers),
+      required: true,
+    });
+  }
+
   const query = slotMembers(grouped("query"), identifiers);
   const looseQuery = "Record<string, string | boolean>";
-  if (query) {
+  if (query && query.required) {
     slots.push({
       name: "query",
       type: options.lenient ? `${query.text} & ${looseQuery}` : query.text,
-      required: query.required,
+      required: true,
     });
-  } else if (options.lenient) {
-    slots.push({ name: "query", type: looseQuery, required: false });
   }
 
   const headers = slotMembers(grouped("header"), identifiers);
   const looseHeaders = "Record<string, string>";
-  if (headers) {
+  if (headers && headers.required) {
     slots.push({
       name: "headers",
       type: options.lenient ? `${headers.text} & ${looseHeaders}` : headers.text,
-      required: headers.required,
+      required: true,
     });
-  } else if (options.lenient) {
-    slots.push({ name: "headers", type: looseHeaders, required: false });
   }
 
   const cookie = slotMembers(grouped("cookie"), identifiers);
-  if (cookie) {
-    slots.push({ name: "cookie", type: cookie.text, required: cookie.required });
+  if (cookie && cookie.required) {
+    slots.push({ name: "cookie", type: cookie.text, required: true });
   }
 
-  const body = jsonBody(method.request.body, options, onSkipped);
-  if (body) {
+  if (body && !bodyRequired) {
     slots.push({
       name: "body",
       type: typeText(body, identifiers),
-      required: method.request.bodyRequired !== false,
+      required: false,
     });
+  }
+
+  if (query && !query.required) {
+    slots.push({
+      name: "query",
+      type: options.lenient ? `${query.text} & ${looseQuery}` : query.text,
+      required: false,
+    });
+  } else if (!query && options.lenient) {
+    slots.push({ name: "query", type: looseQuery, required: false });
+  }
+
+  if (headers && !headers.required) {
+    slots.push({
+      name: "headers",
+      type: options.lenient ? `${headers.text} & ${looseHeaders}` : headers.text,
+      required: false,
+    });
+  } else if (!headers && options.lenient) {
+    slots.push({ name: "headers", type: looseHeaders, required: false });
+  }
+
+  if (cookie && !cookie.required) {
+    slots.push({ name: "cookie", type: cookie.text, required: false });
   }
 
   return slots;
 }
 
 /**
- * What a call resolves to: every success payload the document lists.
  *
  * A failure is thrown rather than returned, so error responses are absent from
  * the type - a caller that wants them reads `ApiError.body`.
@@ -594,12 +622,11 @@ function successType(
   const meaningful = types.filter((text) => text !== "void");
   return meaningful.length > 0 ? meaningful.join(" | ") : "void";
 }
-
-/** The URL template, reading path parameters off the caller's slot object. */
+/** The URL template, reading path parameters off the positional path parameter. */
 function urlTemplate(
   method: HttpServiceMethodIR,
-  access: string,
-  hasQuery: boolean
+  pathExpr: string,
+  queryExpr: string | undefined
 ): string {
   const path = method.address.path.replace(
     /\{([^}]+)\}/g,
@@ -607,7 +634,7 @@ function urlTemplate(
       const key = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)
         ? `.${name}`
         : `[${JSON.stringify(name)}]`;
-      return `\${encodePath(${access}.path${key})}`;
+      return `\${encodePath(${pathExpr}${key})}`;
     }
   );
 
@@ -623,11 +650,10 @@ function urlTemplate(
   }
   const specsArg = Object.keys(querySpecs).length > 0 ? `, ${JSON.stringify(querySpecs)}` : "";
 
-  return hasQuery
-    ? `\`\${config.baseUrl}${path}\${queryString(${access}.query${specsArg})}\``
+  return queryExpr
+    ? `\`\${config.baseUrl}${path}\${queryString(${queryExpr}${specsArg})}\``
     : `\`\${config.baseUrl}${path}\``;
 }
-
 /** One operation, in the shapes the emitted file needs it in. */
 interface Operation {
   name: string;
@@ -665,20 +691,21 @@ function httpOperation(
 ): Operation {
   const slots = requestSlots(method, identifiers, options, onSkipped);
   const returns = successType(method, identifiers, options, onSkipped);
-  const required = slots.some((slot) => slot.required);
-  const access = slots.length === 0 || required ? "options" : "options?";
 
-  const optionsType =
-    slots.length === 0
-      ? undefined
-      : `{ ${slots
-          .map((slot) => `${slot.name}${slot.required ? "" : "?"}: ${slot.type}`)
-          .join("; ")} }`;
+  const positionalParams: string[] = [];
+  const parameterNames: string[] = [];
+  for (const slot of slots) {
+    const opt = slot.required ? "" : "?";
+    positionalParams.push(`${slot.name}${opt}: ${slot.type}`);
+    parameterNames.push(slot.name);
+  }
+  positionalParams.push("callOptions?: HttpCallOptions");
+  parameterNames.push("callOptions");
 
-  const parameter =
-    optionsType === undefined
-      ? "callOptions?: HttpCallOptions"
-      : `options${required ? "" : "?"}: ${aliases.options}, callOptions?: HttpCallOptions`;
+  const parameter = positionalParams.join(", ");
+  const optionsType = slots.length === 0
+    ? undefined
+    : `{ ${slots.map((s) => `${s.name}${s.required ? "" : "?"}: ${s.type}`).join("; ")} }`;
 
   const requestBodyObj = selectBody(method.request.body, options, onSkipped);
   const requestType = requestBodyObj?.content;
@@ -703,17 +730,20 @@ function httpOperation(
   const decode = responseIdentifier ? codecName("decode", responseIdentifier) : undefined;
 
   const has = (name: string) => slots.some((slot) => slot.name === name);
+  const pathExpr = has("path") ? "path" : "undefined";
+  const queryExpr = has("query") ? "query" : undefined;
+
   const call = [
     `        method: ${JSON.stringify(method.address.method)},`,
-    `        url: ${urlTemplate(method, access, has("query"))},`,
+    `        url: ${urlTemplate(method, pathExpr, queryExpr)},`,
     `        headers: headerRecord(${[
-      has("headers") ? `${access}.headers` : "undefined",
-      has("cookie") ? `${access}.cookie` : "undefined",
+      has("headers") ? "headers" : "undefined",
+      has("cookie") ? "cookie" : "undefined",
       has("body") ? JSON.stringify(requestMimetype) : "undefined",
     ].join(", ")}),`,
     ...(has("body")
       ? [
-          `        body: ${bodySerializer(requestMimetype, access, encode)},`,
+          `        body: ${bodySerializer(requestMimetype, "body", encode)},`,
         ]
       : []),
   ].join("\n");
@@ -737,11 +767,10 @@ function httpOperation(
   const headerTypeIR = resolved(parameterGroupTypeIR(grouped("header"), "header"));
   const bodyTypeIR = resolved(jsonBody(method.request.body, options, onSkipped));
   const responseTypeIR = resolved(jsonBody(chosen[0]?.body, options, onSkipped));
+  const requestChecks: string[] = [];
 
   /**
    * One slot's checks, as a guarded block.
-   *
-   * A slot the caller may legitimately omit is only checked when it is there;
    * a required one that is missing is itself a failure, and saying so here is
    * what stops the request going out with a URL that has `undefined` in it.
    */
@@ -772,13 +801,10 @@ function httpOperation(
     lines.push(`      }`);
     return lines.join("\n");
   };
-
-  const requestChecks: string[] = [];
-
   if (pathTypeIR && isValidationEnabled(options, "path")) {
     // A path parameter is always required: it is part of the URL.
     requestChecks.push(
-      slotCheck("path", pathTypeIR, `${access}.path`, true, "Missing required path parameters")
+      slotCheck("path", pathTypeIR, "path", true, "Missing required path parameters")
     );
   }
   if (queryTypeIR && isValidationEnabled(options, "query")) {
@@ -786,20 +812,9 @@ function httpOperation(
       slotCheck(
         "query",
         queryTypeIR,
-        `${access}.query`,
+        "query",
         grouped("query").some((parameter) => parameter.required),
         "Missing required query parameters"
-      )
-    );
-  }
-  if (headerTypeIR && isValidationEnabled(options, "headers")) {
-    requestChecks.push(
-      slotCheck(
-        "headers",
-        headerTypeIR,
-        `${access}.headers`,
-        grouped("header").some((parameter) => parameter.required),
-        "Missing required header parameters"
       )
     );
   }
@@ -808,9 +823,20 @@ function httpOperation(
       slotCheck(
         "body",
         bodyTypeIR,
-        `${access}.body`,
+        "body",
         method.request.bodyRequired !== false,
         "Missing required request body"
+      )
+    );
+  }
+  if (headerTypeIR && isValidationEnabled(options, "headers")) {
+    requestChecks.push(
+      slotCheck(
+        "headers",
+        headerTypeIR,
+        "headers",
+        grouped("header").some((parameter) => parameter.required),
+        "Missing required header parameters"
       )
     );
   }
@@ -875,8 +901,7 @@ function httpOperation(
       ""
     ),
     parameter,
-    parameterNames:
-      slots.length === 0 ? ["callOptions"] : ["options", "callOptions"],
+    parameterNames,
     optionsType: optionsType ?? "HttpCallOptions",
     resultType: returns,
     returns: isStreamResponse
@@ -887,16 +912,16 @@ function httpOperation(
     // Parameters are left unannotated: the object literal is contextually typed
     // by `Client`, so the signature has exactly one source of truth.
     implementation: isStreamResponse
-      ? `    async *${name}(${slots.length === 0 ? "callOptions" : "options, callOptions"}) {\n${body}\n    },`
-      : `    async ${name}(${slots.length === 0 ? "callOptions" : "options, callOptions"}) {\n${body}\n    },`,
+      ? `    async *${name}(${parameterNames.join(", ")}) {\n${body}\n    },`
+      : `    async ${name}(${parameterNames.join(", ")}) {\n${body}\n    },`,
     streaming: isStreamResponse,
   };
 }
+
 /** `encodePet`, from the identifier the model declares the message under. */
 function codecName(kind: "encode" | "decode", identifier: string): string {
   return `${kind}${identifier.charAt(0).toUpperCase()}${identifier.slice(1)}`;
 }
-
 function grpcPath(method: GrpcServiceMethodIR): string {
   const qualified = method.address.package
     ? `${method.address.package}.${method.address.service}`

@@ -171,12 +171,11 @@ describe("reactQueryGenerator basic code generation", () => {
     expect(mutations).toContain("export function createMutations");
   });
 
-  test("query keys start with path template and include options parameter", () => {
+  test("query keys start with path template and include slot parameters", () => {
     const queries = files["queries.ts"]!;
-    expect(queries).toContain('queryKey: ["/pets", options] as const');
-    expect(queries).toContain('queryKey: ["/pets/{petId}", options] as const');
+    expect(queries).toContain('queryKey: ["/pets", query] as const');
+    expect(queries).toContain('queryKey: ["/pets/{petId}", path] as const');
   });
-
   test("mutation keys use path template and HTTP method", () => {
     const mutations = files["mutations.ts"]!;
     expect(mutations).toContain('mutationKey: ["/pets", "POST"] as const');
@@ -194,8 +193,8 @@ describe("reactQueryGenerator basic code generation", () => {
 describe("Multi-tenancy & query options verification", () => {
   test("queries.ts re-uses options getter inside query hook", () => {
     const queries = files["queries.ts"]!;
-    expect(queries).toContain("return useQuery(getListPetsQueryOptions(options!, queryOptions, client));");
-    expect(queries).toContain("return useQuery(getGetPetByPetIdQueryOptions(options, queryOptions, client));");
+    expect(queries).toContain("return useQuery(getListPetsQueryOptions(query, queryOptions, client));");
+    expect(queries).toContain("return useQuery(getGetPetByPetIdQueryOptions(path, queryOptions, client));");
   });
 
   test("mutations.ts re-uses mutation options getter inside mutation hook", () => {

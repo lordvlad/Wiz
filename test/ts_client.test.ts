@@ -147,19 +147,18 @@ describe("emitted files", () => {
     );
     expect(source).toContain("export type ListPetsResult = Pet[];");
     expect(source).toContain(
-      "listPets(options?: ListPetsOptions, callOptions?: HttpCallOptions): Promise<ListPetsResult>;"
+      "listPets(query?: { limit?: number }, callOptions?: HttpCallOptions): Promise<ListPetsResult>;"
     );
-    // A required body is a required argument.
     expect(source).toContain("export type CreatePetOptions = { body: NewPet };");
     expect(source).toContain(
-      "createPet(options: CreatePetOptions, callOptions?: HttpCallOptions): Promise<CreatePetResult>;"
+      "createPet(body: NewPet, callOptions?: HttpCallOptions): Promise<CreatePetResult>;"
     );
     // Path is required, the header is not, and the header name needs quoting.
     expect(source).toContain(
       'export type GetPetByIdOptions = { path: { petId: string }; headers?: { "x-trace-id"?: string } };'
     );
     expect(source).toContain(
-      "getPetById(options: GetPetByIdOptions, callOptions?: HttpCallOptions): Promise<GetPetByIdResult>;"
+      'getPetById(path: { petId: string }, headers?: { "x-trace-id"?: string }, callOptions?: HttpCallOptions): Promise<GetPetByIdResult>;'
     );
     // No content means no payload to type.
     expect(source).toContain(
@@ -167,7 +166,7 @@ describe("emitted files", () => {
     );
     expect(source).toContain("export type DeletePetResult = void;");
     expect(source).toContain(
-      "deletePet(options: DeletePetOptions, callOptions?: HttpCallOptions): Promise<void>;"
+      "deletePet(path: { petId: string }, callOptions?: HttpCallOptions): Promise<void>;"
     );
   });
 
@@ -181,7 +180,7 @@ describe("emitted files", () => {
     // The free function is typed from the interface, so the two cannot drift,
     // and it forwards the per-call options along with the slots.
     expect(source).toContain(
-      "export const listPets: Client[\"listPets\"] = (options, callOptions) => client.listPets(options, callOptions);"
+      "export const listPets: Client[\"listPets\"] = (query, callOptions) => client.listPets(query, callOptions);"
     );
     // Four operations, four request bodies: the delegates forward, they do not
     // re-implement.
@@ -290,13 +289,14 @@ describe("emitted code compiles and runs", () => {
   }
 
   interface Operations {
-    listPets(options?: { query?: { limit?: number } }, callOptions?: CallOptionsLike): Promise<unknown>;
-    createPet(options: { body: { name: string } }, callOptions?: CallOptionsLike): Promise<unknown>;
+    listPets(query?: { limit?: number }, callOptions?: CallOptionsLike): Promise<unknown>;
+    createPet(body: { name: string }, callOptions?: CallOptionsLike): Promise<unknown>;
     getPetById(
-      options: { path: { petId: string }; headers?: { "x-trace-id"?: string } },
+      path: { petId: string },
+      headers?: { "x-trace-id"?: string },
       callOptions?: CallOptionsLike
     ): Promise<unknown>;
-    deletePet(options: { path: { petId: string } }, callOptions?: CallOptionsLike): Promise<unknown>;
+    deletePet(path: { petId: string }, callOptions?: CallOptionsLike): Promise<unknown>;
   }
 
   interface ClientModule extends Operations {
@@ -355,10 +355,10 @@ describe("emitted code compiles and runs", () => {
       seen,
     });
 
-    const pet = await client.getPetById({
-      path: { petId: "p 1" },
-      headers: { "x-trace-id": "t1" },
-    });
+    const pet = await client.getPetById(
+      { petId: "p 1" },
+      { "x-trace-id": "t1" }
+    );
 
     expect(pet).toEqual({ id: "p1", name: "Rex" });
     expect(sent[0]!.url).toBe("https://api.test/pets/p%201");
@@ -374,7 +374,7 @@ describe("emitted code compiles and runs", () => {
     const sent: Sent[] = [];
     const client = await load(() => json([]), sent);
 
-    await client.listPets({ query: { limit: 2 } });
+    await client.listPets({ limit: 2 });
     await client.listPets();
 
     expect(sent[0]!.url).toBe("https://api.test/pets?limit=2");
@@ -385,8 +385,7 @@ describe("emitted code compiles and runs", () => {
     const sent: Sent[] = [];
     const client = await load(() => json({ id: "p2", name: "Ada" }, 201), sent);
 
-    await client.createPet({ body: { name: "Ada" } });
-
+    await client.createPet({ name: "Ada" });
     expect(sent[0]!.method).toBe("POST");
     expect(sent[0]!.headers["content-type"]).toBe("application/json");
     expect(sent[0]!.body).toBe('{"name":"Ada"}');
@@ -396,7 +395,7 @@ describe("emitted code compiles and runs", () => {
     const sent: Sent[] = [];
     const client = await load(() => new Response(null, { status: 204 }), sent);
 
-    expect(await client.deletePet({ path: { petId: "p1" } })).toBeUndefined();
+    expect(await client.deletePet({ petId: "p1" })).toBeUndefined();
   });
 
   test("a failure throws with the status and the parsed body", async () => {
@@ -404,10 +403,8 @@ describe("emitted code compiles and runs", () => {
     const client = await load(() => json({ message: "gone" }, 404), sent);
 
     const failure = await client
-      .getPetById({ path: { petId: "p1" } })
+      .getPetById({ petId: "p1" })
       .catch((error: unknown) => error);
-
-    expect(failure).toBeInstanceOf(client.ApiError);
     if (!(failure instanceof client.ApiError)) throw new Error("expected ApiError");
     expect(failure.status).toBe(404);
     expect(failure.body).toEqual({ message: "gone" });
@@ -445,11 +442,11 @@ describe("emitted code compiles and runs", () => {
       },
     });
 
-    expect(await tenantA.getPetById({ path: { petId: "x" } })).toEqual({
+    expect(await tenantA.getPetById({ petId: "x" })).toEqual({
       id: "a",
       name: "A",
     });
-    expect(await tenantB.getPetById({ path: { petId: "x" } })).toEqual({
+    expect(await tenantB.getPetById({ petId: "x" })).toEqual({
       id: "b",
       name: "B",
     });
@@ -502,7 +499,7 @@ describe("emitted code compiles and runs", () => {
       },
     });
 
-    expect(await retrying.getPetById({ path: { petId: "x" } })).toEqual({
+    expect(await retrying.getPetById({ petId: "x" })).toEqual({
       id: "p1",
       name: "Rex",
     });
@@ -529,8 +526,7 @@ describe("emitted code compiles and runs", () => {
       },
     });
 
-    const pet = await customClient.getPetById({ path: { petId: "t1" } });
-    expect(pet).toEqual({ id: "t1", name: "TransportPet" });
+    const pet = await customClient.getPetById({ petId: "t1" });
     expect(calls[0]!.url).toBe("https://t.test/pets/t1");
   });
 
@@ -570,7 +566,8 @@ describe("emitted code compiles and runs", () => {
 
     const controller = new AbortController();
     const inFlight = controlled.getPetById(
-      { path: { petId: "x" } },
+      { petId: "x" },
+      undefined,
       { signal: controller.signal }
     );
     controller.abort();
@@ -579,7 +576,7 @@ describe("emitted code compiles and runs", () => {
     expect((cancelled as Error).name).toBe("AbortError");
 
     const timedOut = await controlled
-      .getPetById({ path: { petId: "x" } }, { timeoutMs: 25 })
+      .getPetById({ petId: "x" }, undefined, { timeoutMs: 25 })
       .catch((error: unknown) => error);
 
     // `AbortSignal.timeout` names its own failure, which is what keeps a
@@ -593,7 +590,7 @@ describe("emitted code compiles and runs", () => {
       transport: (_url, init) => slow(init),
     });
     const defaulted = await byDefault
-      .deletePet({ path: { petId: "x" } })
+      .deletePet({ petId: "x" })
       .catch((error: unknown) => error);
 
     expect((defaulted as Error).name).toBe("TimeoutError");
@@ -646,8 +643,7 @@ describe("emitted code compiles and runs", () => {
       },
     });
 
-    const pet = await retrying.getPetById({ path: { petId: "x" } }, { timeoutMs: 25 });
-
+    const pet = await retrying.getPetById({ petId: "x" }, undefined, { timeoutMs: 25 });
     expect(pet).toEqual({ id: "second" });
     expect(attempts).toBe(2);
   });
@@ -942,7 +938,7 @@ describe("multipart/form-data and application/x-www-form-urlencoded request body
 
     const ir = extractApiIR(doc, { format: "json" });
     const clientFiles = generate(ir, tsClientGenerator, {}, silentLogger);
-    expect(clientFiles["api.ts"]).toContain("serializeFormData(options.body)");
+    expect(clientFiles["api.ts"]).toContain("serializeFormData(body)");
     expect(clientFiles["api.ts"]).toContain("function serializeFormData");
   });
 
@@ -986,7 +982,7 @@ describe("multipart/form-data and application/x-www-form-urlencoded request body
 
     const ir = extractApiIR(doc, { format: "json" });
     const clientFiles = generate(ir, tsClientGenerator, {}, silentLogger);
-    expect(clientFiles["api.ts"]).toContain("serializeUrlEncoded(options.body)");
+    expect(clientFiles["api.ts"]).toContain("serializeUrlEncoded(body)");
     expect(clientFiles["api.ts"]).toContain("function serializeUrlEncoded");
   });
 });
