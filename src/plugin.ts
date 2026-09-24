@@ -107,11 +107,13 @@ function jsonToExpression(factory: ts.NodeFactory, value: unknown): ts.Expressio
 export interface WizPluginOptions {
     /**
      * Where diagnostics go. Defaults to {@link defaultLogger}, which forwards
-     * `info`/`warn`/`error` to `console` and drops `trace`. Pass
-     * `consoleLogger` for verbose builds, `silentLogger` to mute the plugin, or
-     * any object with the four levels to route them somewhere else.
+     * `info`/`warn`/`error` to `console` and drops `trace`. Compatible with `console`, `pino`, etc.
      */
     logger?: WizLogger;
+    /**
+     * Optional custom error factory creating error instances thrown during transformation.
+     */
+    errorFactory?: (message: string, context?: Record<string, unknown>) => Error;
 }
 
 /**

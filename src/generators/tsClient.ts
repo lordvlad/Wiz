@@ -1097,7 +1097,21 @@ function grpcOperation(
  * than reading a module-level one, which is what lets one file serve both a
  * per-instance client and the module-level default.
  */
-const PRELUDE = `/** A token string or an async provider returning one. */
+const PRELUDE = `/**
+ * Sink for client logs, compatible with \`console\`, \`pino\`, and \`winston\`.
+ */
+export interface Logger {
+  trace?(...args: unknown[]): void;
+  debug?(...args: unknown[]): void;
+  info(...args: unknown[]): void;
+  warn(...args: unknown[]): void;
+  error(...args: unknown[]): void;
+}
+
+/** Factory for constructing error instances from HTTP response failures. */
+export type ErrorFactory = (status: number, body: unknown, response: Response) => Error;
+
+/** A token string or an async provider returning one. */
 export type TokenProvider = string | (() => string | Promise<string>);
 
 /** Configuration for client authentication schemes. */
@@ -1260,6 +1274,10 @@ export interface ClientConfig {
   baseUrl: string;
   /** Authentication configuration (Bearer, API Key, Custom Headers). */
   auth?: AuthConfig;
+  /** Logger instance for client diagnostics. Defaults to \`console\`. */
+  logger?: Logger;
+  /** Optional factory creating custom errors for non-2xx responses. Defaults to creating \`ApiError\`. */
+  errorFactory?: ErrorFactory;
 __TRANSPORT_CONFIG__
   /**
    * Wrappers around every call, outermost first. This is where an
@@ -1275,6 +1293,7 @@ __GRPC_CONFIG__}
 
 const DEFAULTS: ClientConfig = {
   baseUrl: "",
+  logger: console,
 };
 /** A response outside 2xx. The parsed body is kept: that is where APIs explain. */
 export class ApiError extends Error {
@@ -1380,6 +1399,7 @@ async function send(
   options: HttpCallOptions | undefined
 ): Promise<unknown> {
   const http = httpTransport(config);
+  const logger = config.logger ?? console;
 
   const invoke = async (outgoing: Call): Promise<CallResult> => {
     const authHeaders = await applyAuthHeaders(config, outgoing.headers);
@@ -1400,6 +1420,10 @@ async function send(
 
   const body = await parseBody(settled.response);
   if (!settled.response.ok) {
+    logger.error?.(\`[wiz] HTTP \${settled.response.status} from \${settled.response.url}\`, body);
+    if (config.errorFactory) {
+      throw config.errorFactory(settled.response.status, body, settled.response);
+    }
     throw new ApiError(settled.response.status, body, settled.response);
   }
   return body;
@@ -1465,13 +1489,13 @@ const HTTP_ENCODING = `async function* parseStream(response: Response): AsyncGen
     reader.releaseLock();
   }
 }
-
 async function* sendStream(
   config: ClientConfig,
   call: Call,
   options: HttpCallOptions | undefined
 ): AsyncGenerator<unknown, void, unknown> {
   const http = httpTransport(config);
+  const logger = config.logger ?? console;
 
   const invoke = async (outgoing: Call): Promise<CallResult> => {
     const activeCall: Call = {
@@ -1489,13 +1513,16 @@ async function* sendStream(
   const settled = await __HTTP_CHAIN__(call);
   if (!settled.response.ok) {
     const body = await parseBody(settled.response);
+    logger.error?.(\`[wiz] HTTP stream \${settled.response.status} from \${settled.response.url}\`, body);
+    if (config.errorFactory) {
+      throw config.errorFactory(settled.response.status, body, settled.response);
+    }
     throw new ApiError(settled.response.status, body, settled.response);
   }
   for await (const chunk of parseStream(settled.response)) {
     yield chunk;
   }
 }
-
 function encodePath(value: string | number | boolean): string {
   return encodeURIComponent(String(value));
 }
