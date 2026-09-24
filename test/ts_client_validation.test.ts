@@ -247,10 +247,11 @@ describe("emitted code compiles and runs", () => {
     createPet(path: { petId: string }, body: { id: string; name: string }): Promise<unknown>;
   }
 
+  interface ClientModule {
+    createClient(config: Record<string, unknown>): Client;
+  }
   /** A client whose transport answers with `pet`, so only the checks can fail. */
   const load = async (pet: unknown): Promise<Client> => {
-    // Dynamic by necessity: the module under test is generated into a temp
-    // directory during this run, so no static specifier for it can exist.
     const module = (await import(apiPath)) as ClientModule;
     return module.createClient({
       baseUrl: "https://pets.test",

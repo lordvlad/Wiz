@@ -595,15 +595,13 @@ const EXTENSION_FORMATS: Record<string, ExtractApiOptions["format"]> = {
   yml: "yaml",
 };
 
-/* -------------------------------------------------------------- components */
-
 const COMPONENT_SECTIONS = [
   "parameters",
   "headers",
   "requestBodies",
   "responses",
+  "securitySchemes",
 ] as const;
-
 type ComponentSection = (typeof COMPONENT_SECTIONS)[number];
 
 function componentSection(ctx: Ctx, section: ComponentSection): JsonObject {
@@ -807,6 +805,22 @@ function buildComponents(ctx: Ctx): void {
     if (!raw) continue;
     // A response component has no status of its own; the use site holds it.
     ctx.components.responses.set(name, responseToIR(raw, ctx, pointer, "default"));
+  }
+
+  for (const name of Object.keys(componentSection(ctx, "securitySchemes"))) {
+    const raw = componentDefinition(ctx, "securitySchemes", name);
+    if (!raw || !isObject(raw)) continue;
+    const type = typeof raw.type === "string" ? (raw.type as any) : "http";
+    ctx.components.securitySchemes.set(name, {
+      type,
+      ...(typeof raw.description === "string" ? { description: raw.description } : {}),
+      ...(typeof raw.name === "string" ? { name: raw.name } : {}),
+      ...(typeof raw.in === "string" ? { in: raw.in as any } : {}),
+      ...(typeof raw.scheme === "string" ? { scheme: raw.scheme } : {}),
+      ...(typeof raw.bearerFormat === "string" ? { bearerFormat: raw.bearerFormat } : {}),
+      ...(isObject(raw.flows) ? { flows: raw.flows as any } : {}),
+      ...(typeof raw.openIdConnectUrl === "string" ? { openIdConnectUrl: raw.openIdConnectUrl } : {}),
+    });
   }
 }
 

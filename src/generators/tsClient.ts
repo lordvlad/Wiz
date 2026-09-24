@@ -1116,7 +1116,20 @@ function grpcOperation(
  * than reading a module-level one, which is what lets one file serve both a
  * per-instance client and the module-level default.
  */
-const PRELUDE = `/** One outgoing call, as built by a method and seen by every interceptor. */
+const PRELUDE = `/** A token string or an async provider returning one. */
+export type TokenProvider = string | (() => string | Promise<string>);
+
+/** Configuration for client authentication schemes. */
+export interface AuthConfig {
+  /** Bearer token or token provider function */
+  bearer?: TokenProvider;
+  /** API Key token / value or token provider */
+  apiKey?: TokenProvider;
+  /** Custom header value or provider */
+  header?: Record<string, TokenProvider>;
+}
+
+/** One outgoing call, as built by a method and seen by every interceptor. */
 export interface Call {
   method: string;
   url: string;
@@ -1132,7 +1145,6 @@ export interface CallResult {
   call: Call;
   response: Response;
 }
-
 /**
  * Per-call cancellation and deadline, the same two things a gRPC call takes.
  * There is deliberately no \`headers\` here: an HTTP document declares its
@@ -1265,6 +1277,8 @@ export interface ClientConfig {
    * describe environments, which is a runtime fact, not a compile-time one.
    */
   baseUrl: string;
+  /** Authentication configuration (Bearer, API Key, Custom Headers). */
+  auth?: AuthConfig;
 __TRANSPORT_CONFIG__
   /**
    * Wrappers around every call, outermost first. This is where an
@@ -1281,7 +1295,6 @@ __GRPC_CONFIG__}
 const DEFAULTS: ClientConfig = {
   baseUrl: "",
 };
-
 /** A response outside 2xx. The parsed body is kept: that is where APIs explain. */
 export class ApiError extends Error {
   readonly status: number;
@@ -1349,6 +1362,37 @@ async function parseBody(response: Response): Promise<unknown> {
   return text;
 }
 
+async function resolveToken(provider: TokenProvider | undefined): Promise<string | undefined> {
+  if (!provider) return undefined;
+  if (typeof provider === "function") {
+    return await provider();
+  }
+  return provider;
+}
+
+async function applyAuthHeaders(config: ClientConfig, headers: Record<string, string>): Promise<Record<string, string>> {
+  const merged: Record<string, string> = { ...headers };
+  if (config.auth) {
+    if (config.auth.bearer && !merged["authorization"]) {
+      const token = await resolveToken(config.auth.bearer);
+      if (token) merged["authorization"] = \`Bearer \${token}\`;
+    }
+    if (config.auth.apiKey && !merged["x-api-key"] && !merged["api-key"]) {
+      const key = await resolveToken(config.auth.apiKey);
+      if (key) merged["x-api-key"] = key;
+    }
+    if (config.auth.header) {
+      for (const [hName, hProvider] of Object.entries(config.auth.header)) {
+        if (!merged[hName.toLowerCase()]) {
+          const val = await resolveToken(hProvider);
+          if (val) merged[hName.toLowerCase()] = val;
+        }
+      }
+    }
+  }
+  return merged;
+}
+
 async function send(
   config: ClientConfig,
   call: Call,
@@ -1357,8 +1401,10 @@ async function send(
   const http = httpTransport(config);
 
   const invoke = async (outgoing: Call): Promise<CallResult> => {
+    const authHeaders = await applyAuthHeaders(config, outgoing.headers);
     const activeCall: Call = {
       ...outgoing,
+      headers: authHeaders,
       signal: effectiveSignal(
         options?.signal,
         options?.timeoutMs ?? config.timeoutMs
@@ -1589,7 +1635,6 @@ function headerRecord(
   if (contentType && !contentType.toLowerCase().includes("multipart/form-data")) {
     record["content-type"] = contentType;
   }
-
   for (const [key, value] of Object.entries(headers ?? {})) {
     if (value === undefined || value === null) continue;
     record[key] = String(value);
@@ -1610,11 +1655,134 @@ function headerRecord(
   }
 
   return record;
+}
+
+export interface OAuth2TokenResponse {
+  access_token: string;
+  token_type?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+  [key: string]: unknown;
+}
+
+export interface OAuth2ClientCredentialsOptions {
+  tokenUrl: string;
+  clientId: string;
+  clientSecret: string;
+  scopes?: string[];
+  customFetch?: (url: string, init: RequestInit) => Promise<Response>;
+}
+
+/** Factory creating a token provider for the OAuth2 Client Credentials Flow. */
+export function createOAuth2ClientCredentialsProvider(
+  options: OAuth2ClientCredentialsOptions
+): () => Promise<string> {
+  let cachedToken: string | undefined;
+  let expiresAt = 0;
+
+  return async () => {
+    const now = Date.now();
+    if (cachedToken && now < expiresAt) {
+      return cachedToken;
+    }
+
+    const body = new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: options.clientId,
+      client_secret: options.clientSecret,
+      ...(options.scopes && options.scopes.length > 0
+        ? { scope: options.scopes.join(" ") }
+        : {}),
+    });
+
+    const fetchFn = options.customFetch ?? globalThis.fetch;
+    const res = await fetchFn(options.tokenUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        accept: "application/json",
+      },
+      body: body.toString(),
+    });
+
+    if (!res.ok) {
+      throw new Error(\`[wiz] OAuth2 client credentials token request failed with status \${res.status}\`);
+    }
+
+    const data = (await res.json()) as OAuth2TokenResponse;
+    cachedToken = data.access_token;
+    const ttl = typeof data.expires_in === "number" ? data.expires_in : 3600;
+    // Expire 30 seconds before real expiration to prevent race conditions
+    expiresAt = now + Math.max(0, ttl - 30) * 1000;
+    return cachedToken;
+  };
+}
+
+export interface OAuth2AuthProviderOptions {
+  tokenUrl: string;
+  clientId: string;
+  clientSecret?: string;
+  refreshToken?: string;
+  initialAccessToken?: string;
+  onTokenRefresh?: (tokenResponse: OAuth2TokenResponse) => void;
+  customFetch?: (url: string, init: RequestInit) => Promise<Response>;
+}
+
+/** Factory creating an authorization code / refresh token auth provider. */
+export function createOAuth2AuthProvider(options: OAuth2AuthProviderOptions) {
+  let accessToken = options.initialAccessToken;
+  let refreshToken = options.refreshToken;
+
+  const refresh = async (): Promise<string> => {
+    if (!refreshToken) {
+      throw new Error("[wiz] Cannot refresh OAuth2 token: no refresh_token provided");
+    }
+
+    const body = new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: options.clientId,
+      ...(options.clientSecret ? { client_secret: options.clientSecret } : {}),
+    });
+
+    const fetchFn = options.customFetch ?? globalThis.fetch;
+    const res = await fetchFn(options.tokenUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        accept: "application/json",
+      },
+      body: body.toString(),
+    });
+
+    if (!res.ok) {
+      throw new Error(\`[wiz] OAuth2 token refresh failed with status \${res.status}\`);
+    }
+
+    const data = (await res.json()) as OAuth2TokenResponse;
+    accessToken = data.access_token;
+    if (data.refresh_token) {
+      refreshToken = data.refresh_token;
+    }
+    options.onTokenRefresh?.(data);
+    return accessToken;
+  };
+
+  const getToken = async (): Promise<string> => {
+    if (accessToken) return accessToken;
+    return await refresh();
+  };
+
+  return {
+    getToken,
+    refreshToken: refresh,
+  };
 }`;
 /**
  * The JSON-RPC envelope, for a document that declares methods rather than
  * paths. The call itself is an ordinary HTTP one, so nothing here duplicates
- * `send`: only the reply shape and the error it raises are new.
+ * \`send\`: only the reply shape and the error it raises are new.
  */
 const OPENRPC_PRELUDE = `/** A reply, before \`result\` or \`error\` is unwrapped. */
 interface JsonRpcResponse {
@@ -1625,8 +1793,6 @@ interface JsonRpcResponse {
 }
 
 /**
- * A JSON-RPC \`error\` member. The transport succeeded, so there is no status to
- * report; the code and \`data\` are kept, because that is where a server explains.
  */
 export class RpcError extends Error {
   readonly code: number;
@@ -2563,6 +2729,10 @@ function emitFiles(
     " * client per configuration.",
     " */",
     "export interface Client {",
+    "  /** Sets or updates the Bearer token / token provider for this client. */",
+    "  setBearerToken(token: TokenProvider): void;",
+    "  /** Sets or updates the API Key / key provider for this client. */",
+    "  setApiKey(key: TokenProvider): void;",
     operations
       .map((operation) => {
         const doc = operation.doc
@@ -2595,6 +2765,12 @@ function emitFiles(
       : []),
     "",
     "  return {",
+    "    setBearerToken(token: TokenProvider) {",
+    "      config.auth = { ...config.auth, bearer: token };",
+    "    },",
+    "    setApiKey(key: TokenProvider) {",
+    "      config.auth = { ...config.auth, apiKey: key };",
+    "    },",
     operations.map((operation) => operation.implementation).join("\n"),
     "  };",
     "}",
@@ -2603,6 +2779,18 @@ function emitFiles(
   const moduleLevel = [
     "let defaults: ClientConfig = { ...DEFAULTS };",
     "let client: Client = createClient();",
+    "",
+    "/** Sets or updates the module-level Bearer token / token provider. */",
+    "export function setBearerToken(token: TokenProvider): void {",
+    "  defaults.auth = { ...defaults.auth, bearer: token };",
+    "  client.setBearerToken(token);",
+    "}",
+    "",
+    "/** Sets or updates the module-level API Key / key provider. */",
+    "export function setApiKey(key: TokenProvider): void {",
+    "  defaults.auth = { ...defaults.auth, apiKey: key };",
+    "  client.setApiKey(key);",
+    "}",
     "",
     "/**",
     " * Merges into the configuration the module-level functions use, so a base",

@@ -14,6 +14,36 @@ export interface ApiDiagnostic {
   keyword: string;
   message: string;
 }
+export type SecuritySchemeType =
+  | "http"
+  | "apiKey"
+  | "oauth2"
+  | "openIdConnect";
+
+export interface SecurityOAuthFlowIR {
+  authorizationUrl?: string;
+  tokenUrl?: string;
+  refreshUrl?: string;
+  scopes?: Record<string, string>;
+}
+
+export interface SecurityOAuthFlowsIR {
+  implicit?: SecurityOAuthFlowIR;
+  password?: SecurityOAuthFlowIR;
+  clientCredentials?: SecurityOAuthFlowIR;
+  authorizationCode?: SecurityOAuthFlowIR;
+}
+
+export interface SecuritySchemeIR {
+  type: SecuritySchemeType;
+  description?: string;
+  name?: string;
+  in?: "header" | "query" | "cookie";
+  scheme?: string;
+  bearerFormat?: string;
+  flows?: SecurityOAuthFlowsIR;
+  openIdConnectUrl?: string;
+}
 
 /**
  * The document's reusable components, keyed by their declared name.
@@ -41,8 +71,9 @@ export interface ApiComponentsIR {
    * a gRPC method has one response and nothing to reuse.
    */
   responses: Map<string, HttpResponseIR>;
+  /** `components.securitySchemes`. */
+  securitySchemes: Map<string, SecuritySchemeIR>;
 }
-
 export interface ApiIR {
   kind: "api";
   /**
@@ -77,5 +108,6 @@ export function emptyApiComponents(): ApiComponentsIR {
     headers: new Map(),
     requestBodies: new Map(),
     responses: new Map(),
+    securitySchemes: new Map(),
   };
 }
