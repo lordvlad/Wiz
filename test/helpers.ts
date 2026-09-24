@@ -1,15 +1,15 @@
-import ts from 'typescript';
-import { extractTypeIR } from '../src/extractors/typescript.ts';
-import { isHttpMethod } from '../src/ir/service.ts';
+import ts from "typescript";
+import { extractTypeIR } from "../src/extractors/typescript.ts";
+import { isHttpMethod } from "../src/ir/service.ts";
 import type {
-  HttpMethodName,
-  HttpRequestIR,
-  HttpServiceMethodIR,
-  ParameterIR,
-  ServiceIR,
-  ServiceMethodIR,
-} from '../src/ir/service.ts';
-import { flattenObjectProperties, type TypeIR } from '../src/types.ts';
+    HttpMethodName,
+    HttpRequestIR,
+    HttpServiceMethodIR,
+    ParameterIR,
+    ServiceIR,
+    ServiceMethodIR,
+} from "../src/ir/service.ts";
+import { flattenObjectProperties, type TypeIR } from "../src/types.ts";
 
 /**
  * Narrows an extracted method to the HTTP shape.
@@ -19,19 +19,19 @@ import { flattenObjectProperties, type TypeIR } from '../src/types.ts';
  * than letting an assertion read `undefined` off the wrong protocol.
  */
 export function asHttp(method: ServiceMethodIR): HttpServiceMethodIR {
-  if (!isHttpMethod(method)) {
-    throw new Error(`expected an HTTP method, got '${method.protocol}'`);
-  }
-  return method;
+    if (!isHttpMethod(method)) {
+        throw new Error(`expected an HTTP method, got '${method.protocol}'`);
+    }
+    return method;
 }
 
-const VIRTUAL_ENTRY = 'test.ts';
+const VIRTUAL_ENTRY = "test.ts";
 
 const compilerOptions: ts.CompilerOptions = {
-  target: ts.ScriptTarget.ESNext,
-  module: ts.ModuleKind.ESNext,
-  strict: true,
-  skipLibCheck: true,
+    target: ts.ScriptTarget.ESNext,
+    module: ts.ModuleKind.ESNext,
+    strict: true,
+    skipLibCheck: true,
 };
 
 /**
@@ -48,82 +48,78 @@ const compilerOptions: ts.CompilerOptions = {
  */
 const libFileCache = new Map<string, ts.SourceFile | undefined>();
 const programCache = new Map<string, ts.Program>();
-let lastProgram: ts.Program | undefined;
-let lastSourceText: string | undefined;
+let _lastProgram: ts.Program | undefined;
+let _lastSourceText: string | undefined;
 
 function programFor(sourceText: string): ts.Program {
-  const cached = programCache.get(sourceText);
-  if (cached) {
-    return cached;
-  }
-
-  const host = ts.createCompilerHost(compilerOptions);
-  const originalReadFile = host.readFile.bind(host);
-  const originalGetSourceFile = host.getSourceFile.bind(host);
-
-  host.readFile = (fileName: string) =>
-    fileName === VIRTUAL_ENTRY ? sourceText : originalReadFile(fileName);
-
-  host.getSourceFile = (fileName, languageVersion, onError, shouldCreate) => {
-    // Only declaration files are shareable; the entry differs per fixture.
-    if (fileName === VIRTUAL_ENTRY) {
-      return originalGetSourceFile(fileName, languageVersion, onError, shouldCreate);
+    const cached = programCache.get(sourceText);
+    if (cached) {
+        return cached;
     }
-    if (!libFileCache.has(fileName)) {
-      libFileCache.set(
-        fileName,
-        originalGetSourceFile(fileName, languageVersion, onError, shouldCreate)
-      );
-    }
-    return libFileCache.get(fileName);
-  };
-  const program = ts.createProgram([VIRTUAL_ENTRY], compilerOptions, host);
-  programCache.set(sourceText, program);
-  return program;
+
+    const host = ts.createCompilerHost(compilerOptions);
+    const originalReadFile = host.readFile.bind(host);
+    const originalGetSourceFile = host.getSourceFile.bind(host);
+
+    host.readFile = (fileName: string) => (fileName === VIRTUAL_ENTRY ? sourceText : originalReadFile(fileName));
+
+    host.getSourceFile = (fileName, languageVersion, onError, shouldCreate) => {
+        // Only declaration files are shareable; the entry differs per fixture.
+        if (fileName === VIRTUAL_ENTRY) {
+            return originalGetSourceFile(fileName, languageVersion, onError, shouldCreate);
+        }
+        if (!libFileCache.has(fileName)) {
+            libFileCache.set(fileName, originalGetSourceFile(fileName, languageVersion, onError, shouldCreate));
+        }
+        return libFileCache.get(fileName);
+    };
+    const program = ts.createProgram([VIRTUAL_ENTRY], compilerOptions, host);
+    programCache.set(sourceText, program);
+    return program;
 }
 
 function declarationNamed(sourceFile: ts.SourceFile, typeName: string) {
-  return sourceFile.statements.find(
-    (s) =>
-      (ts.isInterfaceDeclaration(s) || ts.isTypeAliasDeclaration(s) || ts.isEnumDeclaration(s)) &&
-      s.name.text === typeName
-  );
+    return sourceFile.statements.find(
+        (s) =>
+            (ts.isInterfaceDeclaration(s) || ts.isTypeAliasDeclaration(s) || ts.isEnumDeclaration(s)) &&
+            s.name.text === typeName,
+    );
 }
 
 export function getIRForSource(sourceText: string, typeName: string): TypeIR {
-  const program = programFor(sourceText);
-  const checker = program.getTypeChecker();
-  const sourceFile = program.getSourceFile(VIRTUAL_ENTRY)!;
+    const program = programFor(sourceText);
+    const checker = program.getTypeChecker();
+    const sourceFile = program.getSourceFile(VIRTUAL_ENTRY)!;
 
-  const statement = declarationNamed(sourceFile, typeName);
-  if (!statement) {
-    throw new Error(`Type '${typeName}' not found in source text.`);
-  }
+    const statement = declarationNamed(sourceFile, typeName);
+    if (!statement) {
+        throw new Error(`Type '${typeName}' not found in source text.`);
+    }
 
-  return extractTypeIR(checker.getTypeAtLocation(statement), checker);
+    return extractTypeIR(checker.getTypeAtLocation(statement), checker);
 }
 
 export function getIRsForSource<T extends string>(
-  sourceText: string,
-  typeNames: T[]
+    sourceText: string,
+    typeNames: T[],
 ): Record<T, { name: string; ir: TypeIR }> {
-  const program = programFor(sourceText);
-  const checker = program.getTypeChecker();
-  const sourceFile = program.getSourceFile(VIRTUAL_ENTRY)!;
+    const program = programFor(sourceText);
+    const checker = program.getTypeChecker();
+    const sourceFile = program.getSourceFile(VIRTUAL_ENTRY)!;
 
-  const result: Record<string, { name: string; ir: TypeIR }> = {};
-  for (const name of typeNames) {
-    const statement = declarationNamed(sourceFile, name);
-    if (!statement) {
-      throw new Error(`Type '${name}' not found in source text.`);
+    const result: Record<string, { name: string; ir: TypeIR }> = {};
+    for (const name of typeNames) {
+        const statement = declarationNamed(sourceFile, name);
+        if (!statement) {
+            throw new Error(`Type '${name}' not found in source text.`);
+        }
+        result[name] = {
+            name,
+            ir: extractTypeIR(checker.getTypeAtLocation(statement), checker),
+        };
     }
-    result[name] = {
-      name,
-      ir: extractTypeIR(checker.getTypeAtLocation(statement), checker),
-    };
-  }
 
-  return result as Record<T, { name: string; ir: TypeIR }>;
+    return result as Record<T, { name: string; ir: TypeIR }>;
 }
 
 /**
@@ -132,110 +128,108 @@ export function getIRsForSource<T extends string>(
  * known export names are collected explicitly.
  */
 export function evalModule<T>(code: string): T {
-  const exportNames = [
-    'keys',
-    'requiredKeys',
-    'optionalKeys',
-    'deepKeys',
-    'jsonSchema',
-    'jsonSchemas',
-    'jsonSchema_draft2020',
-    'jsonSchema_draft07',
-    'jsonSchemas_draft2020',
-    'jsonSchemas_draft07',
-    'schema_draft2020',
-    'schema_draft07',
-    'validate',
-    'parseQuery',
-    'QueryValidationError',
-    'is',
-    'assert',
-    'openapiSchema',
-    'openRPCSchema',
-    'encodeProto',
-    'decodeProto',
-    'protobufSchema',
-    'encodeAvro',
-    'decodeAvro',
-    'avroSchema',
-    'encodeArrow',
-    'decodeArrow',
-    'arrowSchema',
-    'zodSchema',
-    'encodeJson',
-    'decodeJson',
-    'encodeErlangText',
-    'decodeErlangText',
-    'encodeErlangBinary',
-    'decodeErlangBinary',
-    'encodeCbor',
-    'decodeCbor',
-    'asyncapiSchema',
-    'mcpSchema',
-    'grpcSchema',
-  ];
+    const exportNames = [
+        "keys",
+        "requiredKeys",
+        "optionalKeys",
+        "deepKeys",
+        "jsonSchema",
+        "jsonSchemas",
+        "jsonSchema_draft2020",
+        "jsonSchema_draft07",
+        "jsonSchemas_draft2020",
+        "jsonSchemas_draft07",
+        "schema_draft2020",
+        "schema_draft07",
+        "validate",
+        "parseQuery",
+        "QueryValidationError",
+        "is",
+        "assert",
+        "openapiSchema",
+        "openRPCSchema",
+        "encodeProto",
+        "decodeProto",
+        "protobufSchema",
+        "encodeAvro",
+        "decodeAvro",
+        "avroSchema",
+        "encodeArrow",
+        "decodeArrow",
+        "arrowSchema",
+        "zodSchema",
+        "encodeJson",
+        "decodeJson",
+        "encodeErlangText",
+        "decodeErlangText",
+        "encodeErlangBinary",
+        "decodeErlangBinary",
+        "encodeCbor",
+        "decodeCbor",
+        "asyncapiSchema",
+        "mcpSchema",
+        "grpcSchema",
+    ];
 
-  const collected = exportNames
-    .map((name) => `${name}: typeof ${name} !== "undefined" ? ${name} : undefined`)
-    .join(', ');
+    const collected = exportNames
+        .map((name) => `${name}: typeof ${name} !== "undefined" ? ${name} : undefined`)
+        .join(", ");
 
-  return new Function(
-    `"use strict";\n${code.replace(/export /g, '')}\nreturn { ${collected} };`
-  )() as T;
+    return new Function(`"use strict";\n${code.replace(/export /g, "")}\nreturn { ${collected} };`)() as T;
 }
 /**
  * Turns a fixture interface's IR into the flat `ParameterIR[]` the IR now
  * carries, the same way `src/plugin.ts` does for `op<{ … }>` slots.
  */
-export function params(ir: TypeIR, location: ParameterIR['in']): ParameterIR[] {
-  return flattenObjectProperties(ir).map((property) => ({
-    name: property.name,
-    in: location,
-    required: location === 'path' ? true : !property.optional,
-    type: property.type,
-  }));
+export function params(ir: TypeIR, location: ParameterIR["in"]): ParameterIR[] {
+    return flattenObjectProperties(ir).map((property) => ({
+        name: property.name,
+        in: location,
+        required: location === "path" ? true : !property.optional,
+        type: property.type,
+    }));
 }
 
 /** Concise `ServiceMethodIR` builder for generator tests. */
 export function httpMethod(spec: {
-  method: string;
-  path: string;
-  parameters?: ParameterIR[];
-  body?: TypeIR;
-  response?: TypeIR;
-  status?: number;
-  overrides?: string;
+    method: string;
+    path: string;
+    parameters?: ParameterIR[];
+    body?: TypeIR;
+    response?: TypeIR;
+    status?: number;
+    overrides?: string;
 }): HttpServiceMethodIR {
-  const request: HttpRequestIR = { protocol: 'http' };
-  if (spec.parameters && spec.parameters.length > 0) {
-    request.parameters = spec.parameters;
-  }
-  if (spec.body) {
-    request.body = [{ mimetype: 'application/json', content: spec.body }];
-  }
+    const request: HttpRequestIR = { protocol: "http" };
+    if (spec.parameters && spec.parameters.length > 0) {
+        request.parameters = spec.parameters;
+    }
+    if (spec.body) {
+        request.body = [{ mimetype: "application/json", content: spec.body }];
+    }
 
-  return {
-    kind: 'serviceMethod',
-    protocol: 'http',
-    address: {
-      protocol: 'http',
-      method: spec.method.toUpperCase() as HttpMethodName,
-      path: spec.path,
-    },
-    request,
-    responses: [
-      spec.response
-        ? {
-            protocol: 'http',
-            status: spec.status ?? 200,
-            body: [{ mimetype: 'application/json', content: spec.response }],
-          }
-        : { protocol: 'http', status: spec.status ?? 204 },
-    ],
-    overrides: spec.overrides,
-  };
+    return {
+        kind: "serviceMethod",
+        protocol: "http",
+        address: {
+            protocol: "http",
+            method: spec.method.toUpperCase() as HttpMethodName,
+            path: spec.path,
+        },
+        request,
+        responses: [
+            spec.response
+                ? {
+                      protocol: "http",
+                      status: spec.status ?? 200,
+                      body: [{ mimetype: "application/json", content: spec.response }],
+                  }
+                : { protocol: "http", status: spec.status ?? 204 },
+        ],
+        overrides: spec.overrides,
+    };
 }
 
 export function service(methods: ServiceMethodIR[]): ServiceIR {
-  return { kind: 'service', methods };
+    return { kind: "service", methods };
 }

@@ -1,21 +1,16 @@
+import { emptyService, isGrpcMethod, type ServiceIR } from "../ir/service.ts";
 import {
-  emptyService,
-  isGrpcMethod,
-  type GrpcServiceMethodIR,
-  type ServiceIR,
-} from '../ir/service.ts';
-import {
-  collectNamedTypes,
-  declaredFormat,
-  flattenObjectProperties,
-  isUserNamedType,
-  walkTypeIR,
-  type Annotated,
-  type PropertyIR,
-  type TypeIR,
-  type UnionTypeIR,
-} from '../types.ts';
-import { generateTypeCheckExpression } from './validator.ts';
+    collectNamedTypes,
+    declaredFormat,
+    flattenObjectProperties,
+    isUserNamedType,
+    walkTypeIR,
+    type Annotated,
+    type PropertyIR,
+    type TypeIR,
+    type UnionTypeIR,
+} from "../types.ts";
+import { generateTypeCheckExpression } from "./validator.ts";
 
 /**
  * How a numeric field travels. protobuf has three encodings, and picking the
@@ -25,145 +20,145 @@ import { generateTypeCheckExpression } from './validator.ts';
  * `wire` is the protobuf wire type: 0 varint, 1 fixed 64-bit, 5 fixed 32-bit.
  */
 interface ProtoNumeric {
-  proto: string;
-  wire: 0 | 1 | 5;
-  write: (target: string) => string;
-  read: string;
+    proto: string;
+    wire: 0 | 1 | 5;
+    write: (target: string) => string;
+    read: string;
 }
 
 const PROTO_NUMERICS: Record<string, ProtoNumeric> = {
-  int32: {
-    proto: 'int32',
-    wire: 0,
-    write: (t) => `o += writeVarint(buf, o, ${t});`,
-    // A negative int32 arrives sign-extended across ten bytes, well past what
-    // Number can accumulate exactly, so it is narrowed back through BigInt.
-    read: `let res; [res, o] = readVarint64(buf, o); res = Number(BigInt.asIntN(32, res));`,
-  },
-  int64: {
-    proto: 'int64',
-    wire: 0,
-    write: (t) => `o += writeVarint64(buf, o, ${t});`,
-    read: `let res; [res, o] = readVarint64(buf, o);`,
-  },
-  uint32: {
-    proto: 'uint32',
-    wire: 0,
-    write: (t) => `o += writeVarint(buf, o, ${t});`,
-    read: `let res; [res, o] = readVarint(buf, o);`,
-  },
-  uint64: {
-    proto: 'uint64',
-    wire: 0,
-    write: (t) => `o += writeVarint64(buf, o, ${t});`,
-    read: `let res; [res, o] = readVarint64(buf, o);`,
-  },
-  // sint uses zig-zag, which is what makes small negatives cheap.
-  sint32: {
-    proto: 'sint32',
-    wire: 0,
-    write: (t) => `o += writeZigZag(buf, o, ${t});`,
-    read: `let res; [res, o] = readZigZag(buf, o);`,
-  },
-  sint64: {
-    proto: 'sint64',
-    wire: 0,
-    write: (t) => `o += writeZigZag(buf, o, ${t});`,
-    read: `let res; [res, o] = readZigZag(buf, o);`,
-  },
-  fixed32: {
-    proto: 'fixed32',
-    wire: 5,
-    write: (t) => `view.setUint32(o, Number(${t}), true); o += 4;`,
-    read: `const res = view.getUint32(o, true); o += 4;`,
-  },
-  sfixed32: {
-    proto: 'sfixed32',
-    wire: 5,
-    write: (t) => `view.setInt32(o, Number(${t}), true); o += 4;`,
-    read: `const res = view.getInt32(o, true); o += 4;`,
-  },
-  fixed64: {
-    proto: 'fixed64',
-    wire: 1,
-    write: (t) => `view.setBigUint64(o, BigInt(${t}), true); o += 8;`,
-    read: `const res = view.getBigUint64(o, true); o += 8;`,
-  },
-  sfixed64: {
-    proto: 'sfixed64',
-    wire: 1,
-    write: (t) => `view.setBigInt64(o, BigInt(${t}), true); o += 8;`,
-    read: `const res = view.getBigInt64(o, true); o += 8;`,
-  },
-  float: {
-    proto: 'float',
-    wire: 5,
-    write: (t) => `view.setFloat32(o, Number(${t}), true); o += 4;`,
-    read: `const res = view.getFloat32(o, true); o += 4;`,
-  },
-  double: {
-    proto: 'double',
-    wire: 1,
-    write: (t) => `view.setFloat64(o, Number(${t}), true); o += 8;`,
-    read: `const res = view.getFloat64(o, true); o += 8;`,
-  },
-  // protobuf has no integer narrower than 32 bits, so the narrow registry
-  // widths travel in the smallest type that holds them. The declared range is
-  // still enforced by the validator, so nothing widens silently.
-  int8: {
-    proto: 'int32',
-    wire: 0,
-    write: (t) => `o += writeVarint(buf, o, ${t});`,
-    read: `let res; [res, o] = readVarint64(buf, o); res = Number(BigInt.asIntN(32, res));`,
-  },
-  int16: {
-    proto: 'int32',
-    wire: 0,
-    write: (t) => `o += writeVarint(buf, o, ${t});`,
-    read: `let res; [res, o] = readVarint64(buf, o); res = Number(BigInt.asIntN(32, res));`,
-  },
-  uint8: {
-    proto: 'uint32',
-    wire: 0,
-    write: (t) => `o += writeVarint(buf, o, ${t});`,
-    read: `let res; [res, o] = readVarint(buf, o);`,
-  },
-  uint16: {
-    proto: 'uint32',
-    wire: 0,
-    write: (t) => `o += writeVarint(buf, o, ${t});`,
-    read: `let res; [res, o] = readVarint(buf, o);`,
-  },
-  // An integer a double holds exactly, so it is 64-bit on the wire but stays a
-  // `number` in JS - which is the whole point of the format.
-  'double-int': {
-    proto: 'int64',
-    wire: 0,
-    write: (t) => `o += writeVarint64(buf, o, ${t});`,
-    read: `let res; [res, o] = readVarint64(buf, o);`,
-  },
-  unixtime: {
-    proto: 'int64',
-    wire: 0,
-    write: (t) => `o += writeVarint64(buf, o, ${t});`,
-    read: `let res; [res, o] = readVarint64(buf, o);`,
-  },
-  'sf-integer': {
-    proto: 'int64',
-    wire: 0,
-    write: (t) => `o += writeVarint64(buf, o, ${t});`,
-    read: `let res; [res, o] = readVarint64(buf, o);`,
-  },
-  'sf-decimal': {
-    proto: 'double',
-    wire: 1,
-    write: (t) => `view.setFloat64(o, Number(${t}), true); o += 8;`,
-    read: `const res = view.getFloat64(o, true); o += 8;`,
-  },
+    int32: {
+        proto: "int32",
+        wire: 0,
+        write: (t) => `o += writeVarint(buf, o, ${t});`,
+        // A negative int32 arrives sign-extended across ten bytes, well past what
+        // Number can accumulate exactly, so it is narrowed back through BigInt.
+        read: `let res; [res, o] = readVarint64(buf, o); res = Number(BigInt.asIntN(32, res));`,
+    },
+    int64: {
+        proto: "int64",
+        wire: 0,
+        write: (t) => `o += writeVarint64(buf, o, ${t});`,
+        read: `let res; [res, o] = readVarint64(buf, o);`,
+    },
+    uint32: {
+        proto: "uint32",
+        wire: 0,
+        write: (t) => `o += writeVarint(buf, o, ${t});`,
+        read: `let res; [res, o] = readVarint(buf, o);`,
+    },
+    uint64: {
+        proto: "uint64",
+        wire: 0,
+        write: (t) => `o += writeVarint64(buf, o, ${t});`,
+        read: `let res; [res, o] = readVarint64(buf, o);`,
+    },
+    // sint uses zig-zag, which is what makes small negatives cheap.
+    sint32: {
+        proto: "sint32",
+        wire: 0,
+        write: (t) => `o += writeZigZag(buf, o, ${t});`,
+        read: `let res; [res, o] = readZigZag(buf, o);`,
+    },
+    sint64: {
+        proto: "sint64",
+        wire: 0,
+        write: (t) => `o += writeZigZag(buf, o, ${t});`,
+        read: `let res; [res, o] = readZigZag(buf, o);`,
+    },
+    fixed32: {
+        proto: "fixed32",
+        wire: 5,
+        write: (t) => `view.setUint32(o, Number(${t}), true); o += 4;`,
+        read: `const res = view.getUint32(o, true); o += 4;`,
+    },
+    sfixed32: {
+        proto: "sfixed32",
+        wire: 5,
+        write: (t) => `view.setInt32(o, Number(${t}), true); o += 4;`,
+        read: `const res = view.getInt32(o, true); o += 4;`,
+    },
+    fixed64: {
+        proto: "fixed64",
+        wire: 1,
+        write: (t) => `view.setBigUint64(o, BigInt(${t}), true); o += 8;`,
+        read: `const res = view.getBigUint64(o, true); o += 8;`,
+    },
+    sfixed64: {
+        proto: "sfixed64",
+        wire: 1,
+        write: (t) => `view.setBigInt64(o, BigInt(${t}), true); o += 8;`,
+        read: `const res = view.getBigInt64(o, true); o += 8;`,
+    },
+    float: {
+        proto: "float",
+        wire: 5,
+        write: (t) => `view.setFloat32(o, Number(${t}), true); o += 4;`,
+        read: `const res = view.getFloat32(o, true); o += 4;`,
+    },
+    double: {
+        proto: "double",
+        wire: 1,
+        write: (t) => `view.setFloat64(o, Number(${t}), true); o += 8;`,
+        read: `const res = view.getFloat64(o, true); o += 8;`,
+    },
+    // protobuf has no integer narrower than 32 bits, so the narrow registry
+    // widths travel in the smallest type that holds them. The declared range is
+    // still enforced by the validator, so nothing widens silently.
+    int8: {
+        proto: "int32",
+        wire: 0,
+        write: (t) => `o += writeVarint(buf, o, ${t});`,
+        read: `let res; [res, o] = readVarint64(buf, o); res = Number(BigInt.asIntN(32, res));`,
+    },
+    int16: {
+        proto: "int32",
+        wire: 0,
+        write: (t) => `o += writeVarint(buf, o, ${t});`,
+        read: `let res; [res, o] = readVarint64(buf, o); res = Number(BigInt.asIntN(32, res));`,
+    },
+    uint8: {
+        proto: "uint32",
+        wire: 0,
+        write: (t) => `o += writeVarint(buf, o, ${t});`,
+        read: `let res; [res, o] = readVarint(buf, o);`,
+    },
+    uint16: {
+        proto: "uint32",
+        wire: 0,
+        write: (t) => `o += writeVarint(buf, o, ${t});`,
+        read: `let res; [res, o] = readVarint(buf, o);`,
+    },
+    // An integer a double holds exactly, so it is 64-bit on the wire but stays a
+    // `number` in JS - which is the whole point of the format.
+    "double-int": {
+        proto: "int64",
+        wire: 0,
+        write: (t) => `o += writeVarint64(buf, o, ${t});`,
+        read: `let res; [res, o] = readVarint64(buf, o);`,
+    },
+    unixtime: {
+        proto: "int64",
+        wire: 0,
+        write: (t) => `o += writeVarint64(buf, o, ${t});`,
+        read: `let res; [res, o] = readVarint64(buf, o);`,
+    },
+    "sf-integer": {
+        proto: "int64",
+        wire: 0,
+        write: (t) => `o += writeVarint64(buf, o, ${t});`,
+        read: `let res; [res, o] = readVarint64(buf, o);`,
+    },
+    "sf-decimal": {
+        proto: "double",
+        wire: 1,
+        write: (t) => `view.setFloat64(o, Number(${t}), true); o += 8;`,
+        read: `const res = view.getFloat64(o, true); o += 8;`,
+    },
 };
 
 /** Widths that must round-trip as BigInt rather than Number. */
-const BIGINT_FORMATS = new Set(['int64', 'uint64', 'fixed64', 'sfixed64', 'sint64']);
+const BIGINT_FORMATS = new Set(["int64", "uint64", "fixed64", "sfixed64", "sint64"]);
 
 /**
  * A JS number is a double, so that is the default. `@format` narrows it, using
@@ -171,73 +166,73 @@ const BIGINT_FORMATS = new Set(['int64', 'uint64', 'fixed64', 'sfixed64', 'sint6
  * definition and defaults to int64.
  */
 function protoNumericFor(ir: TypeIR, carrier?: Annotated): ProtoNumeric | undefined {
-  if (ir.kind !== 'primitive') {
+    if (ir.kind !== "primitive") {
+        return undefined;
+    }
+    const format = declaredFormat(carrier, ir);
+    const declared = format ? PROTO_NUMERICS[format] : undefined;
+    if (ir.type === "bigint") {
+        return declared ?? PROTO_NUMERICS.int64!;
+    }
+    if (ir.type === "number") {
+        return declared ?? PROTO_NUMERICS.double!;
+    }
+    if (ir.type === "date") {
+        return PROTO_NUMERICS.int64!;
+    }
     return undefined;
-  }
-  const format = declaredFormat(carrier, ir);
-  const declared = format ? PROTO_NUMERICS[format] : undefined;
-  if (ir.type === 'bigint') {
-    return declared ?? PROTO_NUMERICS.int64!;
-  }
-  if (ir.type === 'number') {
-    return declared ?? PROTO_NUMERICS.double!;
-  }
-  if (ir.type === 'date') {
-    return PROTO_NUMERICS.int64!;
-  }
-  return undefined;
 }
 
 /** Does this field's JS value come back as a BigInt? */
 function readsAsBigInt(ir: TypeIR, carrier?: Annotated): boolean {
-  if (ir.kind !== 'primitive') {
-    return false;
-  }
-  if (ir.type === 'bigint') {
+    if (ir.kind !== "primitive") {
+        return false;
+    }
+    if (ir.type === "bigint") {
+        const format = declaredFormat(carrier, ir);
+        return !format || BIGINT_FORMATS.has(format);
+    }
     const format = declaredFormat(carrier, ir);
-    return !format || BIGINT_FORMATS.has(format);
-  }
-  const format = declaredFormat(carrier, ir);
-  return Boolean(format && BIGINT_FORMATS.has(format) && format !== 'int64');
+    return Boolean(format && BIGINT_FORMATS.has(format) && format !== "int64");
 }
 
 /** An object type that becomes its own protobuf message. */
 interface MessagePlan {
-  id: number;
-  ir: TypeIR;
-  name: string;
+    id: number;
+    ir: TypeIR;
+    name: string;
 }
 
 /** Root first, then every nested object reachable through its fields. */
 function planMessages(root: TypeIR, resolve: Resolve): MessagePlan[] {
-  const plans: MessagePlan[] = [];
-  const seen = new Map<TypeIR, number>();
+    const plans: MessagePlan[] = [];
+    const seen = new Map<TypeIR, number>();
 
-  const visit = (ir: TypeIR, name: string): number => {
-    const existing = seen.get(ir);
-    if (existing !== undefined) {
-      return existing;
-    }
-
-    const id = plans.length;
-    seen.set(ir, id);
-    plans.push({ id, ir, name });
-
-    for (const property of flattenObjectProperties(ir)) {
-      const oneof = oneofFor(property.type);
-      const reachable = oneof ? oneof.types : [property.type];
-      for (const candidate of reachable) {
-        const target = messageTarget(candidate, resolve);
-        if (target) {
-          visit(target, target.name ?? `${name}_${property.name}`);
+    const visit = (ir: TypeIR, name: string): number => {
+        const existing = seen.get(ir);
+        if (existing !== undefined) {
+            return existing;
         }
-      }
-    }
-    return id;
-  };
 
-  visit(root, root.name ?? 'Target');
-  return plans;
+        const id = plans.length;
+        seen.set(ir, id);
+        plans.push({ id, ir, name });
+
+        for (const property of flattenObjectProperties(ir)) {
+            const oneof = oneofFor(property.type);
+            const reachable = oneof ? oneof.types : [property.type];
+            for (const candidate of reachable) {
+                const target = messageTarget(candidate, resolve);
+                if (target) {
+                    visit(target, target.name ?? `${name}_${property.name}`);
+                }
+            }
+        }
+        return id;
+    };
+
+    visit(root, root.name ?? "Target");
+    return plans;
 }
 
 /**
@@ -248,125 +243,125 @@ function planMessages(root: TypeIR, resolve: Resolve): MessagePlan[] {
 type Resolve = (ir: TypeIR) => TypeIR;
 
 function refResolver(root: TypeIR): Resolve {
-  const byId = new Map<string, TypeIR>();
-  walkTypeIR(root, (node) => {
-    byId.set(node.id, node);
-  });
-  return (ir) => (ir.kind === 'ref' ? (byId.get(ir.targetId) ?? ir) : ir);
+    const byId = new Map<string, TypeIR>();
+    walkTypeIR(root, (node) => {
+        byId.set(node.id, node);
+    });
+    return (ir) => (ir.kind === "ref" ? (byId.get(ir.targetId) ?? ir) : ir);
 }
 
 /** The object a field embeds, if it embeds one (directly or per array item). */
 function messageTarget(ir: TypeIR, resolve: Resolve): TypeIR | undefined {
-  // An optional message still embeds; absence is field omission.
-  const unwrapped = unwrapNullable(resolve(ir));
-  const candidate = resolve(unwrapped.kind === 'array' ? unwrapped.element : unwrapped);
-  if (candidate.kind === 'object' || candidate.kind === 'intersection') {
-    return flattenObjectProperties(candidate).length > 0 ? candidate : undefined;
-  }
-  return undefined;
+    // An optional message still embeds; absence is field omission.
+    const unwrapped = unwrapNullable(resolve(ir));
+    const candidate = resolve(unwrapped.kind === "array" ? unwrapped.element : unwrapped);
+    if (candidate.kind === "object" || candidate.kind === "intersection") {
+        return flattenObjectProperties(candidate).length > 0 ? candidate : undefined;
+    }
+    return undefined;
 }
 
 /** Wraps `body` so it is written length-delimited, as wire type 2 requires. */
 function lengthDelimited(body: string[], indent: string): string[] {
-  return [
-    `${indent}{`,
-    `${indent}  const lenPos = o;`,
-    `${indent}  o += 1;`,
-    `${indent}  const start = o;`,
-    ...body.map((l) => `${indent}  ${l}`),
-    `${indent}  const len = o - start;`,
-    `${indent}  const size = varintSize(len);`,
-    `${indent}  if (size !== 1) {`,
-    `${indent}    buf.copyWithin(start + size - 1, start, o);`,
-    `${indent}    o += size - 1;`,
-    `${indent}  }`,
-    `${indent}  writeVarint(buf, lenPos, len);`,
-    `${indent}}`,
-  ];
+    return [
+        `${indent}{`,
+        `${indent}  const lenPos = o;`,
+        `${indent}  o += 1;`,
+        `${indent}  const start = o;`,
+        ...body.map((l) => `${indent}  ${l}`),
+        `${indent}  const len = o - start;`,
+        `${indent}  const size = varintSize(len);`,
+        `${indent}  if (size !== 1) {`,
+        `${indent}    buf.copyWithin(start + size - 1, start, o);`,
+        `${indent}    o += size - 1;`,
+        `${indent}  }`,
+        `${indent}  writeVarint(buf, lenPos, len);`,
+        `${indent}}`,
+    ];
 }
 
 interface ScalarCodec {
-  wire: 0 | 1 | 2 | 5;
-  write: (expr: string) => string;
-  /** Leaves the value in `res`. */
-  read: string;
-  lift: (expr: string) => string;
+    wire: 0 | 1 | 2 | 5;
+    write: (expr: string) => string;
+    /** Leaves the value in `res`. */
+    read: string;
+    lift: (expr: string) => string;
 }
 
 /** How a non-message value travels, or undefined if it needs a sub-message. */
 function scalarCodecFor(ir: TypeIR, carrier?: Annotated): ScalarCodec | undefined {
-  // A literal travels as its primitive: `kind: "circle"` is a string, not JSON.
-  if (ir.kind === 'literal') {
-    const type = typeof ir.value === 'bigint' ? 'bigint' : typeof ir.value;
-    if (type === 'string' || type === 'number' || type === 'boolean' || type === 'bigint') {
-      return scalarCodecFor({ id: `${ir.id}_prim`, kind: 'primitive', type }, carrier);
+    // A literal travels as its primitive: `kind: "circle"` is a string, not JSON.
+    if (ir.kind === "literal") {
+        const type = typeof ir.value === "bigint" ? "bigint" : typeof ir.value;
+        if (type === "string" || type === "number" || type === "boolean" || type === "bigint") {
+            return scalarCodecFor({ id: `${ir.id}_prim`, kind: "primitive", type }, carrier);
+        }
     }
-  }
 
-  if (ir.kind === 'primitive') {
-    if (ir.type === 'string' || ir.type === 'symbol') {
-      return {
-        wire: 2,
-        write: (e) => `o += writeString(buf, o, String(${e}));`,
-        read: `let res; [res, o] = readString(buf, o);`,
-        lift: (e) => e,
-      };
+    if (ir.kind === "primitive") {
+        if (ir.type === "string" || ir.type === "symbol") {
+            return {
+                wire: 2,
+                write: (e) => `o += writeString(buf, o, String(${e}));`,
+                read: `let res; [res, o] = readString(buf, o);`,
+                lift: (e) => e,
+            };
+        }
+        if (ir.type === "bytes") {
+            return {
+                wire: 2,
+                write: (e) => `o += writeBytes(buf, o, ${e});`,
+                read: `let res; [res, o] = readBytes(buf, o);`,
+                lift: (e) => e,
+            };
+        }
+        if (ir.type === "boolean") {
+            return {
+                wire: 0,
+                write: (e) => `o += writeVarint(buf, o, ${e} ? 1 : 0);`,
+                read: `let res; [res, o] = readVarint(buf, o);`,
+                lift: (e) => `Boolean(${e})`,
+            };
+        }
+        if (ir.type === "date") {
+            return {
+                wire: 0,
+                write: (e) => `o += writeVarint64(buf, o, BigInt(${e}.getTime()));`,
+                read: `let res; [res, o] = readVarint64(buf, o);`,
+                lift: (e) => `new Date(Number(${e}))`,
+            };
+        }
     }
-    if (ir.type === 'bytes') {
-      return {
-        wire: 2,
-        write: (e) => `o += writeBytes(buf, o, ${e});`,
-        read: `let res; [res, o] = readBytes(buf, o);`,
-        lift: (e) => e,
-      };
-    }
-    if (ir.type === 'boolean') {
-      return {
-        wire: 0,
-        write: (e) => `o += writeVarint(buf, o, ${e} ? 1 : 0);`,
-        read: `let res; [res, o] = readVarint(buf, o);`,
-        lift: (e) => `Boolean(${e})`,
-      };
-    }
-    if (ir.type === 'date') {
-      return {
-        wire: 0,
-        write: (e) => `o += writeVarint64(buf, o, BigInt(${e}.getTime()));`,
-        read: `let res; [res, o] = readVarint64(buf, o);`,
-        lift: (e) => `new Date(Number(${e}))`,
-      };
-    }
-  }
 
-  if (ir.kind === 'enum') {
-    return {
-      wire: 0,
-      write: (e) => `o += writeVarint(buf, o, ${e});`,
-      read: `let res; [res, o] = readVarint(buf, o);`,
-      lift: (e) => e,
-    };
-  }
+    if (ir.kind === "enum") {
+        return {
+            wire: 0,
+            write: (e) => `o += writeVarint(buf, o, ${e});`,
+            read: `let res; [res, o] = readVarint(buf, o);`,
+            lift: (e) => e,
+        };
+    }
 
-  const numeric = protoNumericFor(ir, carrier);
-  if (numeric) {
-    const asBigInt = readsAsBigInt(ir, carrier);
-    return {
-      wire: numeric.wire,
-      write: numeric.write,
-      read: numeric.read,
-      lift: (e) => (asBigInt ? `BigInt(${e})` : `Number(${e})`),
-    };
-  }
+    const numeric = protoNumericFor(ir, carrier);
+    if (numeric) {
+        const asBigInt = readsAsBigInt(ir, carrier);
+        return {
+            wire: numeric.wire,
+            write: numeric.write,
+            read: numeric.read,
+            lift: (e) => (asBigInt ? `BigInt(${e})` : `Number(${e})`),
+        };
+    }
 
-  return undefined;
+    return undefined;
 }
 
 /** JSON text is the last resort for shapes protobuf cannot express. */
 const JSON_FALLBACK: ScalarCodec = {
-  wire: 2,
-  write: (e) => `o += writeString(buf, o, JSON.stringify(${e}));`,
-  read: `let res; [res, o] = readString(buf, o);\n        try { res = JSON.parse(res); } catch {}`,
-  lift: (e) => e,
+    wire: 2,
+    write: (e) => `o += writeString(buf, o, JSON.stringify(${e}));`,
+    read: `let res; [res, o] = readString(buf, o);\n        try { res = JSON.parse(res); } catch {}`,
+    lift: (e) => e,
 };
 
 /**
@@ -377,17 +372,13 @@ const JSON_FALLBACK: ScalarCodec = {
  * falls through to the JSON fallback, silently encoding text.
  */
 function unwrapNullable(ir: TypeIR): TypeIR {
-  if (ir.kind !== 'union') {
-    return ir;
-  }
-  const meaningful = ir.types.filter(
-    (t) =>
-      !(
-        t.kind === 'primitive' &&
-        (t.type === 'undefined' || t.type === 'null' || t.type === 'void')
-      )
-  );
-  return meaningful.length === 1 ? meaningful[0]! : { ...ir, types: meaningful };
+    if (ir.kind !== "union") {
+        return ir;
+    }
+    const meaningful = ir.types.filter(
+        (t) => !(t.kind === "primitive" && (t.type === "undefined" || t.type === "null" || t.type === "void")),
+    );
+    return meaningful.length === 1 ? meaningful[0]! : { ...ir, types: meaningful };
 }
 
 /**
@@ -395,22 +386,22 @@ function unwrapNullable(ir: TypeIR): TypeIR {
  * primitive: `"a" | "b"` is a string. Returns that primitive, if it applies.
  */
 function collapseLiteralUnion(ir: UnionTypeIR): TypeIR | undefined {
-  const types = new Set<string>();
-  for (const member of ir.types) {
-    if (member.kind !== 'literal') {
-      return undefined;
+    const types = new Set<string>();
+    for (const member of ir.types) {
+        if (member.kind !== "literal") {
+            return undefined;
+        }
+        types.add(typeof member.value === "bigint" ? "bigint" : typeof member.value);
     }
-    types.add(typeof member.value === 'bigint' ? 'bigint' : typeof member.value);
-  }
-  if (types.size !== 1) {
-    return undefined;
-  }
-  const only = [...types][0];
-  // `boolean` reaches us as `true | false`, which is one wire type, not two.
-  if (only !== 'string' && only !== 'number' && only !== 'bigint' && only !== 'boolean') {
-    return undefined;
-  }
-  return { id: `${ir.id}_collapsed`, kind: 'primitive', type: only };
+    if (types.size !== 1) {
+        return undefined;
+    }
+    const only = [...types][0];
+    // `boolean` reaches us as `true | false`, which is one wire type, not two.
+    if (only !== "string" && only !== "number" && only !== "bigint" && only !== "boolean") {
+        return undefined;
+    }
+    return { id: `${ir.id}_collapsed`, kind: "primitive", type: only };
 }
 
 /**
@@ -419,33 +410,33 @@ function collapseLiteralUnion(ir: UnionTypeIR): TypeIR | undefined {
  * the codec writes another.
  */
 function wireFieldType(ir: TypeIR): TypeIR {
-  const unwrapped = unwrapNullable(ir);
-  if (unwrapped.kind !== 'union') {
-    return unwrapped;
-  }
-  return collapseLiteralUnion(unwrapped) ?? unwrapped;
+    const unwrapped = unwrapNullable(ir);
+    if (unwrapped.kind !== "union") {
+        return unwrapped;
+    }
+    return collapseLiteralUnion(unwrapped) ?? unwrapped;
 }
 
 /** The variants of a field encoded as a `oneof`, if it is one. */
 function oneofFor(ir: TypeIR): UnionTypeIR | undefined {
-  const inner = unwrapNullable(ir);
-  if (inner.kind !== 'union') {
-    return undefined;
-  }
-  return collapseLiteralUnion(inner) ? undefined : inner;
+    const inner = unwrapNullable(ir);
+    if (inner.kind !== "union") {
+        return undefined;
+    }
+    return collapseLiteralUnion(inner) ? undefined : inner;
 }
 
 /** The required property names of an object variant, as a stable signature. */
 function requiredSignature(ir: TypeIR): string[] {
-  return flattenObjectProperties(ir)
-    .filter((p) => !p.optional)
-    .map((p) => p.name)
-    .sort();
+    return flattenObjectProperties(ir)
+        .filter((p) => !p.optional)
+        .map((p) => p.name)
+        .sort();
 }
 
 /** A JS literal for a value that may be a bigint, which JSON cannot spell. */
 function literalExpression(value: unknown): string {
-  return typeof value === 'bigint' ? `${value}n` : JSON.stringify(value);
+    return typeof value === "bigint" ? `${value}n` : JSON.stringify(value);
 }
 
 /**
@@ -456,33 +447,26 @@ function literalExpression(value: unknown): string {
  * discriminant property decides where the union has one, and the required
  * property names decide otherwise.
  */
-function variantCheck(
-  variant: TypeIR,
-  union: UnionTypeIR,
-  local: string,
-  resolve: Resolve
-): string {
-  const target = resolve(unwrapNullable(variant));
-  if (target.kind !== 'object' && target.kind !== 'intersection') {
-    return generateTypeCheckExpression(target, local);
-  }
+function variantCheck(variant: TypeIR, union: UnionTypeIR, local: string, resolve: Resolve): string {
+    const target = resolve(unwrapNullable(variant));
+    if (target.kind !== "object" && target.kind !== "intersection") {
+        return generateTypeCheckExpression(target, local);
+    }
 
-  const tests = [`${local} !== null`, `typeof ${local} === "object"`];
-  const properties = flattenObjectProperties(target);
+    const tests = [`${local} !== null`, `typeof ${local} === "object"`];
+    const properties = flattenObjectProperties(target);
 
-  const discriminant = union.discriminator?.propertyName;
-  const tag = discriminant ? properties.find((p) => p.name === discriminant) : undefined;
-  if (tag?.type.kind === 'literal') {
-    tests.push(
-      `${local}[${JSON.stringify(discriminant)}] === ${literalExpression(tag.type.value)}`
-    );
-    return tests.join(' && ');
-  }
+    const discriminant = union.discriminator?.propertyName;
+    const tag = discriminant ? properties.find((p) => p.name === discriminant) : undefined;
+    if (tag?.type.kind === "literal") {
+        tests.push(`${local}[${JSON.stringify(discriminant)}] === ${literalExpression(tag.type.value)}`);
+        return tests.join(" && ");
+    }
 
-  for (const name of requiredSignature(target)) {
-    tests.push(`${JSON.stringify(name)} in ${local}`);
-  }
-  return tests.join(' && ');
+    for (const name of requiredSignature(target)) {
+        tests.push(`${JSON.stringify(name)} in ${local}`);
+    }
+    return tests.join(" && ");
 }
 
 /**
@@ -494,21 +478,21 @@ function variantCheck(
  * they are refused with the shape that does work.
  */
 function nestedUnionBlocker(p: PropertyIR, typeName: string): string | undefined {
-  const field = wireFieldType(p.type);
+    const field = wireFieldType(p.type);
 
-  const nested =
-    field.kind === 'array'
-      ? { position: 'element', ir: wireFieldType(field.element) }
-      : field.kind === 'record'
-        ? { position: 'value', ir: wireFieldType(field.valueType) }
-        : undefined;
+    const nested =
+        field.kind === "array"
+            ? { position: "element", ir: wireFieldType(field.element) }
+            : field.kind === "record"
+              ? { position: "value", ir: wireFieldType(field.valueType) }
+              : undefined;
 
-  if (!nested || nested.ir.kind !== 'union') {
-    return undefined;
-  }
+    if (!nested || nested.ir.kind !== "union") {
+        return undefined;
+    }
 
-  const container = field.kind === 'array' ? 'repeated field' : 'map';
-  return `[wiz] The ${nested.position} type of '${p.name}' on type '${typeName}' is a union, and protobuf has no ${container} of 'oneof'. Wrap the variants in their own type, so the oneof sits inside a message that can be repeated.`;
+    const container = field.kind === "array" ? "repeated field" : "map";
+    return `[wiz] The ${nested.position} type of '${p.name}' on type '${typeName}' is a union, and protobuf has no ${container} of 'oneof'. Wrap the variants in their own type, so the oneof sits inside a message that can be repeated.`;
 }
 
 /**
@@ -517,539 +501,533 @@ function nestedUnionBlocker(p: PropertyIR, typeName: string): string | undefined
  * Reported up front rather than per field, so the generated module fails with
  * a single actionable message instead of encoding something unreadable.
  */
-function protobufBlocker(plans: MessagePlan[], resolve: Resolve): string | undefined {
-  for (const plan of plans) {
-    const props = flattenObjectProperties(plan.ir);
-    if (props.length === 0) {
-      return `[wiz] Type '${plan.name}' has no properties for protobuf encoding/decoding.`;
+function protobufBlocker(plans: MessagePlan[], _resolve: Resolve): string | undefined {
+    for (const plan of plans) {
+        const props = flattenObjectProperties(plan.ir);
+        if (props.length === 0) {
+            return `[wiz] Type '${plan.name}' has no properties for protobuf encoding/decoding.`;
+        }
+
+        // oneof members share the enclosing message's field-number space.
+        const claimed = new Map<number, string>();
+        const claim = (n: number, by: string): string | undefined => {
+            const owner = claimed.get(n);
+            if (owner !== undefined) {
+                return `[wiz] Field number ${n} on type '${plan.name}' is claimed by both '${owner}' and '${by}'. A 'oneof' shares the enclosing message's field numbers, so every variant needs its own.`;
+            }
+            claimed.set(n, by);
+            return undefined;
+        };
+
+        for (const p of props) {
+            const nestedUnion = nestedUnionBlocker(p, plan.name);
+            if (nestedUnion) {
+                return nestedUnion;
+            }
+
+            const oneof = oneofFor(p.type);
+            if (!oneof) {
+                if (p.fieldNumber === undefined || Number.isNaN(p.fieldNumber)) {
+                    return `[wiz] Property '${p.name}' on type '${plan.name}' is missing required '@fieldNumber <N>' JSDoc tag for protobuf encoding/decoding.`;
+                }
+                const clash = claim(p.fieldNumber, p.name);
+                if (clash) {
+                    return clash;
+                }
+                continue;
+            }
+
+            if (!oneof.fieldNumbers) {
+                return `[wiz] Property '${p.name}' on type '${plan.name}' is a union, which protobuf encodes as a 'oneof' and so needs a field number per variant. Declare it as NumberedUnion<{ 1: A; 2: B }> instead of A | B.`;
+            }
+            if (p.fieldNumber !== undefined && !Number.isNaN(p.fieldNumber)) {
+                return `[wiz] Property '${p.name}' on type '${plan.name}' carries '@fieldNumber ${p.fieldNumber}' but its NumberedUnion already numbers each variant. Remove the tag.`;
+            }
+            for (const [index, n] of oneof.fieldNumbers.entries()) {
+                const clash = claim(n, `${p.name} variant ${index + 1}`);
+                if (clash) {
+                    return clash;
+                }
+            }
+
+            // Encoding picks a variant by inspecting the value, so two variants that
+            // no test can separate would silently encode under the wrong number.
+            if (!oneof.discriminator) {
+                const seen = new Map<string, number>();
+                for (const [index, variant] of oneof.types.entries()) {
+                    const unwrapped = unwrapNullable(variant);
+                    if (unwrapped.kind !== "object" && unwrapped.kind !== "intersection") {
+                        continue;
+                    }
+                    const signature = requiredSignature(unwrapped).join(",");
+                    const first = seen.get(signature);
+                    if (first !== undefined) {
+                        return `[wiz] Variants ${first + 1} and ${index + 1} of property '${p.name}' on type '${plan.name}' have the same required properties (${signature || "none"}), so a value cannot be matched to one of them. Give the union a discriminant property with a distinct literal value.`;
+                    }
+                    seen.set(signature, index);
+                }
+            }
+        }
     }
-
-    // oneof members share the enclosing message's field-number space.
-    const claimed = new Map<number, string>();
-    const claim = (n: number, by: string): string | undefined => {
-      const owner = claimed.get(n);
-      if (owner !== undefined) {
-        return `[wiz] Field number ${n} on type '${plan.name}' is claimed by both '${owner}' and '${by}'. A 'oneof' shares the enclosing message's field numbers, so every variant needs its own.`;
-      }
-      claimed.set(n, by);
-      return undefined;
-    };
-
-    for (const p of props) {
-      const nestedUnion = nestedUnionBlocker(p, plan.name);
-      if (nestedUnion) {
-        return nestedUnion;
-      }
-
-      const oneof = oneofFor(p.type);
-      if (!oneof) {
-        if (p.fieldNumber === undefined || Number.isNaN(p.fieldNumber)) {
-          return `[wiz] Property '${p.name}' on type '${plan.name}' is missing required '@fieldNumber <N>' JSDoc tag for protobuf encoding/decoding.`;
-        }
-        const clash = claim(p.fieldNumber, p.name);
-        if (clash) {
-          return clash;
-        }
-        continue;
-      }
-
-      if (!oneof.fieldNumbers) {
-        return `[wiz] Property '${p.name}' on type '${plan.name}' is a union, which protobuf encodes as a 'oneof' and so needs a field number per variant. Declare it as NumberedUnion<{ 1: A; 2: B }> instead of A | B.`;
-      }
-      if (p.fieldNumber !== undefined && !Number.isNaN(p.fieldNumber)) {
-        return `[wiz] Property '${p.name}' on type '${plan.name}' carries '@fieldNumber ${p.fieldNumber}' but its NumberedUnion already numbers each variant. Remove the tag.`;
-      }
-      for (const [index, n] of oneof.fieldNumbers.entries()) {
-        const clash = claim(n, `${p.name} variant ${index + 1}`);
-        if (clash) {
-          return clash;
-        }
-      }
-
-      // Encoding picks a variant by inspecting the value, so two variants that
-      // no test can separate would silently encode under the wrong number.
-      if (!oneof.discriminator) {
-        const seen = new Map<string, number>();
-        for (const [index, variant] of oneof.types.entries()) {
-          const unwrapped = unwrapNullable(variant);
-          if (unwrapped.kind !== 'object' && unwrapped.kind !== 'intersection') {
-            continue;
-          }
-          const signature = requiredSignature(unwrapped).join(',');
-          const first = seen.get(signature);
-          if (first !== undefined) {
-            return `[wiz] Variants ${first + 1} and ${index + 1} of property '${p.name}' on type '${plan.name}' have the same required properties (${signature || 'none'}), so a value cannot be matched to one of them. Give the union a discriminant property with a distinct literal value.`;
-          }
-          seen.set(signature, index);
-        }
-      }
-    }
-  }
-  return undefined;
+    return undefined;
 }
 export function generateProtobufCode(ir: TypeIR): string {
-  const resolve = refResolver(ir);
-  const plans = planMessages(ir, resolve);
+    const resolve = refResolver(ir);
+    const plans = planMessages(ir, resolve);
 
-  const blocker = protobufBlocker(plans, resolve);
-  if (blocker) {
-    return [
-      `export function encodeProto(val, buf, offset = 0) {`,
-      `  throw new Error(${JSON.stringify(blocker)});`,
-      `}`,
-      ``,
-      `export function decodeProto(buf, offset = 0) {`,
-      `  throw new Error(${JSON.stringify(blocker)});`,
-      `}`,
-    ].join('\n');
-  }
-
-  const messageId = new Map<TypeIR, number>();
-  for (const plan of plans) {
-    messageId.set(plan.ir, plan.id);
-  }
-
-  const functions: string[] = [];
-
-  for (const plan of plans) {
-    const encodeLines: string[] = [];
-    const decodeCases: string[] = [];
-    // A oneof has no single number; it sorts by its lowest variant.
-    const numberOf = (p: PropertyIR): number => {
-      const variants = oneofFor(p.type)?.fieldNumbers;
-      return variants ? Math.min(...variants) : p.fieldNumber!;
-    };
-    const sorted = [...flattenObjectProperties(plan.ir)].sort((a, b) => numberOf(a) - numberOf(b));
-
-    for (const p of sorted) {
-      const prop = JSON.stringify(p.name);
-      const access = `val[${prop}]`;
-
-      // ---- oneof ----------------------------------------------------------
-      const oneof = oneofFor(p.type);
-      if (oneof?.fieldNumbers) {
-        const local = `oneof${numberOf(p)}`;
-        encodeLines.push(`  const ${local} = ${access};`);
-        encodeLines.push(`  if (${local} !== undefined && ${local} !== null) {`);
-
-        oneof.types.forEach((variant, index) => {
-          const n = oneof.fieldNumbers![index]!;
-          const nested = messageId.get(messageTarget(variant, resolve) ?? variant);
-          const check = variantCheck(variant, oneof, local, resolve);
-          const branch = index === 0 ? 'if' : '} else if';
-
-          encodeLines.push(`    ${branch} (${check}) {`);
-          if (nested !== undefined) {
-            encodeLines.push(`      o += writeVarint(buf, o, ${(n << 3) | 2});`);
-            encodeLines.push(
-              ...lengthDelimited([`o = encodeMsg${nested}(${local}, buf, o, view);`], '      ')
-            );
-          } else {
-            const codec = scalarCodecFor(variant, p) ?? JSON_FALLBACK;
-            encodeLines.push(`      o += writeVarint(buf, o, ${(n << 3) | codec.wire});`);
-            encodeLines.push(`      ${codec.write(local)}`);
-          }
-
-          decodeCases.push(`      case ${n}: {`);
-          if (nested !== undefined) {
-            decodeCases.push(`        let len; [len, o] = readVarint(buf, o);`);
-            decodeCases.push(`        obj[${prop}] = decodeMsg${nested}(buf, o, o + len, view);`);
-            decodeCases.push(`        o += len;`);
-          } else {
-            const codec = scalarCodecFor(variant, p) ?? JSON_FALLBACK;
-            decodeCases.push(`        ${codec.read}`);
-            decodeCases.push(`        obj[${prop}] = ${codec.lift('res')};`);
-          }
-          decodeCases.push(`        break;`);
-          decodeCases.push(`      }`);
-        });
-
-        encodeLines.push(`    }`);
-        encodeLines.push(`  }`);
-        continue;
-      }
-
-      const fn = p.fieldNumber!;
-      const pType = wireFieldType(p.type);
-
-      const embedded = messageTarget(pType, resolve);
-
-      // ---- repeated -------------------------------------------------------
-      if (pType.kind === 'array') {
-        const element = pType.element;
-        const nested = embedded ? messageId.get(embedded) : undefined;
-
-        if (nested !== undefined) {
-          // Repeated messages are never packed: each entry is its own record.
-          const tag = (fn << 3) | 2;
-          encodeLines.push(`  if (Array.isArray(${access})) {`);
-          encodeLines.push(`    for (const item of ${access}) {`);
-          encodeLines.push(`      o += writeVarint(buf, o, ${tag});`);
-          encodeLines.push(
-            ...lengthDelimited([`o = encodeMsg${nested}(item, buf, o, view);`], '      ')
-          );
-          encodeLines.push(`    }`);
-          encodeLines.push(`  }`);
-
-          decodeCases.push(`      case ${fn}: {`);
-          decodeCases.push(`        let len; [len, o] = readVarint(buf, o);`);
-          decodeCases.push(`        obj[${prop}] = obj[${prop}] || [];`);
-          decodeCases.push(`        obj[${prop}].push(decodeMsg${nested}(buf, o, o + len, view));`);
-          decodeCases.push(`        o += len;`);
-          decodeCases.push(`        break;`);
-          decodeCases.push(`      }`);
-          continue;
-        }
-
-        // `@format` sits on the property but describes each element.
-        const codec = scalarCodecFor(element, p) ?? JSON_FALLBACK;
-        // proto3 packs repeated scalars by default; only length-delimited
-        // element types stay unpacked, since they carry their own length.
-        const packable = codec.wire !== 2;
-        const tag = (fn << 3) | (packable ? 2 : codec.wire);
-
-        encodeLines.push(`  if (Array.isArray(${access}) && ${access}.length > 0) {`);
-        encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
-        if (packable) {
-          encodeLines.push(
-            ...lengthDelimited([`for (const item of ${access}) { ${codec.write('item')} }`], '    ')
-          );
-        } else {
-          encodeLines.push(`    ${codec.write(`${access}[0]`)}`);
-          encodeLines.push(`    for (let i = 1; i < ${access}.length; i++) {`);
-          encodeLines.push(`      o += writeVarint(buf, o, ${tag});`);
-          encodeLines.push(`      ${codec.write(`${access}[i]`)}`);
-          encodeLines.push(`    }`);
-        }
-        encodeLines.push(`  }`);
-
-        decodeCases.push(`      case ${fn}: {`);
-        decodeCases.push(`        obj[${prop}] = obj[${prop}] || [];`);
-        if (packable) {
-          // A conformant reader accepts both framings regardless of what it writes.
-          decodeCases.push(`        if (wireType === 2) {`);
-          decodeCases.push(`          let len; [len, o] = readVarint(buf, o);`);
-          decodeCases.push(`          const stop = o + len;`);
-          decodeCases.push(`          while (o < stop) {`);
-          decodeCases.push(`            ${codec.read}`);
-          decodeCases.push(`            obj[${prop}].push(${codec.lift('res')});`);
-          decodeCases.push(`          }`);
-          decodeCases.push(`        } else {`);
-          decodeCases.push(`          ${codec.read}`);
-          decodeCases.push(`          obj[${prop}].push(${codec.lift('res')});`);
-          decodeCases.push(`        }`);
-        } else {
-          decodeCases.push(`        ${codec.read}`);
-          decodeCases.push(`        obj[${prop}].push(${codec.lift('res')});`);
-        }
-        decodeCases.push(`        break;`);
-        decodeCases.push(`      }`);
-        continue;
-      }
-
-      // ---- map ------------------------------------------------------------
-      if (pType.kind === 'record') {
-        // `@format` on the property describes the map's value type.
-        const valueCodec = scalarCodecFor(pType.valueType, p) ?? JSON_FALLBACK;
-        const valueMsg = messageTarget(pType.valueType, resolve);
-        const valueId = valueMsg ? messageId.get(valueMsg) : undefined;
-        const tag = (fn << 3) | 2;
-
-        // A protobuf map entry is a message with key = 1 and value = 2.
-        const entryBody: string[] = [
-          `o += writeVarint(buf, o, ${(1 << 3) | 2});`,
-          `o += writeString(buf, o, mapKey);`,
-        ];
-        if (valueId !== undefined) {
-          entryBody.push(`o += writeVarint(buf, o, ${(2 << 3) | 2});`);
-          entryBody.push(
-            ...lengthDelimited([`o = encodeMsg${valueId}(mapVal, buf, o, view);`], '')
-          );
-        } else {
-          entryBody.push(`o += writeVarint(buf, o, ${(2 << 3) | valueCodec.wire});`);
-          entryBody.push(valueCodec.write('mapVal'));
-        }
-
-        encodeLines.push(`  if (${access} !== undefined && ${access} !== null) {`);
-        encodeLines.push(`    for (const [mapKey, mapVal] of Object.entries(${access})) {`);
-        encodeLines.push(`      o += writeVarint(buf, o, ${tag});`);
-        encodeLines.push(...lengthDelimited(entryBody, '      '));
-        encodeLines.push(`    }`);
-        encodeLines.push(`  }`);
-
-        decodeCases.push(`      case ${fn}: {`);
-        decodeCases.push(`        let len; [len, o] = readVarint(buf, o);`);
-        decodeCases.push(`        const stop = o + len;`);
-        decodeCases.push(`        let mapKey = "";`);
-        decodeCases.push(`        let mapVal;`);
-        decodeCases.push(`        while (o < stop) {`);
-        decodeCases.push(`          let entryTag; [entryTag, o] = readVarint(buf, o);`);
-        decodeCases.push(`          if ((entryTag >> 3) === 1) {`);
-        decodeCases.push(`            [mapKey, o] = readString(buf, o);`);
-        decodeCases.push(`          } else {`);
-        if (valueId !== undefined) {
-          decodeCases.push(`            let vlen; [vlen, o] = readVarint(buf, o);`);
-          decodeCases.push(`            mapVal = decodeMsg${valueId}(buf, o, o + vlen, view);`);
-          decodeCases.push(`            o += vlen;`);
-        } else {
-          decodeCases.push(`            ${valueCodec.read}`);
-          decodeCases.push(`            mapVal = ${valueCodec.lift('res')};`);
-        }
-        decodeCases.push(`          }`);
-        decodeCases.push(`        }`);
-        decodeCases.push(`        obj[${prop}] = obj[${prop}] || {};`);
-        decodeCases.push(`        obj[${prop}][mapKey] = mapVal;`);
-        decodeCases.push(`        break;`);
-        decodeCases.push(`      }`);
-        continue;
-      }
-
-      // ---- embedded message ------------------------------------------------
-      const nestedId = embedded ? messageId.get(embedded) : undefined;
-      if (nestedId !== undefined) {
-        const tag = (fn << 3) | 2;
-        encodeLines.push(`  if (${access} !== undefined && ${access} !== null) {`);
-        encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
-        encodeLines.push(
-          ...lengthDelimited([`o = encodeMsg${nestedId}(${access}, buf, o, view);`], '    ')
-        );
-        encodeLines.push(`  }`);
-
-        decodeCases.push(`      case ${fn}: {`);
-        decodeCases.push(`        let len; [len, o] = readVarint(buf, o);`);
-        decodeCases.push(`        obj[${prop}] = decodeMsg${nestedId}(buf, o, o + len, view);`);
-        decodeCases.push(`        o += len;`);
-        decodeCases.push(`        break;`);
-        decodeCases.push(`      }`);
-        continue;
-      }
-
-      // ---- scalar -----------------------------------------------------------
-      const codec = scalarCodecFor(pType, p) ?? JSON_FALLBACK;
-      const tag = (fn << 3) | codec.wire;
-      encodeLines.push(`  if (${access} !== undefined) {`);
-      encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
-      encodeLines.push(`    ${codec.write(access)}`);
-      encodeLines.push(`  }`);
-
-      decodeCases.push(`      case ${fn}: {`);
-      decodeCases.push(`        ${codec.read}`);
-      decodeCases.push(`        obj[${prop}] = ${codec.lift('res')};`);
-      decodeCases.push(`        break;`);
-      decodeCases.push(`      }`);
+    const blocker = protobufBlocker(plans, resolve);
+    if (blocker) {
+        return [
+            `export function encodeProto(val, buf, offset = 0) {`,
+            `  throw new Error(${JSON.stringify(blocker)});`,
+            `}`,
+            ``,
+            `export function decodeProto(buf, offset = 0) {`,
+            `  throw new Error(${JSON.stringify(blocker)});`,
+            `}`,
+        ].join("\n");
     }
 
-    functions.push(
-      [
-        `function encodeMsg${plan.id}(val, buf, offset, view) {`,
+    const messageId = new Map<TypeIR, number>();
+    for (const plan of plans) {
+        messageId.set(plan.ir, plan.id);
+    }
+
+    const functions: string[] = [];
+
+    for (const plan of plans) {
+        const encodeLines: string[] = [];
+        const decodeCases: string[] = [];
+        // A oneof has no single number; it sorts by its lowest variant.
+        const numberOf = (p: PropertyIR): number => {
+            const variants = oneofFor(p.type)?.fieldNumbers;
+            return variants ? Math.min(...variants) : p.fieldNumber!;
+        };
+        const sorted = [...flattenObjectProperties(plan.ir)].sort((a, b) => numberOf(a) - numberOf(b));
+
+        for (const p of sorted) {
+            const prop = JSON.stringify(p.name);
+            const access = `val[${prop}]`;
+
+            // ---- oneof ----------------------------------------------------------
+            const oneof = oneofFor(p.type);
+            if (oneof?.fieldNumbers) {
+                const local = `oneof${numberOf(p)}`;
+                encodeLines.push(`  const ${local} = ${access};`);
+                encodeLines.push(`  if (${local} !== undefined && ${local} !== null) {`);
+
+                oneof.types.forEach((variant, index) => {
+                    const n = oneof.fieldNumbers![index]!;
+                    const nested = messageId.get(messageTarget(variant, resolve) ?? variant);
+                    const check = variantCheck(variant, oneof, local, resolve);
+                    const branch = index === 0 ? "if" : "} else if";
+
+                    encodeLines.push(`    ${branch} (${check}) {`);
+                    if (nested !== undefined) {
+                        encodeLines.push(`      o += writeVarint(buf, o, ${(n << 3) | 2});`);
+                        encodeLines.push(
+                            ...lengthDelimited([`o = encodeMsg${nested}(${local}, buf, o, view);`], "      "),
+                        );
+                    } else {
+                        const codec = scalarCodecFor(variant, p) ?? JSON_FALLBACK;
+                        encodeLines.push(`      o += writeVarint(buf, o, ${(n << 3) | codec.wire});`);
+                        encodeLines.push(`      ${codec.write(local)}`);
+                    }
+
+                    decodeCases.push(`      case ${n}: {`);
+                    if (nested !== undefined) {
+                        decodeCases.push(`        let len; [len, o] = readVarint(buf, o);`);
+                        decodeCases.push(`        obj[${prop}] = decodeMsg${nested}(buf, o, o + len, view);`);
+                        decodeCases.push(`        o += len;`);
+                    } else {
+                        const codec = scalarCodecFor(variant, p) ?? JSON_FALLBACK;
+                        decodeCases.push(`        ${codec.read}`);
+                        decodeCases.push(`        obj[${prop}] = ${codec.lift("res")};`);
+                    }
+                    decodeCases.push(`        break;`);
+                    decodeCases.push(`      }`);
+                });
+
+                encodeLines.push(`    }`);
+                encodeLines.push(`  }`);
+                continue;
+            }
+
+            const fn = p.fieldNumber!;
+            const pType = wireFieldType(p.type);
+
+            const embedded = messageTarget(pType, resolve);
+
+            // ---- repeated -------------------------------------------------------
+            if (pType.kind === "array") {
+                const element = pType.element;
+                const nested = embedded ? messageId.get(embedded) : undefined;
+
+                if (nested !== undefined) {
+                    // Repeated messages are never packed: each entry is its own record.
+                    const tag = (fn << 3) | 2;
+                    encodeLines.push(`  if (Array.isArray(${access})) {`);
+                    encodeLines.push(`    for (const item of ${access}) {`);
+                    encodeLines.push(`      o += writeVarint(buf, o, ${tag});`);
+                    encodeLines.push(...lengthDelimited([`o = encodeMsg${nested}(item, buf, o, view);`], "      "));
+                    encodeLines.push(`    }`);
+                    encodeLines.push(`  }`);
+
+                    decodeCases.push(`      case ${fn}: {`);
+                    decodeCases.push(`        let len; [len, o] = readVarint(buf, o);`);
+                    decodeCases.push(`        obj[${prop}] = obj[${prop}] || [];`);
+                    decodeCases.push(`        obj[${prop}].push(decodeMsg${nested}(buf, o, o + len, view));`);
+                    decodeCases.push(`        o += len;`);
+                    decodeCases.push(`        break;`);
+                    decodeCases.push(`      }`);
+                    continue;
+                }
+
+                // `@format` sits on the property but describes each element.
+                const codec = scalarCodecFor(element, p) ?? JSON_FALLBACK;
+                // proto3 packs repeated scalars by default; only length-delimited
+                // element types stay unpacked, since they carry their own length.
+                const packable = codec.wire !== 2;
+                const tag = (fn << 3) | (packable ? 2 : codec.wire);
+
+                encodeLines.push(`  if (Array.isArray(${access}) && ${access}.length > 0) {`);
+                encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
+                if (packable) {
+                    encodeLines.push(
+                        ...lengthDelimited([`for (const item of ${access}) { ${codec.write("item")} }`], "    "),
+                    );
+                } else {
+                    encodeLines.push(`    ${codec.write(`${access}[0]`)}`);
+                    encodeLines.push(`    for (let i = 1; i < ${access}.length; i++) {`);
+                    encodeLines.push(`      o += writeVarint(buf, o, ${tag});`);
+                    encodeLines.push(`      ${codec.write(`${access}[i]`)}`);
+                    encodeLines.push(`    }`);
+                }
+                encodeLines.push(`  }`);
+
+                decodeCases.push(`      case ${fn}: {`);
+                decodeCases.push(`        obj[${prop}] = obj[${prop}] || [];`);
+                if (packable) {
+                    // A conformant reader accepts both framings regardless of what it writes.
+                    decodeCases.push(`        if (wireType === 2) {`);
+                    decodeCases.push(`          let len; [len, o] = readVarint(buf, o);`);
+                    decodeCases.push(`          const stop = o + len;`);
+                    decodeCases.push(`          while (o < stop) {`);
+                    decodeCases.push(`            ${codec.read}`);
+                    decodeCases.push(`            obj[${prop}].push(${codec.lift("res")});`);
+                    decodeCases.push(`          }`);
+                    decodeCases.push(`        } else {`);
+                    decodeCases.push(`          ${codec.read}`);
+                    decodeCases.push(`          obj[${prop}].push(${codec.lift("res")});`);
+                    decodeCases.push(`        }`);
+                } else {
+                    decodeCases.push(`        ${codec.read}`);
+                    decodeCases.push(`        obj[${prop}].push(${codec.lift("res")});`);
+                }
+                decodeCases.push(`        break;`);
+                decodeCases.push(`      }`);
+                continue;
+            }
+
+            // ---- map ------------------------------------------------------------
+            if (pType.kind === "record") {
+                // `@format` on the property describes the map's value type.
+                const valueCodec = scalarCodecFor(pType.valueType, p) ?? JSON_FALLBACK;
+                const valueMsg = messageTarget(pType.valueType, resolve);
+                const valueId = valueMsg ? messageId.get(valueMsg) : undefined;
+                const tag = (fn << 3) | 2;
+
+                // A protobuf map entry is a message with key = 1 and value = 2.
+                const entryBody: string[] = [
+                    `o += writeVarint(buf, o, ${(1 << 3) | 2});`,
+                    `o += writeString(buf, o, mapKey);`,
+                ];
+                if (valueId !== undefined) {
+                    entryBody.push(`o += writeVarint(buf, o, ${(2 << 3) | 2});`);
+                    entryBody.push(...lengthDelimited([`o = encodeMsg${valueId}(mapVal, buf, o, view);`], ""));
+                } else {
+                    entryBody.push(`o += writeVarint(buf, o, ${(2 << 3) | valueCodec.wire});`);
+                    entryBody.push(valueCodec.write("mapVal"));
+                }
+
+                encodeLines.push(`  if (${access} !== undefined && ${access} !== null) {`);
+                encodeLines.push(`    for (const [mapKey, mapVal] of Object.entries(${access})) {`);
+                encodeLines.push(`      o += writeVarint(buf, o, ${tag});`);
+                encodeLines.push(...lengthDelimited(entryBody, "      "));
+                encodeLines.push(`    }`);
+                encodeLines.push(`  }`);
+
+                decodeCases.push(`      case ${fn}: {`);
+                decodeCases.push(`        let len; [len, o] = readVarint(buf, o);`);
+                decodeCases.push(`        const stop = o + len;`);
+                decodeCases.push(`        let mapKey = "";`);
+                decodeCases.push(`        let mapVal;`);
+                decodeCases.push(`        while (o < stop) {`);
+                decodeCases.push(`          let entryTag; [entryTag, o] = readVarint(buf, o);`);
+                decodeCases.push(`          if ((entryTag >> 3) === 1) {`);
+                decodeCases.push(`            [mapKey, o] = readString(buf, o);`);
+                decodeCases.push(`          } else {`);
+                if (valueId !== undefined) {
+                    decodeCases.push(`            let vlen; [vlen, o] = readVarint(buf, o);`);
+                    decodeCases.push(`            mapVal = decodeMsg${valueId}(buf, o, o + vlen, view);`);
+                    decodeCases.push(`            o += vlen;`);
+                } else {
+                    decodeCases.push(`            ${valueCodec.read}`);
+                    decodeCases.push(`            mapVal = ${valueCodec.lift("res")};`);
+                }
+                decodeCases.push(`          }`);
+                decodeCases.push(`        }`);
+                decodeCases.push(`        obj[${prop}] = obj[${prop}] || {};`);
+                decodeCases.push(`        obj[${prop}][mapKey] = mapVal;`);
+                decodeCases.push(`        break;`);
+                decodeCases.push(`      }`);
+                continue;
+            }
+
+            // ---- embedded message ------------------------------------------------
+            const nestedId = embedded ? messageId.get(embedded) : undefined;
+            if (nestedId !== undefined) {
+                const tag = (fn << 3) | 2;
+                encodeLines.push(`  if (${access} !== undefined && ${access} !== null) {`);
+                encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
+                encodeLines.push(...lengthDelimited([`o = encodeMsg${nestedId}(${access}, buf, o, view);`], "    "));
+                encodeLines.push(`  }`);
+
+                decodeCases.push(`      case ${fn}: {`);
+                decodeCases.push(`        let len; [len, o] = readVarint(buf, o);`);
+                decodeCases.push(`        obj[${prop}] = decodeMsg${nestedId}(buf, o, o + len, view);`);
+                decodeCases.push(`        o += len;`);
+                decodeCases.push(`        break;`);
+                decodeCases.push(`      }`);
+                continue;
+            }
+
+            // ---- scalar -----------------------------------------------------------
+            const codec = scalarCodecFor(pType, p) ?? JSON_FALLBACK;
+            const tag = (fn << 3) | codec.wire;
+            encodeLines.push(`  if (${access} !== undefined) {`);
+            encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
+            encodeLines.push(`    ${codec.write(access)}`);
+            encodeLines.push(`  }`);
+
+            decodeCases.push(`      case ${fn}: {`);
+            decodeCases.push(`        ${codec.read}`);
+            decodeCases.push(`        obj[${prop}] = ${codec.lift("res")};`);
+            decodeCases.push(`        break;`);
+            decodeCases.push(`      }`);
+        }
+
+        functions.push(
+            [
+                `function encodeMsg${plan.id}(val, buf, offset, view) {`,
+                `  let o = offset;`,
+                ...encodeLines,
+                `  return o;`,
+                `}`,
+                ``,
+                `function decodeMsg${plan.id}(buf, offset, end, view) {`,
+                `  let o = offset;`,
+                `  const obj = {};`,
+                `  while (o < end) {`,
+                `    let tag; [tag, o] = readVarint(buf, o);`,
+                `    if (tag === 0) break;`,
+                `    const fieldNum = tag >> 3;`,
+                `    const wireType = tag & 7;`,
+                `    switch (fieldNum) {`,
+                ...decodeCases,
+                `      default: {`,
+                `        if (wireType === 0) { let _; [_, o] = readVarint(buf, o); }`,
+                `        else if (wireType === 2) { let len; [len, o] = readVarint(buf, o); o += len; }`,
+                `        else if (wireType === 1) { o += 8; }`,
+                `        else if (wireType === 5) { o += 4; }`,
+                `        break;`,
+                `      }`,
+                `    }`,
+                `  }`,
+                `  return obj;`,
+                `}`,
+            ].join("\n"),
+        );
+    }
+
+    return [
+        // `var`, and bare: the protobuf and avro codecs are concatenated into one
+        // module, and only `var` tolerates the redeclaration. Bare because a
+        // top-level `new TextEncoder()` is a side effect a bundler must keep, which
+        // would pin the whole codec into a build that never calls it.
+        `var textEncoder;`,
+        `var textDecoder;`,
+        `function writeVarint(buf, offset, val) {`,
+        `  let v = Number(val);`,
+        `  if (!Number.isFinite(v)) v = 0;`,
+        `  // proto3 sign-extends a negative int32 to 64 bits, so it always occupies`,
+        `  // ten bytes. Truncating it to the low group instead produces a number no`,
+        `  // other implementation can read back.`,
+        `  if (v < 0) return writeVarint64(buf, offset, BigInt(Math.trunc(v)));`,
         `  let o = offset;`,
-        ...encodeLines,
-        `  return o;`,
+        `  // % rather than & 0x7f: bitwise operands are coerced to int32, which`,
+        `  // silently truncates anything past 2^31.`,
+        `  while (v >= 0x80) {`,
+        `    buf[o++] = (v % 128) | 0x80;`,
+        `    v = Math.floor(v / 128);`,
+        `  }`,
+        `  buf[o++] = v % 128;`,
+        `  return o - offset;`,
         `}`,
         ``,
-        `function decodeMsg${plan.id}(buf, offset, end, view) {`,
+        `function readVarint(buf, offset) {`,
         `  let o = offset;`,
-        `  const obj = {};`,
-        `  while (o < end) {`,
-        `    let tag; [tag, o] = readVarint(buf, o);`,
-        `    if (tag === 0) break;`,
-        `    const fieldNum = tag >> 3;`,
-        `    const wireType = tag & 7;`,
-        `    switch (fieldNum) {`,
-        ...decodeCases,
-        `      default: {`,
-        `        if (wireType === 0) { let _; [_, o] = readVarint(buf, o); }`,
-        `        else if (wireType === 2) { let len; [len, o] = readVarint(buf, o); o += len; }`,
-        `        else if (wireType === 1) { o += 8; }`,
-        `        else if (wireType === 5) { o += 4; }`,
-        `        break;`,
-        `      }`,
-        `    }`,
+        `  let res = 0;`,
+        `  let shift = 0;`,
+        `  while (true) {`,
+        `    const b = buf[o++];`,
+        `    res += (b & 0x7f) * Math.pow(2, shift);`,
+        `    if ((b & 0x80) === 0) break;`,
+        `    shift += 7;`,
         `  }`,
-        `  return obj;`,
+        `  return [res, o];`,
         `}`,
-      ].join('\n')
-    );
-  }
-
-  return [
-    // `var`, and bare: the protobuf and avro codecs are concatenated into one
-    // module, and only `var` tolerates the redeclaration. Bare because a
-    // top-level `new TextEncoder()` is a side effect a bundler must keep, which
-    // would pin the whole codec into a build that never calls it.
-    `var textEncoder;`,
-    `var textDecoder;`,
-    `function writeVarint(buf, offset, val) {`,
-    `  let v = Number(val);`,
-    `  if (!Number.isFinite(v)) v = 0;`,
-    `  // proto3 sign-extends a negative int32 to 64 bits, so it always occupies`,
-    `  // ten bytes. Truncating it to the low group instead produces a number no`,
-    `  // other implementation can read back.`,
-    `  if (v < 0) return writeVarint64(buf, offset, BigInt(Math.trunc(v)));`,
-    `  let o = offset;`,
-    `  // % rather than & 0x7f: bitwise operands are coerced to int32, which`,
-    `  // silently truncates anything past 2^31.`,
-    `  while (v >= 0x80) {`,
-    `    buf[o++] = (v % 128) | 0x80;`,
-    `    v = Math.floor(v / 128);`,
-    `  }`,
-    `  buf[o++] = v % 128;`,
-    `  return o - offset;`,
-    `}`,
-    ``,
-    `function readVarint(buf, offset) {`,
-    `  let o = offset;`,
-    `  let res = 0;`,
-    `  let shift = 0;`,
-    `  while (true) {`,
-    `    const b = buf[o++];`,
-    `    res += (b & 0x7f) * Math.pow(2, shift);`,
-    `    if ((b & 0x80) === 0) break;`,
-    `    shift += 7;`,
-    `  }`,
-    `  return [res, o];`,
-    `}`,
-    ``,
-    `// 64-bit fields go through BigInt end to end. Number would round anything`,
-    `// past 2^53, which is exactly the range int64 exists to carry.`,
-    `function writeVarint64(buf, offset, val) {`,
-    `  let o = offset;`,
-    `  let v = typeof val === "bigint" ? val : BigInt(Math.trunc(Number(val) || 0));`,
-    `  // Negative int64 travels as its two's complement, per protobuf.`,
-    `  v = BigInt.asUintN(64, v);`,
-    `  while (v >= 0x80n) {`,
-    `    buf[o++] = Number((v & 0x7fn) | 0x80n);`,
-    `    v >>= 7n;`,
-    `  }`,
-    `  buf[o++] = Number(v & 0x7fn);`,
-    `  return o - offset;`,
-    `}`,
-    ``,
-    `function readVarint64(buf, offset) {`,
-    `  let o = offset;`,
-    `  let res = 0n;`,
-    `  let shift = 0n;`,
-    `  while (true) {`,
-    `    const b = buf[o++];`,
-    `    res |= BigInt(b & 0x7f) << shift;`,
-    `    if ((b & 0x80) === 0) break;`,
-    `    shift += 7n;`,
-    `  }`,
-    `  return [BigInt.asIntN(64, res), o];`,
-    `}`,
-    ``,
-    `function writeString(buf, offset, str) {`,
-    `  textEncoder ??= new TextEncoder();`,
-    `  const bytes = textEncoder.encode(str);`,
-    `  let o = offset;`,
-    `  o += writeVarint(buf, o, bytes.length);`,
-    `  buf.set(bytes, o);`,
-    `  return o + bytes.length - offset;`,
-    `}`,
-    ``,
-    `function readString(buf, offset) {`,
-    `  const [len, newOff] = readVarint(buf, offset);`,
-    `  textDecoder ??= new TextDecoder();`,
-    `  const str = textDecoder.decode(buf.subarray(newOff, newOff + len));`,
-    `  return [str, newOff + len];`,
-    `}`,
-    ``,
-    `// sint32/sint64: zig-zag maps small negatives onto small positives, so`,
-    `// -1 costs one byte instead of ten.`,
-    `function writeZigZag(buf, offset, value) {`,
-    `  const v = typeof value === "bigint" ? value : BigInt(Math.trunc(Number(value) || 0));`,
-    `  return writeVarint64(buf, offset, BigInt.asUintN(64, (v << 1n) ^ (v >> 63n)));`,
-    `}`,
-    ``,
-    `function readZigZag(buf, offset) {`,
-    `  const [raw, next] = readVarint64(buf, offset);`,
-    `  const u = BigInt.asUintN(64, raw);`,
-    `  return [(u >> 1n) ^ -(u & 1n), next];`,
-    `}`,
-    ``,
-    `function writeBytes(buf, offset, value) {`,
-    `  const bytes = value instanceof Uint8Array`,
-    `    ? value`,
-    `    : new Uint8Array(value ?? []);`,
-    `  let o = offset;`,
-    `  o += writeVarint(buf, o, bytes.length);`,
-    `  buf.set(bytes, o);`,
-    `  return o + bytes.length - offset;`,
-    `}`,
-    ``,
-    `function readBytes(buf, offset) {`,
-    `  const [len, start] = readVarint(buf, offset);`,
-    `  return [buf.slice(start, start + len), start + len];`,
-    `}`,
-    ``,
-    `function varintSize(n) {`,
-    `  let size = 1;`,
-    `  let v = n;`,
-    `  while (v >= 0x80) { v = Math.floor(v / 128); size++; }`,
-    `  return size;`,
-    `}`,
-    ``,
-    ...functions,
-    ``,
-    `export function encodeProto(val, buf, offset = 0) {`,
-    `  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);`,
-    `  return encodeMsg0(val, buf, offset, view) - offset;`,
-    `}`,
-    ``,
-    `export function decodeProto(buf, offset = 0) {`,
-    `  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);`,
-    `  return decodeMsg0(buf, offset, buf.length, view);`,
-    `}`,
-  ].join('\n');
+        ``,
+        `// 64-bit fields go through BigInt end to end. Number would round anything`,
+        `// past 2^53, which is exactly the range int64 exists to carry.`,
+        `function writeVarint64(buf, offset, val) {`,
+        `  let o = offset;`,
+        `  let v = typeof val === "bigint" ? val : BigInt(Math.trunc(Number(val) || 0));`,
+        `  // Negative int64 travels as its two's complement, per protobuf.`,
+        `  v = BigInt.asUintN(64, v);`,
+        `  while (v >= 0x80n) {`,
+        `    buf[o++] = Number((v & 0x7fn) | 0x80n);`,
+        `    v >>= 7n;`,
+        `  }`,
+        `  buf[o++] = Number(v & 0x7fn);`,
+        `  return o - offset;`,
+        `}`,
+        ``,
+        `function readVarint64(buf, offset) {`,
+        `  let o = offset;`,
+        `  let res = 0n;`,
+        `  let shift = 0n;`,
+        `  while (true) {`,
+        `    const b = buf[o++];`,
+        `    res |= BigInt(b & 0x7f) << shift;`,
+        `    if ((b & 0x80) === 0) break;`,
+        `    shift += 7n;`,
+        `  }`,
+        `  return [BigInt.asIntN(64, res), o];`,
+        `}`,
+        ``,
+        `function writeString(buf, offset, str) {`,
+        `  textEncoder ??= new TextEncoder();`,
+        `  const bytes = textEncoder.encode(str);`,
+        `  let o = offset;`,
+        `  o += writeVarint(buf, o, bytes.length);`,
+        `  buf.set(bytes, o);`,
+        `  return o + bytes.length - offset;`,
+        `}`,
+        ``,
+        `function readString(buf, offset) {`,
+        `  const [len, newOff] = readVarint(buf, offset);`,
+        `  textDecoder ??= new TextDecoder();`,
+        `  const str = textDecoder.decode(buf.subarray(newOff, newOff + len));`,
+        `  return [str, newOff + len];`,
+        `}`,
+        ``,
+        `// sint32/sint64: zig-zag maps small negatives onto small positives, so`,
+        `// -1 costs one byte instead of ten.`,
+        `function writeZigZag(buf, offset, value) {`,
+        `  const v = typeof value === "bigint" ? value : BigInt(Math.trunc(Number(value) || 0));`,
+        `  return writeVarint64(buf, offset, BigInt.asUintN(64, (v << 1n) ^ (v >> 63n)));`,
+        `}`,
+        ``,
+        `function readZigZag(buf, offset) {`,
+        `  const [raw, next] = readVarint64(buf, offset);`,
+        `  const u = BigInt.asUintN(64, raw);`,
+        `  return [(u >> 1n) ^ -(u & 1n), next];`,
+        `}`,
+        ``,
+        `function writeBytes(buf, offset, value) {`,
+        `  const bytes = value instanceof Uint8Array`,
+        `    ? value`,
+        `    : new Uint8Array(value ?? []);`,
+        `  let o = offset;`,
+        `  o += writeVarint(buf, o, bytes.length);`,
+        `  buf.set(bytes, o);`,
+        `  return o + bytes.length - offset;`,
+        `}`,
+        ``,
+        `function readBytes(buf, offset) {`,
+        `  const [len, start] = readVarint(buf, offset);`,
+        `  return [buf.slice(start, start + len), start + len];`,
+        `}`,
+        ``,
+        `function varintSize(n) {`,
+        `  let size = 1;`,
+        `  let v = n;`,
+        `  while (v >= 0x80) { v = Math.floor(v / 128); size++; }`,
+        `  return size;`,
+        `}`,
+        ``,
+        ...functions,
+        ``,
+        `export function encodeProto(val, buf, offset = 0) {`,
+        `  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);`,
+        `  return encodeMsg0(val, buf, offset, view) - offset;`,
+        `}`,
+        ``,
+        `export function decodeProto(buf, offset = 0) {`,
+        `  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);`,
+        `  return decodeMsg0(buf, offset, buf.length, view);`,
+        `}`,
+    ].join("\n");
 }
 
 function mapIRToProtoType(ir: TypeIR, carrier?: Annotated): string {
-  const numeric = protoNumericFor(ir, carrier);
-  if (numeric) {
-    return numeric.proto;
-  }
+    const numeric = protoNumericFor(ir, carrier);
+    if (numeric) {
+        return numeric.proto;
+    }
 
-  switch (ir.kind) {
-    case 'primitive':
-      switch (ir.type) {
-        case 'string':
-        case 'symbol':
-          return 'string';
-        case 'boolean':
-          return 'bool';
-        case 'bytes':
-          return 'bytes';
+    switch (ir.kind) {
+        case "primitive":
+            switch (ir.type) {
+                case "string":
+                case "symbol":
+                    return "string";
+                case "boolean":
+                    return "bool";
+                case "bytes":
+                    return "bytes";
+                default:
+                    return "string";
+            }
+        case "literal":
+            if (typeof ir.value === "boolean") {
+                return "bool";
+            }
+            if (typeof ir.value === "bigint") {
+                return "int64";
+            }
+            if (typeof ir.value === "number") {
+                return "double";
+            }
+            return "string";
+        case "enum":
+            return ir.name ?? "int32";
+        case "array":
+            // The carrier travels with the element: `@format` sits on the property
+            // but describes what the repeated field holds, and the codec reads it
+            // that way. Dropping it here described an int32 field as a double.
+            return `repeated ${mapIRToProtoType(wireFieldType(ir.element), carrier)}`;
+        case "record":
+            return `map<${mapIRToProtoType(ir.keyType)}, ${mapIRToProtoType(wireFieldType(ir.valueType), carrier)}>`;
+        case "object":
+        case "intersection":
+            return ir.name ?? "bytes";
+        case "ref":
+            return ir.name ?? ir.targetId;
         default:
-          return 'string';
-      }
-    case 'literal':
-      if (typeof ir.value === 'boolean') {
-        return 'bool';
-      }
-      if (typeof ir.value === 'bigint') {
-        return 'int64';
-      }
-      if (typeof ir.value === 'number') {
-        return 'double';
-      }
-      return 'string';
-    case 'enum':
-      return ir.name ?? 'int32';
-    case 'array':
-      // The carrier travels with the element: `@format` sits on the property
-      // but describes what the repeated field holds, and the codec reads it
-      // that way. Dropping it here described an int32 field as a double.
-      return `repeated ${mapIRToProtoType(wireFieldType(ir.element), carrier)}`;
-    case 'record':
-      return `map<${mapIRToProtoType(ir.keyType)}, ${mapIRToProtoType(wireFieldType(ir.valueType), carrier)}>`;
-    case 'object':
-    case 'intersection':
-      return ir.name ?? 'bytes';
-    case 'ref':
-      return ir.name ?? ir.targetId;
-    default:
-      return 'string';
-  }
+            return "string";
+    }
 }
 
 /**
@@ -1059,41 +1037,41 @@ function mapIRToProtoType(ir: TypeIR, carrier?: Annotated): string {
  * so the variant's own type name is used where it has one.
  */
 function variantFieldName(ir: TypeIR, index: number): string {
-  const base = unwrapNullable(ir).name;
-  if (!base) {
-    return `variant_${index + 1}`;
-  }
-  return base.charAt(0).toLowerCase() + base.slice(1);
+    const base = unwrapNullable(ir).name;
+    if (!base) {
+        return `variant_${index + 1}`;
+    }
+    return base.charAt(0).toLowerCase() + base.slice(1);
 }
 
 /** One `message` or `enum`, flattened into what the emitter prints. */
 interface ProtoTypeDef {
-  name: string;
-  isEnum: boolean;
-  description?: string;
-  entries: Array<{
     name: string;
-    type: string;
-    fieldNumber: number;
-    comments: string[];
-    options: string[];
-    /** Set when this entry belongs to a `oneof` of that name. */
-    oneof?: string;
-  }>;
+    isEnum: boolean;
+    description?: string;
+    entries: Array<{
+        name: string;
+        type: string;
+        fieldNumber: number;
+        comments: string[];
+        options: string[];
+        /** Set when this entry belongs to a `oneof` of that name. */
+        oneof?: string;
+    }>;
 }
 
 /** One `service` block, with its rpcs in declaration order. */
 interface ProtoServiceDef {
-  name: string;
-  rpcs: Array<{
     name: string;
-    requestType: string;
-    requestStream: boolean;
-    responseType: string;
-    responseStream: boolean;
-    comments: string[];
-    options: string[];
-  }>;
+    rpcs: Array<{
+        name: string;
+        requestType: string;
+        requestStream: boolean;
+        responseType: string;
+        responseStream: boolean;
+        comments: string[];
+        options: string[];
+    }>;
 }
 
 /**
@@ -1104,23 +1082,23 @@ interface ProtoServiceDef {
  * were walked in: otherwise the message is emitted empty.
  */
 function collectProtoNamedTypes(types: Array<{ name: string; ir: TypeIR }>): Map<string, TypeIR> {
-  const allNamedTypes = new Map<string, TypeIR>();
+    const allNamedTypes = new Map<string, TypeIR>();
 
-  const offer = (name: string, ir: TypeIR): void => {
-    const existing = allNamedTypes.get(name);
-    if (!existing || (existing.kind === 'ref' && ir.kind !== 'ref')) {
-      allNamedTypes.set(name, ir);
+    const offer = (name: string, ir: TypeIR): void => {
+        const existing = allNamedTypes.get(name);
+        if (!existing || (existing.kind === "ref" && ir.kind !== "ref")) {
+            allNamedTypes.set(name, ir);
+        }
+    };
+
+    for (const { name, ir } of types) {
+        offer(name, ir);
+        for (const [transitiveName, transitiveIR] of collectNamedTypes(ir)) {
+            offer(transitiveName, transitiveIR);
+        }
     }
-  };
 
-  for (const { name, ir } of types) {
-    offer(name, ir);
-    for (const [transitiveName, transitiveIR] of collectNamedTypes(ir)) {
-      offer(transitiveName, transitiveIR);
-    }
-  }
-
-  return allNamedTypes;
+    return allNamedTypes;
 }
 
 /**
@@ -1130,118 +1108,116 @@ function collectProtoNamedTypes(types: Array<{ name: string; ir: TypeIR }>): Map
  * a field number is the wire identity, and protobuf has no way to derive one.
  */
 function protoFieldBlocker(allNamedTypes: ReadonlyMap<string, TypeIR>): string | undefined {
-  for (const [typeName, typeIR] of allNamedTypes.entries()) {
-    for (const prop of flattenObjectProperties(typeIR)) {
-      const oneof = oneofFor(prop.type);
-      const blocker =
-        nestedUnionBlocker(prop, typeName) ??
-        (oneof && !oneof.fieldNumbers
-          ? `[wiz] Property '${prop.name}' on type '${typeName}' is a union, which protobuf encodes as a 'oneof' and so needs a field number per variant. Declare it as NumberedUnion<{ 1: A; 2: B }> instead of A | B.`
-          : undefined) ??
-        (!oneof && (prop.fieldNumber === undefined || Number.isNaN(prop.fieldNumber))
-          ? `[wiz] Property '${prop.name}' on type '${typeName}' is missing required '@fieldNumber <N>' JSDoc tag for protobuf schema generation.`
-          : undefined);
+    for (const [typeName, typeIR] of allNamedTypes.entries()) {
+        for (const prop of flattenObjectProperties(typeIR)) {
+            const oneof = oneofFor(prop.type);
+            const blocker =
+                nestedUnionBlocker(prop, typeName) ??
+                (oneof && !oneof.fieldNumbers
+                    ? `[wiz] Property '${prop.name}' on type '${typeName}' is a union, which protobuf encodes as a 'oneof' and so needs a field number per variant. Declare it as NumberedUnion<{ 1: A; 2: B }> instead of A | B.`
+                    : undefined) ??
+                (!oneof && (prop.fieldNumber === undefined || Number.isNaN(prop.fieldNumber))
+                    ? `[wiz] Property '${prop.name}' on type '${typeName}' is missing required '@fieldNumber <N>' JSDoc tag for protobuf schema generation.`
+                    : undefined);
 
-      if (blocker) {
-        return blocker;
-      }
+            if (blocker) {
+                return blocker;
+            }
+        }
     }
-  }
-  return undefined;
+    return undefined;
 }
 
 /** The named types as message and enum definitions, in field-number order. */
 function protoTypeDefs(allNamedTypes: ReadonlyMap<string, TypeIR>): ProtoTypeDef[] {
-  const typeDefs: ProtoTypeDef[] = [];
+    const typeDefs: ProtoTypeDef[] = [];
 
-  // A named scalar, literal union, array or tuple is a field type rather than
-  // a message: `type Species = "dog" | "cat"` travels as a `string`, so an
-  // empty `message Species {}` beside it is noise nothing references.
-  const isMessageBody = (ir: TypeIR): boolean =>
-    ir.kind === 'enum' || ir.kind === 'object' || ir.kind === 'intersection' || ir.kind === 'ref';
+    // A named scalar, literal union, array or tuple is a field type rather than
+    // a message: `type Species = "dog" | "cat"` travels as a `string`, so an
+    // empty `message Species {}` beside it is noise nothing references.
+    const isMessageBody = (ir: TypeIR): boolean =>
+        ir.kind === "enum" || ir.kind === "object" || ir.kind === "intersection" || ir.kind === "ref";
 
-  for (const [typeName, typeIR] of allNamedTypes.entries()) {
-    if (!isMessageBody(typeIR)) {
-      continue;
+    for (const [typeName, typeIR] of allNamedTypes.entries()) {
+        if (!isMessageBody(typeIR)) {
+            continue;
+        }
+        if (typeIR.kind === "enum") {
+            typeDefs.push({
+                name: typeName,
+                isEnum: true,
+                description: typeIR.description,
+                entries: typeIR.members.map((m, idx) => ({
+                    name: m.name,
+                    type: "",
+                    fieldNumber: typeof m.value === "number" ? m.value : idx,
+                    comments: [],
+                    options: [],
+                })),
+            });
+        } else {
+            const props = flattenObjectProperties(typeIR);
+            const numberOf = (p: PropertyIR): number => {
+                const variants = oneofFor(p.type)?.fieldNumbers;
+                return variants ? Math.min(...variants) : p.fieldNumber!;
+            };
+            const sortedProps = [...props].sort((a, b) => numberOf(a) - numberOf(b));
+
+            typeDefs.push({
+                name: typeName,
+                isEnum: false,
+                description: typeIR.description,
+                entries: sortedProps.flatMap((p) => {
+                    const comments: string[] = [];
+                    if (p.description) {
+                        comments.push(p.description);
+                    }
+                    if (p.constraints) {
+                        for (const c of p.constraints) {
+                            comments.push(`@${c.kind} ${c.value}`);
+                        }
+                    }
+                    const options: string[] = [];
+                    if (p.deprecated?.isDeprecated) {
+                        options.push("deprecated = true");
+                    }
+
+                    const oneof = oneofFor(p.type);
+                    if (oneof?.fieldNumbers) {
+                        // Variants are named after their type; protobuf needs a field name
+                        // per member and the TypeScript side has none to offer.
+                        return oneof.types.map((variant, index) => ({
+                            name: variantFieldName(variant, index),
+                            type: mapIRToProtoType(variant, p),
+                            fieldNumber: oneof.fieldNumbers![index]!,
+                            comments: index === 0 ? comments : [],
+                            options,
+                            oneof: p.name,
+                        }));
+                    }
+
+                    return [
+                        {
+                            name: p.name,
+                            type: mapIRToProtoType(wireFieldType(p.type), p),
+                            fieldNumber: p.fieldNumber!,
+                            comments,
+                            options,
+                        },
+                    ];
+                }),
+            });
+        }
     }
-    if (typeIR.kind === 'enum') {
-      typeDefs.push({
-        name: typeName,
-        isEnum: true,
-        description: typeIR.description,
-        entries: typeIR.members.map((m, idx) => ({
-          name: m.name,
-          type: '',
-          fieldNumber: typeof m.value === 'number' ? m.value : idx,
-          comments: [],
-          options: [],
-        })),
-      });
-    } else {
-      const props = flattenObjectProperties(typeIR);
-      const numberOf = (p: PropertyIR): number => {
-        const variants = oneofFor(p.type)?.fieldNumbers;
-        return variants ? Math.min(...variants) : p.fieldNumber!;
-      };
-      const sortedProps = [...props].sort((a, b) => numberOf(a) - numberOf(b));
 
-      typeDefs.push({
-        name: typeName,
-        isEnum: false,
-        description: typeIR.description,
-        entries: sortedProps.flatMap((p) => {
-          const comments: string[] = [];
-          if (p.description) {
-            comments.push(p.description);
-          }
-          if (p.constraints) {
-            for (const c of p.constraints) {
-              comments.push(`@${c.kind} ${c.value}`);
-            }
-          }
-          const options: string[] = [];
-          if (p.deprecated?.isDeprecated) {
-            options.push('deprecated = true');
-          }
-
-          const oneof = oneofFor(p.type);
-          if (oneof?.fieldNumbers) {
-            // Variants are named after their type; protobuf needs a field name
-            // per member and the TypeScript side has none to offer.
-            return oneof.types.map((variant, index) => ({
-              name: variantFieldName(variant, index),
-              type: mapIRToProtoType(variant, p),
-              fieldNumber: oneof.fieldNumbers![index]!,
-              comments: index === 0 ? comments : [],
-              options,
-              oneof: p.name,
-            }));
-          }
-
-          return [
-            {
-              name: p.name,
-              type: mapIRToProtoType(wireFieldType(p.type), p),
-              fieldNumber: p.fieldNumber!,
-              comments,
-              options,
-            },
-          ];
-        }),
-      });
-    }
-  }
-
-  return typeDefs;
+    return typeDefs;
 }
 
 /** A module exporting `name`, which throws whatever stopped generation. */
 function protoBlockedModuleCode(name: string, blocker: string): string {
-  return [
-    `export function ${name}(options = {}) {`,
-    `  throw new Error(${JSON.stringify(blocker)});`,
-    `}`,
-  ].join('\n');
+    return [`export function ${name}(options = {}) {`, `  throw new Error(${JSON.stringify(blocker)});`, `}`].join(
+        "\n",
+    );
 }
 
 /**
@@ -1252,110 +1228,107 @@ function protoBlockedModuleCode(name: string, blocker: string): string {
  * build. `package` and `services` are empty for a payload-only schema.
  */
 function protoModuleCode(
-  name: string,
-  typeDefs: ProtoTypeDef[],
-  pkg: string | undefined,
-  services: ProtoServiceDef[]
+    name: string,
+    typeDefs: ProtoTypeDef[],
+    pkg: string | undefined,
+    services: ProtoServiceDef[],
 ): string {
-  return [
-    `export function ${name}(options = {}) {`,
-    `  const indent = options.indent ?? "  ";`,
-    `  const typeDefs = ${JSON.stringify(typeDefs, null, 2)};`,
-    `  const serviceDefs = ${JSON.stringify(services, null, 2)};`,
-    `  const pkg = ${JSON.stringify(pkg ?? null)};`,
-    `  const lines = ['syntax = "proto3";', ''];`,
-    `  if (pkg) lines.push('package ' + pkg + ';', '');`,
-    `  for (const def of typeDefs) {`,
-    `    if (def.description) {`,
-    `      for (const line of def.description.split("\\n")) {`,
-    `        if (line.trim()) lines.push('// ' + line.trim());`,
-    `      }`,
-    `    }`,
-    `    if (def.isEnum) {`,
-    `      lines.push('enum ' + def.name + ' {');`,
-    `      for (const entry of def.entries) {`,
-    `        if (entry.comments && entry.comments.length > 0) {`,
-    `          for (const c of entry.comments) {`,
-    `            lines.push(indent + '// ' + c);`,
-    `          }`,
-    `        }`,
-    `        const optStr = entry.options && entry.options.length > 0 ? ' [' + entry.options.join(', ') + ']' : '';`,
-    `        lines.push(indent + entry.name + ' = ' + entry.fieldNumber + optStr + ';');`,
-    `      }`,
-    `      lines.push('}');`,
-    `    } else {`,
-    `      lines.push('message ' + def.name + ' {');`,
-    `      let openOneof = null;`,
-    `      for (const entry of def.entries) {`,
-    `        if (entry.oneof !== openOneof) {`,
-    `          if (openOneof !== null) lines.push(indent + '}');`,
-    `          if (entry.oneof) lines.push(indent + 'oneof ' + entry.oneof + ' {');`,
-    `          openOneof = entry.oneof ?? null;`,
-    `        }`,
-    `        const pad = entry.oneof ? indent + indent : indent;`,
-    `        if (entry.comments && entry.comments.length > 0) {`,
-    `          for (const c of entry.comments) {`,
-    `            lines.push(pad + '// ' + c);`,
-    `          }`,
-    `        }`,
-    `        const optStr = entry.options && entry.options.length > 0 ? ' [' + entry.options.join(', ') + ']' : '';`,
-    `        lines.push(pad + entry.type + ' ' + entry.name + ' = ' + entry.fieldNumber + optStr + ';');`,
-    `      }`,
-    `      if (openOneof !== null) lines.push(indent + '}');`,
-    `      lines.push('}');`,
-    `    }`,
-    `    lines.push('');`,
-    `  }`,
-    `  for (const svc of serviceDefs) {`,
-    `    lines.push('service ' + svc.name + ' {');`,
-    `    for (const rpc of svc.rpcs) {`,
-    `      for (const c of rpc.comments) {`,
-    `        lines.push(indent + '// ' + c);`,
-    `      }`,
-    `      const req = (rpc.requestStream ? 'stream ' : '') + rpc.requestType;`,
-    `      const res = (rpc.responseStream ? 'stream ' : '') + rpc.responseType;`,
-    `      const decl = indent + 'rpc ' + rpc.name + ' (' + req + ') returns (' + res + ')';`,
-    `      if (rpc.options.length > 0) {`,
-    `        lines.push(decl + ' {');`,
-    `        for (const opt of rpc.options) lines.push(indent + indent + 'option ' + opt + ';');`,
-    `        lines.push(indent + '}');`,
-    `      } else {`,
-    `        lines.push(decl + ';');`,
-    `      }`,
-    `    }`,
-    `    lines.push('}');`,
-    `    lines.push('');`,
-    `  }`,
-    `  return lines.join('\\n').trim();`,
-    `}`,
-  ].join('\n');
+    return [
+        `export function ${name}(options = {}) {`,
+        `  const indent = options.indent ?? "  ";`,
+        `  const typeDefs = ${JSON.stringify(typeDefs, null, 2)};`,
+        `  const serviceDefs = ${JSON.stringify(services, null, 2)};`,
+        `  const pkg = ${JSON.stringify(pkg ?? null)};`,
+        `  const lines = ['syntax = "proto3";', ''];`,
+        `  if (pkg) lines.push('package ' + pkg + ';', '');`,
+        `  for (const def of typeDefs) {`,
+        `    if (def.description) {`,
+        `      for (const line of def.description.split("\\n")) {`,
+        `        if (line.trim()) lines.push('// ' + line.trim());`,
+        `      }`,
+        `    }`,
+        `    if (def.isEnum) {`,
+        `      lines.push('enum ' + def.name + ' {');`,
+        `      for (const entry of def.entries) {`,
+        `        if (entry.comments && entry.comments.length > 0) {`,
+        `          for (const c of entry.comments) {`,
+        `            lines.push(indent + '// ' + c);`,
+        `          }`,
+        `        }`,
+        `        const optStr = entry.options && entry.options.length > 0 ? ' [' + entry.options.join(', ') + ']' : '';`,
+        `        lines.push(indent + entry.name + ' = ' + entry.fieldNumber + optStr + ';');`,
+        `      }`,
+        `      lines.push('}');`,
+        `    } else {`,
+        `      lines.push('message ' + def.name + ' {');`,
+        `      let openOneof = null;`,
+        `      for (const entry of def.entries) {`,
+        `        if (entry.oneof !== openOneof) {`,
+        `          if (openOneof !== null) lines.push(indent + '}');`,
+        `          if (entry.oneof) lines.push(indent + 'oneof ' + entry.oneof + ' {');`,
+        `          openOneof = entry.oneof ?? null;`,
+        `        }`,
+        `        const pad = entry.oneof ? indent + indent : indent;`,
+        `        if (entry.comments && entry.comments.length > 0) {`,
+        `          for (const c of entry.comments) {`,
+        `            lines.push(pad + '// ' + c);`,
+        `          }`,
+        `        }`,
+        `        const optStr = entry.options && entry.options.length > 0 ? ' [' + entry.options.join(', ') + ']' : '';`,
+        `        lines.push(pad + entry.type + ' ' + entry.name + ' = ' + entry.fieldNumber + optStr + ';');`,
+        `      }`,
+        `      if (openOneof !== null) lines.push(indent + '}');`,
+        `      lines.push('}');`,
+        `    }`,
+        `    lines.push('');`,
+        `  }`,
+        `  for (const svc of serviceDefs) {`,
+        `    lines.push('service ' + svc.name + ' {');`,
+        `    for (const rpc of svc.rpcs) {`,
+        `      for (const c of rpc.comments) {`,
+        `        lines.push(indent + '// ' + c);`,
+        `      }`,
+        `      const req = (rpc.requestStream ? 'stream ' : '') + rpc.requestType;`,
+        `      const res = (rpc.responseStream ? 'stream ' : '') + rpc.responseType;`,
+        `      const decl = indent + 'rpc ' + rpc.name + ' (' + req + ') returns (' + res + ')';`,
+        `      if (rpc.options.length > 0) {`,
+        `        lines.push(decl + ' {');`,
+        `        for (const opt of rpc.options) lines.push(indent + indent + 'option ' + opt + ';');`,
+        `        lines.push(indent + '}');`,
+        `      } else {`,
+        `        lines.push(decl + ';');`,
+        `      }`,
+        `    }`,
+        `    lines.push('}');`,
+        `    lines.push('');`,
+        `  }`,
+        `  return lines.join('\\n').trim();`,
+        `}`,
+    ].join("\n");
 }
 
 export function generateProtobufSchemaCode(types: Array<{ name: string; ir: TypeIR }>): string {
-  const allNamedTypes = collectProtoNamedTypes(types);
+    const allNamedTypes = collectProtoNamedTypes(types);
 
-  const blocker = protoFieldBlocker(allNamedTypes);
-  if (blocker) {
-    return protoBlockedModuleCode('protobufSchema', blocker);
-  }
+    const blocker = protoFieldBlocker(allNamedTypes);
+    if (blocker) {
+        return protoBlockedModuleCode("protobufSchema", blocker);
+    }
 
-  return protoModuleCode('protobufSchema', protoTypeDefs(allNamedTypes), undefined, []);
+    return protoModuleCode("protobufSchema", protoTypeDefs(allNamedTypes), undefined, []);
 }
 
 /** `never`/`void`/`undefined` in a payload slot means "no message at all". */
 function isAbsentIR(ir: TypeIR | undefined): boolean {
-  if (!ir) {
-    return true;
-  }
-  return (
-    ir.kind === 'primitive' &&
-    (ir.type === 'never' || ir.type === 'void' || ir.type === 'undefined')
-  );
+    if (!ir) {
+        return true;
+    }
+    return ir.kind === "primitive" && (ir.type === "never" || ir.type === "void" || ir.type === "undefined");
 }
 
 /** `sayHello` → `SayHello`, for a message name derived from an rpc name. */
 function upperFirst(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1);
+    return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /**
@@ -1368,112 +1341,108 @@ function upperFirst(text: string): string {
  * `google/protobuf/empty.proto`, which would make the file need a resolver.
  */
 export function generateGrpcSchemaCode(
-  types: Array<{ name: string; ir: TypeIR }>,
-  service: ServiceIR = emptyService()
+    types: Array<{ name: string; ir: TypeIR }>,
+    service: ServiceIR = emptyService(),
 ): string {
-  const roots: Array<{ name: string; ir: TypeIR }> = [...types];
-  const services = new Map<string, ProtoServiceDef>();
-  let pkg: string | undefined;
-  let blocker: string | undefined;
+    const roots: Array<{ name: string; ir: TypeIR }> = [...types];
+    const services = new Map<string, ProtoServiceDef>();
+    let pkg: string | undefined;
+    let blocker: string | undefined;
 
-  /** The message name for one rpc slot, defining it when the type has none. */
-  const messageFor = (ir: TypeIR | undefined, fallback: string, slot: string): string => {
-    if (isAbsentIR(ir)) {
-      roots.push({
-        name: fallback,
-        ir: { id: `wiz:grpc:${fallback}`, kind: 'object', name: fallback, properties: [] },
-      });
-      return fallback;
-    }
-    const payload = ir!;
-    if (isUserNamedType(payload.name)) {
-      roots.push({ name: payload.name!, ir: payload });
-      return payload.name!;
-    }
-    if (payload.kind === 'object' || payload.kind === 'intersection') {
-      roots.push({ name: fallback, ir: payload });
-      return fallback;
-    }
-    blocker ??=
-      `[wiz] The ${slot} is '${payload.kind}', but a gRPC rpc carries a message: ` +
-      `declare it as an interface or object type.`;
-    return fallback;
-  };
-
-  for (const method of service.methods) {
-    if (!isGrpcMethod(method)) {
-      continue;
-    }
-
-    const declaredPkg = method.address.package;
-    if (declaredPkg) {
-      if (pkg === undefined) {
-        pkg = declaredPkg;
-      } else if (pkg !== declaredPkg) {
-        return protoBlockedModuleCode(
-          'grpcSchema',
-          `[wiz] Methods declare conflicting proto packages '${pkg}' and '${declaredPkg}', ` +
-            `but a .proto file declares exactly one. Use one '@package' for the whole schema.`
-        );
-      }
-    }
-
-    const rpcName = method.address.method;
-    const label = `${method.address.service}.${rpcName}`;
-    const response = method.responses[0];
-
-    const comments: string[] = [];
-    for (const text of [method.summary, method.description]) {
-      if (!text) {
-        continue;
-      }
-      for (const line of text.split('\n')) {
-        if (line.trim()) {
-          comments.push(line.trim());
+    /** The message name for one rpc slot, defining it when the type has none. */
+    const messageFor = (ir: TypeIR | undefined, fallback: string, slot: string): string => {
+        if (isAbsentIR(ir)) {
+            roots.push({
+                name: fallback,
+                ir: { id: `wiz:grpc:${fallback}`, kind: "object", name: fallback, properties: [] },
+            });
+            return fallback;
         }
-      }
-    }
-
-    const rpc = {
-      name: rpcName,
-      requestType: messageFor(
-        method.request.message,
-        `${upperFirst(rpcName)}Request`,
-        `request of rpc '${label}'`
-      ),
-      requestStream: method.request.streaming,
-      responseType: messageFor(
-        response?.message,
-        `${upperFirst(rpcName)}Response`,
-        `response of rpc '${label}'`
-      ),
-      responseStream: response?.streaming ?? false,
-      comments,
-      options: method.deprecated ? ['deprecated = true'] : [],
+        const payload = ir!;
+        if (isUserNamedType(payload.name)) {
+            roots.push({ name: payload.name!, ir: payload });
+            return payload.name!;
+        }
+        if (payload.kind === "object" || payload.kind === "intersection") {
+            roots.push({ name: fallback, ir: payload });
+            return fallback;
+        }
+        blocker ??=
+            `[wiz] The ${slot} is '${payload.kind}', but a gRPC rpc carries a message: ` +
+            `declare it as an interface or object type.`;
+        return fallback;
     };
 
-    const existing = services.get(method.address.service);
-    if (existing) {
-      existing.rpcs.push(rpc);
-    } else {
-      services.set(method.address.service, {
-        name: method.address.service,
-        rpcs: [rpc],
-      });
+    for (const method of service.methods) {
+        if (!isGrpcMethod(method)) {
+            continue;
+        }
+
+        const declaredPkg = method.address.package;
+        if (declaredPkg) {
+            if (pkg === undefined) {
+                pkg = declaredPkg;
+            } else if (pkg !== declaredPkg) {
+                return protoBlockedModuleCode(
+                    "grpcSchema",
+                    `[wiz] Methods declare conflicting proto packages '${pkg}' and '${declaredPkg}', ` +
+                        `but a .proto file declares exactly one. Use one '@package' for the whole schema.`,
+                );
+            }
+        }
+
+        const rpcName = method.address.method;
+        const label = `${method.address.service}.${rpcName}`;
+        const response = method.responses[0];
+
+        const comments: string[] = [];
+        for (const text of [method.summary, method.description]) {
+            if (!text) {
+                continue;
+            }
+            for (const line of text.split("\n")) {
+                if (line.trim()) {
+                    comments.push(line.trim());
+                }
+            }
+        }
+
+        const rpc = {
+            name: rpcName,
+            requestType: messageFor(
+                method.request.message,
+                `${upperFirst(rpcName)}Request`,
+                `request of rpc '${label}'`,
+            ),
+            requestStream: method.request.streaming,
+            responseType: messageFor(response?.message, `${upperFirst(rpcName)}Response`, `response of rpc '${label}'`),
+            responseStream: response?.streaming ?? false,
+            comments,
+            options: method.deprecated ? ["deprecated = true"] : [],
+        };
+
+        const existing = services.get(method.address.service);
+        if (existing) {
+            existing.rpcs.push(rpc);
+        } else {
+            services.set(method.address.service, {
+                name: method.address.service,
+                rpcs: [rpc],
+            });
+        }
     }
-  }
 
-  if (blocker) {
-    return protoBlockedModuleCode('grpcSchema', blocker);
-  }
+    if (blocker) {
+        return protoBlockedModuleCode("grpcSchema", blocker);
+    }
 
-  const allNamedTypes = collectProtoNamedTypes(roots);
-  const fieldBlocker = protoFieldBlocker(allNamedTypes);
-  if (fieldBlocker) {
-    return protoBlockedModuleCode('grpcSchema', fieldBlocker);
-  }
+    const allNamedTypes = collectProtoNamedTypes(roots);
+    const fieldBlocker = protoFieldBlocker(allNamedTypes);
+    if (fieldBlocker) {
+        return protoBlockedModuleCode("grpcSchema", fieldBlocker);
+    }
 
-  return protoModuleCode('grpcSchema', protoTypeDefs(allNamedTypes), pkg, [...services.values()]);
+    return protoModuleCode("grpcSchema", protoTypeDefs(allNamedTypes), pkg, [...services.values()]);
 }
 
 /**
@@ -1490,103 +1459,103 @@ export function generateGrpcSchemaCode(
  * model, which is what api.ts is checked against.
  */
 export function generateProtobufCodecCode(
-  types: Array<{ name: string; ir: TypeIR }>,
-  options: { modelModule?: string; identifiers?: ReadonlyMap<string, string> } = {}
+    types: Array<{ name: string; ir: TypeIR }>,
+    options: { modelModule?: string; identifiers?: ReadonlyMap<string, string> } = {},
 ): string {
-  const MESSAGE_MARKER = 'function encodeMsg0(';
-  const PUBLIC_MARKER = '\nexport function encodeProto(';
+    const MESSAGE_MARKER = "function encodeMsg0(";
+    const PUBLIC_MARKER = "\nexport function encodeProto(";
 
-  const identifierFor = (name: string): string => {
-    const mapped = options.identifiers?.get(name);
-    if (mapped) {
-      return mapped;
-    }
-    const sanitized = name.replace(/[^A-Za-z0-9_$]/g, '_');
-    return /^[A-Za-z_$]/.test(sanitized) ? sanitized : `_${sanitized}`;
-  };
+    const identifierFor = (name: string): string => {
+        const mapped = options.identifiers?.get(name);
+        if (mapped) {
+            return mapped;
+        }
+        const sanitized = name.replace(/[^A-Za-z0-9_$]/g, "_");
+        return /^[A-Za-z_$]/.test(sanitized) ? sanitized : `_${sanitized}`;
+    };
 
-  const exported = (kind: 'encode' | 'decode', identifier: string): string =>
-    `${kind}${identifier.charAt(0).toUpperCase()}${identifier.slice(1)}`;
+    const exported = (kind: "encode" | "decode", identifier: string): string =>
+        `${kind}${identifier.charAt(0).toUpperCase()}${identifier.slice(1)}`;
 
-  let helpers: string | undefined;
-  const bodies: string[] = [];
-  const wrappers: string[] = [];
-  const modelTypes: string[] = [];
+    let helpers: string | undefined;
+    const bodies: string[] = [];
+    const wrappers: string[] = [];
+    const modelTypes: string[] = [];
 
-  types.forEach(({ name, ir }, index) => {
-    const identifier = identifierFor(name);
-    const valueType = options.modelModule ? identifier : 'unknown';
-    if (options.modelModule) {
-      modelTypes.push(identifier);
-    }
+    types.forEach(({ name, ir }, index) => {
+        const identifier = identifierFor(name);
+        const valueType = options.modelModule ? identifier : "unknown";
+        if (options.modelModule) {
+            modelTypes.push(identifier);
+        }
 
-    const module = generateProtobufCode(ir);
-    const start = module.indexOf(MESSAGE_MARKER);
+        const module = generateProtobufCode(ir);
+        const start = module.indexOf(MESSAGE_MARKER);
 
-    // A type protobuf cannot express still gets a module: the blocked root
-    // emits only throwing exports, and its reason is worth keeping verbatim.
-    if (start < 0) {
-      const reason = /throw new Error\((".*?")\)/.exec(module)?.[1] ?? '"[wiz] not encodable"';
-      wrappers.push(
-        `export function ${exported('encode', identifier)}(value: ${valueType}): Uint8Array {\n` +
-          `  throw new Error(${reason});\n}`,
-        `export function ${exported('decode', identifier)}(bytes: Uint8Array): ${valueType} {\n` +
-          `  throw new Error(${reason});\n}`
-      );
-      return;
-    }
+        // A type protobuf cannot express still gets a module: the blocked root
+        // emits only throwing exports, and its reason is worth keeping verbatim.
+        if (start < 0) {
+            const reason = /throw new Error\((".*?")\)/.exec(module)?.[1] ?? '"[wiz] not encodable"';
+            wrappers.push(
+                `export function ${exported("encode", identifier)}(value: ${valueType}): Uint8Array {\n` +
+                    `  throw new Error(${reason});\n}`,
+                `export function ${exported("decode", identifier)}(bytes: Uint8Array): ${valueType} {\n` +
+                    `  throw new Error(${reason});\n}`,
+            );
+            return;
+        }
 
-    helpers ??= module.slice(0, start).trimEnd();
-    const end = module.indexOf(PUBLIC_MARKER);
-    // Message ids are per-root, so they are suffixed to keep two roots apart.
-    bodies.push(
-      module
-        .slice(start, end < 0 ? undefined : end)
-        .replace(/\b(encodeMsg|decodeMsg)(\d+)\b/g, `$1$2_${index}`)
-        .trimEnd()
-    );
+        helpers ??= module.slice(0, start).trimEnd();
+        const end = module.indexOf(PUBLIC_MARKER);
+        // Message ids are per-root, so they are suffixed to keep two roots apart.
+        bodies.push(
+            module
+                .slice(start, end < 0 ? undefined : end)
+                .replace(/\b(encodeMsg|decodeMsg)(\d+)\b/g, `$1$2_${index}`)
+                .trimEnd(),
+        );
 
-    wrappers.push(
-      `export function ${exported('encode', identifier)}(value: ${valueType}): Uint8Array {\n` +
-        `  return writeMessage((buf, view) => encodeMsg0_${index}(value, buf, 0, view));\n}`,
-      `export function ${exported('decode', identifier)}(bytes: Uint8Array): ${valueType} {\n` +
-        `  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);\n` +
-        `  return decodeMsg0_${index}(bytes, 0, bytes.length, view);\n}`
-    );
-  });
+        wrappers.push(
+            `export function ${exported("encode", identifier)}(value: ${valueType}): Uint8Array {\n` +
+                `  return writeMessage((buf, view) => encodeMsg0_${index}(value, buf, 0, view));\n}`,
+            `export function ${exported("decode", identifier)}(bytes: Uint8Array): ${valueType} {\n` +
+                `  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);\n` +
+                `  return decodeMsg0_${index}(bytes, 0, bytes.length, view);\n}`,
+        );
+    });
 
-  const allocator = [
-    `/**`,
-    ` * Encodes into a buffer it owns.`,
-    ` *`,
-    ` * The writers advance their offset past the end of a short buffer while the`,
-    ` * writes themselves are dropped, so a result longer than the buffer is how`,
-    ` * truncation announces itself: grow and write again.`,
-    ` */`,
-    `function writeMessage(write) {`,
-    `  let size = 1024;`,
-    `  for (let attempt = 0; attempt < 16; attempt++) {`,
-    `    const buf = new Uint8Array(size);`,
-    `    const view = new DataView(buf.buffer);`,
-    `    const written = write(buf, view);`,
-    `    if (written <= size) return buf.subarray(0, written);`,
-    `    size = Math.max(size * 2, written + 64);`,
-    `  }`,
-    `  throw new Error("[wiz] message did not fit in any buffer this codec will allocate");`,
-    `}`,
-  ].join('\n');
+    const allocator = [
+        `/**`,
+        ` * Encodes into a buffer it owns.`,
+        ` *`,
+        ` * The writers advance their offset past the end of a short buffer while the`,
+        ` * writes themselves are dropped, so a result longer than the buffer is how`,
+        ` * truncation announces itself: grow and write again.`,
+        ` */`,
+        `function writeMessage(write) {`,
+        `  let size = 1024;`,
+        `  for (let attempt = 0; attempt < 16; attempt++) {`,
+        `    const buf = new Uint8Array(size);`,
+        `    const view = new DataView(buf.buffer);`,
+        `    const written = write(buf, view);`,
+        `    if (written <= size) return buf.subarray(0, written);`,
+        `    size = Math.max(size * 2, written + 64);`,
+        `  }`,
+        `  throw new Error("[wiz] message did not fit in any buffer this codec will allocate");`,
+        `}`,
+    ].join("\n");
 
-  return [
-    `// @ts-nocheck - generated wire code; the typed surface is the exports below.`,
-    ...(modelTypes.length > 0
-      ? [
-          `import type { ${[...new Set(modelTypes)].sort().join(', ')} } from ${JSON.stringify(options.modelModule)};`,
-        ]
-      : []),
-    ``,
-    ...(helpers ? [helpers, ``] : []),
-    ...(bodies.length > 0 ? [bodies.join('\n\n'), ``] : []),
-    ...(bodies.length > 0 ? [allocator, ``] : []),
-    wrappers.join('\n\n'),
-  ].join('\n');
+    return [
+        `// @ts-nocheck - generated wire code; the typed surface is the exports below.`,
+        ...(modelTypes.length > 0
+            ? [
+                  `import type { ${[...new Set(modelTypes)].sort().join(", ")} } from ${JSON.stringify(options.modelModule)};`,
+              ]
+            : []),
+        ``,
+        ...(helpers ? [helpers, ``] : []),
+        ...(bodies.length > 0 ? [bodies.join("\n\n"), ``] : []),
+        ...(bodies.length > 0 ? [allocator, ``] : []),
+        wrappers.join("\n\n"),
+    ].join("\n");
 }

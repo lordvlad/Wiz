@@ -1,4 +1,4 @@
-import type { TypeIR } from '../ir/types.ts';
+import type { TypeIR } from "../ir/types.ts";
 
 /**
  * Generates Virtual Module code for `encodeCbor` and `decodeCbor`.
@@ -7,7 +7,7 @@ import type { TypeIR } from '../ir/types.ts';
  * information, so the codec is dynamic and ignores the IR.
  */
 export function generateCborCode(_ir: TypeIR): string {
-  return `
+    return `
 var __wizCborEnc;
 var __wizCborDec;
 

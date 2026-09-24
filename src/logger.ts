@@ -4,10 +4,10 @@
  * without an adapter.
  */
 export interface WizLogger {
-  trace(...args: unknown[]): void;
-  info(...args: unknown[]): void;
-  warn(...args: unknown[]): void;
-  error(...args: unknown[]): void;
+    trace(...args: unknown[]): void;
+    info(...args: unknown[]): void;
+    warn(...args: unknown[]): void;
+    error(...args: unknown[]): void;
 }
 
 const noop = () => {};
@@ -21,24 +21,24 @@ const noop = () => {};
  * {@link consoleLogger}, or map `trace` to a sink of your choosing.
  */
 export const defaultLogger: WizLogger = {
-  trace: noop,
-  info: (...args) => console.info(...args),
-  warn: (...args) => console.warn(...args),
-  error: (...args) => console.error(...args),
+    trace: noop,
+    info: (...args) => console.info(...args),
+    warn: (...args) => console.warn(...args),
+    error: (...args) => console.error(...args),
 };
 
 /** Full console mirror, `console.trace` and all. Opt in for verbose builds. */
 export const consoleLogger: WizLogger = {
-  trace: (...args) => console.trace(...args),
-  info: (...args) => console.info(...args),
-  warn: (...args) => console.warn(...args),
-  error: (...args) => console.error(...args),
+    trace: (...args) => console.trace(...args),
+    info: (...args) => console.info(...args),
+    warn: (...args) => console.warn(...args),
+    error: (...args) => console.error(...args),
 };
 
 /** Discards everything. Useful in tests and quiet CI builds. */
 export const silentLogger: WizLogger = {
-  trace: noop,
-  info: noop,
-  warn: noop,
-  error: noop,
+    trace: noop,
+    info: noop,
+    warn: noop,
+    error: noop,
 };

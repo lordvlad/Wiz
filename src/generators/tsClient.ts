@@ -1,38 +1,38 @@
-import type { ApiIR } from '../ir/api.ts';
+import type { ApiIR } from "../ir/api.ts";
 import {
-  isGrpcMethod,
-  isHttpMethod,
-  isOpenRpcMethod,
-  type GrpcServiceMethodIR,
-  type HttpResponseIR,
-  type HttpServiceMethodIR,
-  type OpenRpcServiceMethodIR,
-  type ParameterIR,
-  type ServiceIR,
-  type ServiceMethodBodyIR,
-  type ServiceMethodIR,
-} from '../ir/service.ts';
-import { collectNamedTypes, type PropertyIR, type TypeIR } from '../types.ts';
-import { generateCborCode } from './cbor.ts';
-import { generateErlangTextCode, generateErlangBinaryCode } from './erlang.ts';
-import type { GeneratedFiles, Generator, GeneratorContext } from './generator.ts';
-import { generateJsonCodecCode } from './json.ts';
-import { generateProtobufCodecCode } from './protobuf.ts';
+    isGrpcMethod,
+    isHttpMethod,
+    isOpenRpcMethod,
+    type GrpcServiceMethodIR,
+    type HttpResponseIR,
+    type HttpServiceMethodIR,
+    type OpenRpcServiceMethodIR,
+    type ParameterIR,
+    type ServiceIR,
+    type ServiceMethodBodyIR,
+    type ServiceMethodIR,
+} from "../ir/service.ts";
+import { collectNamedTypes, type TypeIR } from "../types.ts";
+import { generateCborCode } from "./cbor.ts";
+import { generateErlangTextCode, generateErlangBinaryCode } from "./erlang.ts";
+import type { GeneratedFiles, Generator, GeneratorContext } from "./generator.ts";
+import { generateJsonCodecCode } from "./json.ts";
+import { generateProtobufCodecCode } from "./protobuf.ts";
 import {
-  applyPlugins,
-  BUILTIN_TS_CLIENT_PLUGINS,
-  type AppliedPlugins,
-  type TsClientPlugin,
-} from './tsClientPlugins.ts';
-import { docComment, tsDeclarations, typeIdentifiers, typeText } from './tsTypes.ts';
-import { generateValidationBlock, helpersFor } from './validator.ts';
+    applyPlugins,
+    BUILTIN_TS_CLIENT_PLUGINS,
+    type AppliedPlugins,
+    type TsClientPlugin,
+} from "./tsClientPlugins.ts";
+import { docComment, tsDeclarations, typeIdentifiers, typeText } from "./tsTypes.ts";
+import { generateValidationBlock, helpersFor } from "./validator.ts";
 
 export type {
-  TsClientPlugin,
-  TsClientTypeInput,
-  TsClientDeclarationInput,
-  TsClientPluginContext,
-} from './tsClientPlugins.ts';
+    TsClientPlugin,
+    TsClientTypeInput,
+    TsClientDeclarationInput,
+    TsClientPluginContext,
+} from "./tsClientPlugins.ts";
 
 /**
  * A TypeScript HTTP client, emitted as two files a consumer can drop into a
@@ -49,59 +49,59 @@ export type {
  * one. Neither is a wrapper around a second implementation.
  */
 
-export type ValidateTarget = 'path' | 'query' | 'body' | 'headers' | 'response';
+export type ValidateTarget = "path" | "query" | "body" | "headers" | "response";
 
 export type MediaType =
-  | 'json'
-  | 'jsonl'
-  | 'jsonc'
-  | 'json5'
-  | 'xml'
-  | 'html'
-  | 'xml+html'
-  | 'grpc'
-  | 'erlangText'
-  | 'erlangBinary'
-  | 'erlang'
-  | 'cbor'
-  | 'yaml';
+    | "json"
+    | "jsonl"
+    | "jsonc"
+    | "json5"
+    | "xml"
+    | "html"
+    | "xml+html"
+    | "grpc"
+    | "erlangText"
+    | "erlangBinary"
+    | "erlang"
+    | "cbor"
+    | "yaml";
 
 export interface TsClientOptions {
-  /**
-   * Widens the parameter objects: headers accept any string entry and query
-   * accepts any string or boolean one, on top of what the document declared.
-   *
-   * The strict shape is the honest one, but real documents omit the header a
-   * gateway requires, so the escape hatch is opt-in rather than absent.
-   */
-  lenient?: boolean;
-  /**
-   * Validates request parameters and/or response payloads at runtime.
-   * Pass `true` to validate all parts (`path`, `query`, `body`, `headers`, `response`),
-   * or an array of specific parts to validate.
-   */
-  validate?: boolean | ValidateTarget[];
-  /**
-   * Additional media types to support when generating the client.
-   * "all" enables all supported media types (JSONL, JSONC, JSON5, XML, HTML, gRPC, Erlang Text, Erlang Binary, YAML).
-   */
-  mediaTypes?: string[] | 'all';
-  /**
-   * Extra vendor-extension plugins, run after the builtins
-   * ({@link BUILTIN_TS_CLIENT_PLUGINS}). The first plugin to render a
-   * declaration wins, so a builtin takes precedence over a later plugin for
-   * the same type.
-   */
-  plugins?: TsClientPlugin[];
+    /**
+     * Widens the parameter objects: headers accept any string entry and query
+     * accepts any string or boolean one, on top of what the document declared.
+     *
+     * The strict shape is the honest one, but real documents omit the header a
+     * gateway requires, so the escape hatch is opt-in rather than absent.
+     */
+    lenient?: boolean;
+    /**
+     * Validates request parameters and/or response payloads at runtime.
+     * Pass `true` to validate all parts (`path`, `query`, `body`, `headers`, `response`),
+     * or an array of specific parts to validate.
+     */
+    validate?: boolean | ValidateTarget[];
+    /**
+     * Additional media types to support when generating the client.
+     * "all" enables all supported media types (JSONL, JSONC, JSON5, XML, HTML, gRPC, Erlang Text, Erlang Binary, YAML).
+     */
+    mediaTypes?: string[] | "all";
+    /**
+     * Extra vendor-extension plugins, run after the builtins
+     * ({@link BUILTIN_TS_CLIENT_PLUGINS}). The first plugin to render a
+     * declaration wins, so a builtin takes precedence over a later plugin for
+     * the same type.
+     */
+    plugins?: TsClientPlugin[];
 }
 function isValidationEnabled(options: TsClientOptions, target: ValidateTarget): boolean {
-  if (options.validate === true) {
-    return true;
-  }
-  if (Array.isArray(options.validate)) {
-    return options.validate.includes(target);
-  }
-  return false;
+    if (options.validate === true) {
+        return true;
+    }
+    if (Array.isArray(options.validate)) {
+        return options.validate.includes(target);
+    }
+    return false;
 }
 
 /**
@@ -112,26 +112,23 @@ function isValidationEnabled(options: TsClientOptions, target: ValidateTarget): 
  * The node is synthetic - it never enters an extracted graph - so its `id` only
  * has to be stable and distinct within this file.
  */
-function parameterGroupTypeIR(
-  parameters: ParameterIR[],
-  group: ParameterIR['in']
-): TypeIR | undefined {
-  const usable = parameters.filter((parameter) => !isAbsent(parameter.type));
-  if (usable.length === 0) {
-    return undefined;
-  }
+function parameterGroupTypeIR(parameters: ParameterIR[], group: ParameterIR["in"]): TypeIR | undefined {
+    const usable = parameters.filter((parameter) => !isAbsent(parameter.type));
+    if (usable.length === 0) {
+        return undefined;
+    }
 
-  return {
-    id: `wiz:parameters:${group}`,
-    kind: 'object',
-    properties: usable.map((parameter) => ({
-      name: parameter.name,
-      type: parameter.type,
-      optional: !parameter.required,
-      readonly: false,
-      description: parameter.description,
-    })),
-  };
+    return {
+        id: `wiz:parameters:${group}`,
+        kind: "object",
+        properties: usable.map((parameter) => ({
+            name: parameter.name,
+            type: parameter.type,
+            optional: !parameter.required,
+            readonly: false,
+            description: parameter.description,
+        })),
+    };
 }
 
 /**
@@ -145,63 +142,59 @@ function parameterGroupTypeIR(
  * and `seen` preserves the stopping behaviour exactly where it matters: a type
  * already being inlined is a cycle, and stays a ref.
  */
-function inlineRefs(
-  ir: TypeIR,
-  declared: ReadonlyMap<string, TypeIR>,
-  seen: ReadonlySet<string> = new Set()
-): TypeIR {
-  if (ir.kind === 'ref') {
-    if (seen.has(ir.targetId)) {
-      return ir;
+function inlineRefs(ir: TypeIR, declared: ReadonlyMap<string, TypeIR>, seen: ReadonlySet<string> = new Set()): TypeIR {
+    if (ir.kind === "ref") {
+        if (seen.has(ir.targetId)) {
+            return ir;
+        }
+        const target = declared.get(ir.targetId);
+        if (!target) {
+            return ir;
+        }
+        return inlineRefs(target, declared, new Set([...seen, ir.targetId]));
     }
-    const target = declared.get(ir.targetId);
-    if (!target) {
-      return ir;
+
+    const next = ir.name !== undefined ? new Set([...seen, ir.name]) : seen;
+
+    switch (ir.kind) {
+        case "object":
+            return {
+                ...ir,
+                properties: ir.properties.map((property) => ({
+                    ...property,
+                    type: inlineRefs(property.type, declared, next),
+                })),
+                additionalProperties:
+                    typeof ir.additionalProperties === "object"
+                        ? inlineRefs(ir.additionalProperties, declared, next)
+                        : ir.additionalProperties,
+            };
+        case "array":
+            return { ...ir, element: inlineRefs(ir.element, declared, next) };
+        case "tuple":
+            return {
+                ...ir,
+                elements: ir.elements.map((element) => ({
+                    ...element,
+                    type: inlineRefs(element.type, declared, next),
+                })),
+                rest: ir.rest ? inlineRefs(ir.rest, declared, next) : ir.rest,
+            };
+        case "union":
+        case "intersection":
+            return {
+                ...ir,
+                types: ir.types.map((member) => inlineRefs(member, declared, next)),
+            };
+        case "record":
+            return {
+                ...ir,
+                keyType: inlineRefs(ir.keyType, declared, next),
+                valueType: inlineRefs(ir.valueType, declared, next),
+            };
+        default:
+            return ir;
     }
-    return inlineRefs(target, declared, new Set([...seen, ir.targetId]));
-  }
-
-  const next = ir.name !== undefined ? new Set([...seen, ir.name]) : seen;
-
-  switch (ir.kind) {
-    case 'object':
-      return {
-        ...ir,
-        properties: ir.properties.map((property) => ({
-          ...property,
-          type: inlineRefs(property.type, declared, next),
-        })),
-        additionalProperties:
-          typeof ir.additionalProperties === 'object'
-            ? inlineRefs(ir.additionalProperties, declared, next)
-            : ir.additionalProperties,
-      };
-    case 'array':
-      return { ...ir, element: inlineRefs(ir.element, declared, next) };
-    case 'tuple':
-      return {
-        ...ir,
-        elements: ir.elements.map((element) => ({
-          ...element,
-          type: inlineRefs(element.type, declared, next),
-        })),
-        rest: ir.rest ? inlineRefs(ir.rest, declared, next) : ir.rest,
-      };
-    case 'union':
-    case 'intersection':
-      return {
-        ...ir,
-        types: ir.types.map((member) => inlineRefs(member, declared, next)),
-      };
-    case 'record':
-      return {
-        ...ir,
-        keyType: inlineRefs(ir.keyType, declared, next),
-        valueType: inlineRefs(ir.valueType, declared, next),
-      };
-    default:
-      return ir;
-  }
 }
 
 /**
@@ -212,213 +205,210 @@ function inlineRefs(
  * same value without the literal type.
  */
 function validationRoot(target: ValidateTarget): { declaration: string; expression: string } {
-  const name = `__wizPath${target.charAt(0).toUpperCase()}${target.slice(1)}`;
-  return {
-    declaration: `const ${name}: string = ${JSON.stringify(target)};`,
-    expression: name,
-  };
+    const name = `__wizPath${target.charAt(0).toUpperCase()}${target.slice(1)}`;
+    return {
+        declaration: `const ${name}: string = ${JSON.stringify(target)};`,
+        expression: name,
+    };
 }
 
-const CODEC_FILE = 'codec.ts';
-const TRANSPORT_FILE = 'transport.ts';
+const CODEC_FILE = "codec.ts";
+const TRANSPORT_FILE = "transport.ts";
 
-const JSON_MIME = 'application/json';
-const MODEL_FILE = 'model.ts';
-const API_FILE = 'api.ts';
+const JSON_MIME = "application/json";
+const MODEL_FILE = "model.ts";
+const API_FILE = "api.ts";
 
 /** `never`/`void`/`undefined` in a payload slot means "this method has none". */
 function isAbsent(ir: TypeIR | undefined): boolean {
-  if (!ir) {
-    return true;
-  }
-  return (
-    ir.kind === 'primitive' &&
-    (ir.type === 'never' || ir.type === 'undefined' || ir.type === 'void')
-  );
+    if (!ir) {
+        return true;
+    }
+    return ir.kind === "primitive" && (ir.type === "never" || ir.type === "undefined" || ir.type === "void");
 }
 
-function normalizeMediaTypes(mediaTypes?: string[] | 'all'): Set<string> | 'all' {
-  if (mediaTypes === 'all') {
-    return 'all';
-  }
-  if (Array.isArray(mediaTypes)) {
-    if (mediaTypes.includes('all')) {
-      return 'all';
+function normalizeMediaTypes(mediaTypes?: string[] | "all"): Set<string> | "all" {
+    if (mediaTypes === "all") {
+        return "all";
     }
-    const set = new Set<string>();
-    for (const item of mediaTypes) {
-      const lower = item.toLowerCase().trim();
-      set.add(lower);
-      if (lower === 'erlangtext' || lower === 'erlang-text' || lower === 'erlang') {
-        set.add('erlangtext');
-        set.add('erlang-text');
-        set.add('erlang');
-      }
-      if (lower === 'erlangbinary' || lower === 'erlang-binary') {
-        set.add('erlangbinary');
-        set.add('erlang-binary');
-      }
-      if (lower === 'xml+html') {
-        set.add('xml');
-        set.add('html');
-        set.add('xml+html');
-      }
+    if (Array.isArray(mediaTypes)) {
+        if (mediaTypes.includes("all")) {
+            return "all";
+        }
+        const set = new Set<string>();
+        for (const item of mediaTypes) {
+            const lower = item.toLowerCase().trim();
+            set.add(lower);
+            if (lower === "erlangtext" || lower === "erlang-text" || lower === "erlang") {
+                set.add("erlangtext");
+                set.add("erlang-text");
+                set.add("erlang");
+            }
+            if (lower === "erlangbinary" || lower === "erlang-binary") {
+                set.add("erlangbinary");
+                set.add("erlang-binary");
+            }
+            if (lower === "xml+html") {
+                set.add("xml");
+                set.add("html");
+                set.add("xml+html");
+            }
+        }
+        return set;
     }
-    return set;
-  }
-  return new Set();
+    return new Set();
 }
 
-function isMimetypeSupported(mimetype: string, mediaTypes?: string[] | 'all'): boolean {
-  const norm = mimetype.toLowerCase().trim();
-  // JSON, SSE, NDJSON, multipart/form-data, and application/x-www-form-urlencoded are always supported
-  if (
-    norm === 'application/json' ||
-    norm.endsWith('+json') ||
-    norm === 'json' ||
-    norm === 'text/event-stream' ||
-    norm.includes('ndjson') ||
-    norm.includes('event-stream') ||
-    norm.includes('stream')
-  ) {
-    return true;
-  }
-  if (norm.includes('multipart/form-data') || norm.includes('form-data')) {
-    return true;
-  }
-  if (
-    norm.includes('application/x-www-form-urlencoded') ||
-    norm.includes('x-www-form-urlencoded') ||
-    norm.includes('urlencoded')
-  ) {
-    return true;
-  }
-  if (norm.includes('application/octet-stream') || norm.includes('octet-stream')) {
-    return true;
-  }
-  const enabled = normalizeMediaTypes(mediaTypes);
-  const isAll = enabled === 'all';
-  const has = (key: string) => isAll || (enabled instanceof Set && enabled.has(key));
+function isMimetypeSupported(mimetype: string, mediaTypes?: string[] | "all"): boolean {
+    const norm = mimetype.toLowerCase().trim();
+    // JSON, SSE, NDJSON, multipart/form-data, and application/x-www-form-urlencoded are always supported
+    if (
+        norm === "application/json" ||
+        norm.endsWith("+json") ||
+        norm === "json" ||
+        norm === "text/event-stream" ||
+        norm.includes("ndjson") ||
+        norm.includes("event-stream") ||
+        norm.includes("stream")
+    ) {
+        return true;
+    }
+    if (norm.includes("multipart/form-data") || norm.includes("form-data")) {
+        return true;
+    }
+    if (
+        norm.includes("application/x-www-form-urlencoded") ||
+        norm.includes("x-www-form-urlencoded") ||
+        norm.includes("urlencoded")
+    ) {
+        return true;
+    }
+    if (norm.includes("application/octet-stream") || norm.includes("octet-stream")) {
+        return true;
+    }
+    const enabled = normalizeMediaTypes(mediaTypes);
+    const isAll = enabled === "all";
+    const has = (key: string) => isAll || (enabled instanceof Set && enabled.has(key));
 
-  if (norm.includes('jsonl') || norm.includes('json-lines') || norm.includes('x-jsonlines')) {
-    return has('jsonl');
-  }
-  if (norm.includes('jsonc')) {
-    return has('jsonc');
-  }
-  if (norm.includes('json5')) {
-    return has('json5');
-  }
-  if (norm.includes('yaml') || norm.includes('x-yaml')) {
-    return has('yaml');
-  }
-  if (norm.includes('xml')) {
-    return has('xml') || has('xml+html');
-  }
-  if (norm.includes('html')) {
-    return has('html') || has('xml+html');
-  }
-  if (norm.includes('cbor')) {
-    return has('cbor');
-  }
-  if (norm.includes('erlang-binary') || norm.includes('x-erlang-binary') || norm.includes('etf')) {
-    return has('erlangbinary') || has('erlang-binary');
-  }
-  if (norm.includes('erlang')) {
-    return has('erlangtext') || has('erlang-text') || has('erlang');
-  }
-  if (norm.includes('grpc')) {
-    return has('grpc');
-  }
+    if (norm.includes("jsonl") || norm.includes("json-lines") || norm.includes("x-jsonlines")) {
+        return has("jsonl");
+    }
+    if (norm.includes("jsonc")) {
+        return has("jsonc");
+    }
+    if (norm.includes("json5")) {
+        return has("json5");
+    }
+    if (norm.includes("yaml") || norm.includes("x-yaml")) {
+        return has("yaml");
+    }
+    if (norm.includes("xml")) {
+        return has("xml") || has("xml+html");
+    }
+    if (norm.includes("html")) {
+        return has("html") || has("xml+html");
+    }
+    if (norm.includes("cbor")) {
+        return has("cbor");
+    }
+    if (norm.includes("erlang-binary") || norm.includes("x-erlang-binary") || norm.includes("etf")) {
+        return has("erlangbinary") || has("erlang-binary");
+    }
+    if (norm.includes("erlang")) {
+        return has("erlangtext") || has("erlang-text") || has("erlang");
+    }
+    if (norm.includes("grpc")) {
+        return has("grpc");
+    }
 
-  return false;
+    return false;
 }
 
 function selectBody(
-  bodies: ServiceMethodBodyIR[] | undefined,
-  options: TsClientOptions,
-  onSkipped?: (mimetype: string) => void
+    bodies: ServiceMethodBodyIR[] | undefined,
+    options: TsClientOptions,
+    onSkipped?: (mimetype: string) => void,
 ): ServiceMethodBodyIR | undefined {
-  if (!bodies || bodies.length === 0) {
-    return undefined;
-  }
-
-  const chosen =
-    bodies.find((body) => body.mimetype === JSON_MIME) ??
-    bodies.find((body) => isMimetypeSupported(body.mimetype, options.mediaTypes)) ??
-    bodies[0];
-
-  const supported = chosen && isMimetypeSupported(chosen.mimetype, options.mediaTypes);
-
-  if (onSkipped) {
-    for (const body of bodies) {
-      if (body !== chosen || !supported) {
-        onSkipped(body.mimetype);
-      }
+    if (!bodies || bodies.length === 0) {
+        return undefined;
     }
-  }
 
-  if (!supported || !chosen || isAbsent(chosen.content)) {
-    return undefined;
-  }
+    const chosen =
+        bodies.find((body) => body.mimetype === JSON_MIME) ??
+        bodies.find((body) => isMimetypeSupported(body.mimetype, options.mediaTypes)) ??
+        bodies[0];
 
-  return chosen;
+    const supported = chosen && isMimetypeSupported(chosen.mimetype, options.mediaTypes);
+
+    if (onSkipped) {
+        for (const body of bodies) {
+            if (body !== chosen || !supported) {
+                onSkipped(body.mimetype);
+            }
+        }
+    }
+
+    if (!supported || !chosen || isAbsent(chosen.content)) {
+        return undefined;
+    }
+
+    return chosen;
 }
 
-function bodySerializer(mimetype: string, expr = 'body', encode?: string): string {
-  const norm = mimetype.toLowerCase().trim();
-  if (norm.includes('multipart/form-data') || norm.includes('form-data')) {
-    return `serializeFormData(${expr})`;
-  }
-  if (
-    norm.includes('application/x-www-form-urlencoded') ||
-    norm.includes('x-www-form-urlencoded') ||
-    norm.includes('urlencoded')
-  ) {
-    return `serializeUrlEncoded(${expr})`;
-  }
-  if (norm.includes('application/octet-stream') || norm.includes('octet-stream')) {
-    return `${expr}`;
-  }
-  if (norm.includes('jsonl') || norm.includes('json-lines') || norm.includes('x-jsonlines')) {
-    return `(${expr}).map((row: any) => JSON.stringify(row)).join("\\n")`;
-  }
-  if (norm.includes('jsonc')) {
+function bodySerializer(mimetype: string, expr = "body", encode?: string): string {
+    const norm = mimetype.toLowerCase().trim();
+    if (norm.includes("multipart/form-data") || norm.includes("form-data")) {
+        return `serializeFormData(${expr})`;
+    }
+    if (
+        norm.includes("application/x-www-form-urlencoded") ||
+        norm.includes("x-www-form-urlencoded") ||
+        norm.includes("urlencoded")
+    ) {
+        return `serializeUrlEncoded(${expr})`;
+    }
+    if (norm.includes("application/octet-stream") || norm.includes("octet-stream")) {
+        return `${expr}`;
+    }
+    if (norm.includes("jsonl") || norm.includes("json-lines") || norm.includes("x-jsonlines")) {
+        return `(${expr}).map((row: any) => JSON.stringify(row)).join("\\n")`;
+    }
+    if (norm.includes("jsonc")) {
+        return `JSON.stringify(${expr})`;
+    }
+    if (norm.includes("json5")) {
+        return `((globalThis as any).Bun?.JSON5 ?? JSON).stringify(${expr})`;
+    }
+    if (norm.includes("yaml") || norm.includes("x-yaml")) {
+        return `((globalThis as any).Bun?.YAML ?? JSON).stringify(${expr})`;
+    }
+    if (norm.includes("xml")) {
+        return `((globalThis as any).Bun?.XML ? (globalThis as any).Bun.XML.stringify(${expr}) : (() => { throw new Error("[wiz] application/xml requests need Bun.XML; this runtime has none"); })())`;
+    }
+    if (norm.includes("html")) {
+        return `typeof ${expr} === "string" ? ${expr} : ((globalThis as any).Bun?.escapeHTML ? (globalThis as any).Bun.escapeHTML(String(${expr})) : (() => { throw new Error("[wiz] non-string HTML request bodies need Bun.escapeHTML; this runtime has none"); })())`;
+    }
+    if (norm.includes("cbor")) {
+        return `typeof (globalThis as any).encodeCbor === "function" ? (globalThis as any).encodeCbor(${expr}) : (() => { throw new Error("[wiz] application/cbor requests need globalThis.encodeCbor; this runtime has none"); })()`;
+    }
+    if (norm.includes("erlang-binary") || norm.includes("x-erlang-binary") || norm.includes("etf")) {
+        return `typeof (globalThis as any).encodeErlangBinary === "function" ? (globalThis as any).encodeErlangBinary(${expr}) : (() => { throw new Error("[wiz] application/x-erlang-binary requests need globalThis.encodeErlangBinary; this runtime has none"); })()`;
+    }
+    if (norm.includes("erlang")) {
+        return `typeof (globalThis as any).encodeErlangText === "function" ? (globalThis as any).encodeErlangText(${expr}) : (() => { throw new Error("[wiz] application/x-erlang-text requests need globalThis.encodeErlangText; this runtime has none"); })()`;
+    }
+    if (encode) {
+        return `${encode}(${expr})`;
+    }
     return `JSON.stringify(${expr})`;
-  }
-  if (norm.includes('json5')) {
-    return `((globalThis as any).Bun?.JSON5 ?? JSON).stringify(${expr})`;
-  }
-  if (norm.includes('yaml') || norm.includes('x-yaml')) {
-    return `((globalThis as any).Bun?.YAML ?? JSON).stringify(${expr})`;
-  }
-  if (norm.includes('xml')) {
-    return `((globalThis as any).Bun?.XML ? (globalThis as any).Bun.XML.stringify(${expr}) : (() => { throw new Error("[wiz] application/xml requests need Bun.XML; this runtime has none"); })())`;
-  }
-  if (norm.includes('html')) {
-    return `typeof ${expr} === "string" ? ${expr} : ((globalThis as any).Bun?.escapeHTML ? (globalThis as any).Bun.escapeHTML(String(${expr})) : (() => { throw new Error("[wiz] non-string HTML request bodies need Bun.escapeHTML; this runtime has none"); })())`;
-  }
-  if (norm.includes('cbor')) {
-    return `typeof (globalThis as any).encodeCbor === "function" ? (globalThis as any).encodeCbor(${expr}) : (() => { throw new Error("[wiz] application/cbor requests need globalThis.encodeCbor; this runtime has none"); })()`;
-  }
-  if (norm.includes('erlang-binary') || norm.includes('x-erlang-binary') || norm.includes('etf')) {
-    return `typeof (globalThis as any).encodeErlangBinary === "function" ? (globalThis as any).encodeErlangBinary(${expr}) : (() => { throw new Error("[wiz] application/x-erlang-binary requests need globalThis.encodeErlangBinary; this runtime has none"); })()`;
-  }
-  if (norm.includes('erlang')) {
-    return `typeof (globalThis as any).encodeErlangText === "function" ? (globalThis as any).encodeErlangText(${expr}) : (() => { throw new Error("[wiz] application/x-erlang-text requests need globalThis.encodeErlangText; this runtime has none"); })()`;
-  }
-  if (encode) {
-    return `${encode}(${expr})`;
-  }
-  return `JSON.stringify(${expr})`;
 }
 function jsonBody(
-  bodies: ServiceMethodBodyIR[] | undefined,
-  options: TsClientOptions,
-  onSkipped?: (mimetype: string) => void
+    bodies: ServiceMethodBodyIR[] | undefined,
+    options: TsClientOptions,
+    onSkipped?: (mimetype: string) => void,
 ): TypeIR | undefined {
-  const chosen = selectBody(bodies, options, onSkipped);
-  return chosen ? chosen.content : undefined;
+    const chosen = selectBody(bodies, options, onSkipped);
+    return chosen ? chosen.content : undefined;
 }
 /**
  * A method name for an operation that named none: `/pets/{petId}` becomes
@@ -426,51 +416,47 @@ function jsonBody(
  * only reached for a method assembled by hand.
  */
 function derivedName(method: ServiceMethodIR): string {
-  if (isGrpcMethod(method)) {
-    return camelCase(`${method.address.service} ${method.address.method}`);
-  }
-  if (isOpenRpcMethod(method)) {
-    return camelCase(
-      method.address.service
-        ? `${method.address.service} ${method.address.method}`
-        : method.address.method
-    );
-  }
-  if (method.address.protocol === 'asyncapi') {
-    return camelCase(method.operationId ?? `${method.address.channel} ${method.address.action}`);
-  }
-  if (!isHttpMethod(method)) {
-    return 'call';
-  }
-  const segments = method.address.path
-    .split('/')
-    .filter((segment) => segment.length > 0)
-    .map((segment) => {
-      const parameter = segment.match(/^\{(.+)\}$/);
-      const word = parameter ? `by ${parameter[1]}` : segment;
-      return word
-        .replace(/[^A-Za-z0-9]+/g, ' ')
-        .trim()
-        .split(' ')
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join('');
-    });
+    if (isGrpcMethod(method)) {
+        return camelCase(`${method.address.service} ${method.address.method}`);
+    }
+    if (isOpenRpcMethod(method)) {
+        return camelCase(
+            method.address.service ? `${method.address.service} ${method.address.method}` : method.address.method,
+        );
+    }
+    if (method.address.protocol === "asyncapi") {
+        return camelCase(method.operationId ?? `${method.address.channel} ${method.address.action}`);
+    }
+    if (!isHttpMethod(method)) {
+        return "call";
+    }
+    const segments = method.address.path
+        .split("/")
+        .filter((segment) => segment.length > 0)
+        .map((segment) => {
+            const parameter = segment.match(/^\{(.+)\}$/);
+            const word = parameter ? `by ${parameter[1]}` : segment;
+            return word
+                .replace(/[^A-Za-z0-9]+/g, " ")
+                .trim()
+                .split(" ")
+                .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+                .join("");
+        });
 
-  return `${method.address.method.toLowerCase()}${segments.join('')}`;
+    return `${method.address.method.toLowerCase()}${segments.join("")}`;
 }
 
 function camelCase(text: string): string {
-  const parts = text
-    .replace(/[^A-Za-z0-9]+/g, ' ')
-    .trim()
-    .split(' ');
-  return parts
-    .map((part, index) =>
-      index === 0
-        ? part.charAt(0).toLowerCase() + part.slice(1)
-        : part.charAt(0).toUpperCase() + part.slice(1)
-    )
-    .join('');
+    const parts = text
+        .replace(/[^A-Za-z0-9]+/g, " ")
+        .trim()
+        .split(" ");
+    return parts
+        .map((part, index) =>
+            index === 0 ? part.charAt(0).toLowerCase() + part.slice(1) : part.charAt(0).toUpperCase() + part.slice(1),
+        )
+        .join("");
 }
 
 /**
@@ -481,141 +467,138 @@ function camelCase(text: string): string {
  * land on the same one are suffixed rather than silently merged.
  */
 export function methodNames(service: ServiceIR): Map<ServiceMethodIR, string> {
-  const names = new Map<ServiceMethodIR, string>();
-  const taken: Record<string, true> = {};
+    const names = new Map<ServiceMethodIR, string>();
+    const taken: Record<string, true> = {};
 
-  for (const method of service.methods) {
-    const preferred = method.operationId ? camelCase(method.operationId) : derivedName(method);
-    const base = preferred.length > 0 ? preferred : 'call';
+    for (const method of service.methods) {
+        const preferred = method.operationId ? camelCase(method.operationId) : derivedName(method);
+        const base = preferred.length > 0 ? preferred : "call";
 
-    let unique = base;
-    for (let index = 2; taken[unique]; index += 1) {
-      unique = `${base}${index}`;
+        let unique = base;
+        for (let index = 2; taken[unique]; index += 1) {
+            unique = `${base}${index}`;
+        }
+
+        taken[unique] = true;
+        names.set(method, unique);
     }
 
-    taken[unique] = true;
-    names.set(method, unique);
-  }
-
-  return names;
+    return names;
 }
 
 /** One `{ name: type }` slot for a group of parameters, or nothing. */
 function slotMembers(
-  parameters: ParameterIR[],
-  identifiers: ReadonlyMap<string, string>
+    parameters: ParameterIR[],
+    identifiers: ReadonlyMap<string, string>,
 ): { text: string; required: boolean } | undefined {
-  const usable = parameters.filter((parameter) => !isAbsent(parameter.type));
-  if (usable.length === 0) {
-    return undefined;
-  }
+    const usable = parameters.filter((parameter) => !isAbsent(parameter.type));
+    if (usable.length === 0) {
+        return undefined;
+    }
 
-  const members = usable.map((parameter) => {
-    const key = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(parameter.name)
-      ? parameter.name
-      : JSON.stringify(parameter.name);
-    const optional = parameter.required ? '' : '?';
-    const doc = parameter.description ? `/** ${parameter.description} */ ` : '';
-    return `${doc}${key}${optional}: ${typeText(parameter.type, identifiers)}`;
-  });
+    const members = usable.map((parameter) => {
+        const key = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(parameter.name) ? parameter.name : JSON.stringify(parameter.name);
+        const optional = parameter.required ? "" : "?";
+        const doc = parameter.description ? `/** ${parameter.description} */ ` : "";
+        return `${doc}${key}${optional}: ${typeText(parameter.type, identifiers)}`;
+    });
 
-  return {
-    text: `{ ${members.join('; ')} }`,
-    required: usable.some((parameter) => parameter.required),
-  };
+    return {
+        text: `{ ${members.join("; ")} }`,
+        required: usable.some((parameter) => parameter.required),
+    };
 }
 
 export interface Slot {
-  name: string;
-  type: string;
-  required: boolean;
+    name: string;
+    type: string;
+    required: boolean;
 }
 
 export function requestSlots(
-  method: HttpServiceMethodIR,
-  identifiers: ReadonlyMap<string, string>,
-  options: TsClientOptions,
-  onSkipped?: (mimetype: string) => void
+    method: HttpServiceMethodIR,
+    identifiers: ReadonlyMap<string, string>,
+    options: TsClientOptions,
+    onSkipped?: (mimetype: string) => void,
 ): Slot[] {
-  const parameters = method.request.parameters ?? [];
-  const grouped = (location: ParameterIR['in']) =>
-    parameters.filter((parameter) => parameter.in === location);
-  const slots: Slot[] = [];
+    const parameters = method.request.parameters ?? [];
+    const grouped = (location: ParameterIR["in"]) => parameters.filter((parameter) => parameter.in === location);
+    const slots: Slot[] = [];
 
-  const path = slotMembers(grouped('path'), identifiers);
-  // Path parameters are part of the URL, so they are never optional.
-  if (path) {
-    slots.push({ name: 'path', type: path.text, required: true });
-  }
+    const path = slotMembers(grouped("path"), identifiers);
+    // Path parameters are part of the URL, so they are never optional.
+    if (path) {
+        slots.push({ name: "path", type: path.text, required: true });
+    }
 
-  const body = jsonBody(method.request.body, options, onSkipped);
-  const bodyRequired = method.request.bodyRequired !== false;
-  if (body && bodyRequired) {
-    slots.push({
-      name: 'body',
-      type: typeText(body, identifiers),
-      required: true,
-    });
-  }
+    const body = jsonBody(method.request.body, options, onSkipped);
+    const bodyRequired = method.request.bodyRequired !== false;
+    if (body && bodyRequired) {
+        slots.push({
+            name: "body",
+            type: typeText(body, identifiers),
+            required: true,
+        });
+    }
 
-  const query = slotMembers(grouped('query'), identifiers);
-  const looseQuery = 'Record<string, string | boolean>';
-  if (query && query.required) {
-    slots.push({
-      name: 'query',
-      type: options.lenient ? `${query.text} & ${looseQuery}` : query.text,
-      required: true,
-    });
-  }
+    const query = slotMembers(grouped("query"), identifiers);
+    const looseQuery = "Record<string, string | boolean>";
+    if (query && query.required) {
+        slots.push({
+            name: "query",
+            type: options.lenient ? `${query.text} & ${looseQuery}` : query.text,
+            required: true,
+        });
+    }
 
-  const headers = slotMembers(grouped('header'), identifiers);
-  const looseHeaders = 'Record<string, string>';
-  if (headers && headers.required) {
-    slots.push({
-      name: 'headers',
-      type: options.lenient ? `${headers.text} & ${looseHeaders}` : headers.text,
-      required: true,
-    });
-  }
+    const headers = slotMembers(grouped("header"), identifiers);
+    const looseHeaders = "Record<string, string>";
+    if (headers && headers.required) {
+        slots.push({
+            name: "headers",
+            type: options.lenient ? `${headers.text} & ${looseHeaders}` : headers.text,
+            required: true,
+        });
+    }
 
-  const cookie = slotMembers(grouped('cookie'), identifiers);
-  if (cookie && cookie.required) {
-    slots.push({ name: 'cookie', type: cookie.text, required: true });
-  }
+    const cookie = slotMembers(grouped("cookie"), identifiers);
+    if (cookie && cookie.required) {
+        slots.push({ name: "cookie", type: cookie.text, required: true });
+    }
 
-  if (body && !bodyRequired) {
-    slots.push({
-      name: 'body',
-      type: typeText(body, identifiers),
-      required: false,
-    });
-  }
+    if (body && !bodyRequired) {
+        slots.push({
+            name: "body",
+            type: typeText(body, identifiers),
+            required: false,
+        });
+    }
 
-  if (query && !query.required) {
-    slots.push({
-      name: 'query',
-      type: options.lenient ? `${query.text} & ${looseQuery}` : query.text,
-      required: false,
-    });
-  } else if (!query && options.lenient) {
-    slots.push({ name: 'query', type: looseQuery, required: false });
-  }
+    if (query && !query.required) {
+        slots.push({
+            name: "query",
+            type: options.lenient ? `${query.text} & ${looseQuery}` : query.text,
+            required: false,
+        });
+    } else if (!query && options.lenient) {
+        slots.push({ name: "query", type: looseQuery, required: false });
+    }
 
-  if (headers && !headers.required) {
-    slots.push({
-      name: 'headers',
-      type: options.lenient ? `${headers.text} & ${looseHeaders}` : headers.text,
-      required: false,
-    });
-  } else if (!headers && options.lenient) {
-    slots.push({ name: 'headers', type: looseHeaders, required: false });
-  }
+    if (headers && !headers.required) {
+        slots.push({
+            name: "headers",
+            type: options.lenient ? `${headers.text} & ${looseHeaders}` : headers.text,
+            required: false,
+        });
+    } else if (!headers && options.lenient) {
+        slots.push({ name: "headers", type: looseHeaders, required: false });
+    }
 
-  if (cookie && !cookie.required) {
-    slots.push({ name: 'cookie', type: cookie.text, required: false });
-  }
+    if (cookie && !cookie.required) {
+        slots.push({ name: "cookie", type: cookie.text, required: false });
+    }
 
-  return slots;
+    return slots;
 }
 
 /**
@@ -624,504 +607,485 @@ export function requestSlots(
  * the type - a caller that wants them reads `ApiError.body`.
  */
 function successType(
-  method: HttpServiceMethodIR,
-  identifiers: ReadonlyMap<string, string>,
-  options: TsClientOptions,
-  onSkipped: (mimetype: string) => void
+    method: HttpServiceMethodIR,
+    identifiers: ReadonlyMap<string, string>,
+    options: TsClientOptions,
+    onSkipped: (mimetype: string) => void,
 ): string {
-  const isSuccess = (response: HttpResponseIR) =>
-    typeof response.status === 'number' && response.status >= 200 && response.status < 300;
+    const isSuccess = (response: HttpResponseIR) =>
+        typeof response.status === "number" && response.status >= 200 && response.status < 300;
 
-  const responses = method.responses.filter(isSuccess);
-  const chosen =
-    responses.length > 0
-      ? responses
-      : method.responses.filter((response) => response.status === 'default');
+    const responses = method.responses.filter(isSuccess);
+    const chosen =
+        responses.length > 0 ? responses : method.responses.filter((response) => response.status === "default");
 
-  const types: string[] = [];
-  for (const response of chosen) {
-    const body = jsonBody(response.body, options, onSkipped);
-    const text = body ? typeText(body, identifiers) : 'void';
-    if (!types.includes(text)) {
-      types.push(text);
+    const types: string[] = [];
+    for (const response of chosen) {
+        const body = jsonBody(response.body, options, onSkipped);
+        const text = body ? typeText(body, identifiers) : "void";
+        if (!types.includes(text)) {
+            types.push(text);
+        }
     }
-  }
 
-  if (types.length === 0) {
-    return 'void';
-  }
-  // `void` only means "no payload"; alongside a real one it says nothing.
-  const meaningful = types.filter((text) => text !== 'void');
-  return meaningful.length > 0 ? meaningful.join(' | ') : 'void';
+    if (types.length === 0) {
+        return "void";
+    }
+    // `void` only means "no payload"; alongside a real one it says nothing.
+    const meaningful = types.filter((text) => text !== "void");
+    return meaningful.length > 0 ? meaningful.join(" | ") : "void";
 }
 /** The URL template, reading path parameters off the positional path parameter. */
-function urlTemplate(
-  method: HttpServiceMethodIR,
-  pathExpr: string,
-  queryExpr: string | undefined
-): string {
-  const path = method.address.path.replace(/\{([^}]+)\}/g, (_match: string, name: string) => {
-    const key = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? `.${name}` : `[${JSON.stringify(name)}]`;
-    return `\${encodePath(${pathExpr}${key})}`;
-  });
+function urlTemplate(method: HttpServiceMethodIR, pathExpr: string, queryExpr: string | undefined): string {
+    const path = method.address.path.replace(/\{([^}]+)\}/g, (_match: string, name: string) => {
+        const key = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? `.${name}` : `[${JSON.stringify(name)}]`;
+        return `\${encodePath(${pathExpr}${key})}`;
+    });
 
-  const queryParams = (method.request.parameters ?? []).filter((p) => p.in === 'query');
-  const querySpecs: Record<string, { style?: string; explode?: boolean }> = {};
-  for (const qp of queryParams) {
-    if (qp.style || qp.explode !== undefined) {
-      querySpecs[qp.name] = {
-        ...(qp.style ? { style: qp.style } : {}),
-        ...(qp.explode !== undefined ? { explode: qp.explode } : {}),
-      };
+    const queryParams = (method.request.parameters ?? []).filter((p) => p.in === "query");
+    const querySpecs: Record<string, { style?: string; explode?: boolean }> = {};
+    for (const qp of queryParams) {
+        if (qp.style || qp.explode !== undefined) {
+            querySpecs[qp.name] = {
+                ...(qp.style ? { style: qp.style } : {}),
+                ...(qp.explode !== undefined ? { explode: qp.explode } : {}),
+            };
+        }
     }
-  }
-  const specsArg = Object.keys(querySpecs).length > 0 ? `, ${JSON.stringify(querySpecs)}` : '';
+    const specsArg = Object.keys(querySpecs).length > 0 ? `, ${JSON.stringify(querySpecs)}` : "";
 
-  return queryExpr
-    ? `\`\${config.baseUrl}${path}\${queryString(${queryExpr}${specsArg})}\``
-    : `\`\${config.baseUrl}${path}\``;
+    return queryExpr
+        ? `\`\${config.baseUrl}${path}\${queryString(${queryExpr}${specsArg})}\``
+        : `\`\${config.baseUrl}${path}\``;
 }
 /** One operation, in the shapes the emitted file needs it in. */
 interface Operation {
-  name: string;
-  doc: string;
-  /** `options: { … }`, `request: Msg`, or nothing at all. */
-  parameter: string;
-  /**
-   * The parameter identifiers, in order, as the implementation names them.
-   *
-   * Kept beside `parameter` rather than parsed back out of it: a module-level
-   * delegate forwards these, and a parameter's own type can hold a comma -
-   * `Record<K, V>`, a function type - so the string is not something to split.
-   */
-  parameterNames: string[];
-  returns: string;
-  /** The first parameter's type text, or undefined when the operation takes no parameters. */
-  optionsType: string | undefined;
-  /** What a completed call yields, already unwrapped from `Promise`. */
-  resultType: string;
-  /** The method body, as a member of the object `createClient` returns. */
-  implementation: string;
-  /** A server stream is an async generator, which reads differently. */
-  streaming: boolean;
+    name: string;
+    doc: string;
+    /** `options: { … }`, `request: Msg`, or nothing at all. */
+    parameter: string;
+    /**
+     * The parameter identifiers, in order, as the implementation names them.
+     *
+     * Kept beside `parameter` rather than parsed back out of it: a module-level
+     * delegate forwards these, and a parameter's own type can hold a comma -
+     * `Record<K, V>`, a function type - so the string is not something to split.
+     */
+    parameterNames: string[];
+    returns: string;
+    /** The first parameter's type text, or undefined when the operation takes no parameters. */
+    optionsType: string | undefined;
+    /** What a completed call yields, already unwrapped from `Promise`. */
+    resultType: string;
+    /** The method body, as a member of the object `createClient` returns. */
+    implementation: string;
+    /** A server stream is an async generator, which reads differently. */
+    streaming: boolean;
 }
 
 function httpOperation(
-  method: HttpServiceMethodIR,
-  name: string,
-  identifiers: ReadonlyMap<string, string>,
-  declared: ReadonlyMap<string, TypeIR>,
-  options: TsClientOptions,
-  onSkipped: (mimetype: string) => void,
-  aliases: { options: string; result: string },
-  applied: AppliedPlugins
+    method: HttpServiceMethodIR,
+    name: string,
+    identifiers: ReadonlyMap<string, string>,
+    declared: ReadonlyMap<string, TypeIR>,
+    options: TsClientOptions,
+    onSkipped: (mimetype: string) => void,
+    aliases: { options: string; result: string },
+    applied: AppliedPlugins,
 ): Operation {
-  const slots = requestSlots(method, identifiers, options, onSkipped);
-  const returns = successType(method, identifiers, options, onSkipped);
+    const slots = requestSlots(method, identifiers, options, onSkipped);
+    const returns = successType(method, identifiers, options, onSkipped);
 
-  const positionalParams: string[] = [];
-  const parameterNames: string[] = [];
-  for (const slot of slots) {
-    const opt = slot.required ? '' : '?';
-    positionalParams.push(`${slot.name}${opt}: ${slot.type}`);
-    parameterNames.push(slot.name);
-  }
-  positionalParams.push('callOptions?: HttpCallOptions');
-  parameterNames.push('callOptions');
-
-  const parameter = positionalParams.join(', ');
-  const optionsType =
-    slots.length === 0
-      ? undefined
-      : `{ ${slots.map((s) => `${s.name}${s.required ? '' : '?'}: ${s.type}`).join('; ')} }`;
-
-  const requestBodyObj = selectBody(method.request.body, options, onSkipped);
-  const requestType = requestBodyObj?.content;
-  const requestMimetype = requestBodyObj?.mimetype ?? JSON_MIME;
-  const requestName = requestType?.name;
-  const requestIdentifier = requestName ? identifiers.get(requestName) : undefined;
-  const encode = requestIdentifier ? codecName('encode', requestIdentifier) : undefined;
-
-  const isSuccess = (response: HttpResponseIR) =>
-    typeof response.status === 'number' && response.status >= 200 && response.status < 300;
-  const responses = method.responses.filter(isSuccess);
-  const chosen =
-    responses.length > 0
-      ? responses
-      : method.responses.filter((response) => response.status === 'default');
-  const responseBodyObj = selectBody(chosen[0]?.body, options, onSkipped);
-  const responseType = responseBodyObj?.content;
-  const responseName = responseType?.name;
-  const responseIdentifier = responseName ? identifiers.get(responseName) : undefined;
-  const decode = responseIdentifier ? codecName('decode', responseIdentifier) : undefined;
-
-  const has = (name: string) => slots.some((slot) => slot.name === name);
-  const pathExpr = has('path') ? 'path' : 'undefined';
-  const queryExpr = has('query') ? 'query' : undefined;
-
-  const call = [
-    `        method: ${JSON.stringify(method.address.method)},`,
-    `        url: ${urlTemplate(method, pathExpr, queryExpr)},`,
-    `        headers: headerRecord(${[
-      has('headers') ? 'headers' : 'undefined',
-      has('cookie') ? 'cookie' : 'undefined',
-      has('body') ? JSON.stringify(requestMimetype) : 'undefined',
-    ].join(', ')}),`,
-    ...(has('body') ? [`        body: ${bodySerializer(requestMimetype, 'body', encode)},`] : []),
-  ].join('\n');
-  const isStreamResponse = chosen.some(
-    (r) =>
-      r.streaming ||
-      r.body?.some((b) => b.mimetype.includes('event-stream') || b.mimetype.includes('ndjson'))
-  );
-  const send = isStreamResponse
-    ? `sendStream(config, {\n${call}\n      }, callOptions)`
-    : `send(config, {\n${call}\n      }, callOptions)`;
-
-  const parameters = method.request.parameters ?? [];
-  const grouped = (location: ParameterIR['in']) =>
-    parameters.filter((parameter) => parameter.in === location);
-  const resolved = (ir: TypeIR | undefined): TypeIR | undefined =>
-    ir ? inlineRefs(ir, declared) : undefined;
-
-  const pathTypeIR = resolved(parameterGroupTypeIR(grouped('path'), 'path'));
-  const queryTypeIR = resolved(parameterGroupTypeIR(grouped('query'), 'query'));
-  const headerTypeIR = resolved(parameterGroupTypeIR(grouped('header'), 'header'));
-  const bodyTypeIR = resolved(jsonBody(method.request.body, options, onSkipped));
-  const responseTypeIR = resolved(jsonBody(chosen[0]?.body, options, onSkipped));
-  const requestChecks: string[] = [];
-
-  /**
-   * One slot's checks, as a guarded block.
-   * a required one that is missing is itself a failure, and saying so here is
-   * what stops the request going out with a URL that has `undefined` in it.
-   */
-  const slotCheck = (
-    target: ValidateTarget,
-    ir: TypeIR,
-    expression: string,
-    required: boolean,
-    missing: string
-  ): string => {
-    const root = validationRoot(target);
-    const lines = [
-      `      if (${expression} !== undefined) {`,
-      `        const errors: ValidationError[] = [];`,
-      `        ${root.declaration}`,
-      generateValidationBlock(ir, expression, root.expression, 0, true)
-        .split('\n')
-        .map((line) => `        ${line}`)
-        .join('\n'),
-      `        if (errors.length > 0) throw new ClientValidationError(${JSON.stringify(target)}, errors);`,
-    ];
-    if (required) {
-      lines.push(`      } else {`);
-      lines.push(
-        `        throw new ClientValidationError(${JSON.stringify(target)}, [{ path: ${JSON.stringify(target)}, message: ${JSON.stringify(missing)} }]);`
-      );
+    const positionalParams: string[] = [];
+    const parameterNames: string[] = [];
+    for (const slot of slots) {
+        const opt = slot.required ? "" : "?";
+        positionalParams.push(`${slot.name}${opt}: ${slot.type}`);
+        parameterNames.push(slot.name);
     }
-    lines.push(`      }`);
-    return lines.join('\n');
-  };
-  if (pathTypeIR && isValidationEnabled(options, 'path')) {
-    // A path parameter is always required: it is part of the URL.
-    requestChecks.push(
-      slotCheck('path', pathTypeIR, 'path', true, 'Missing required path parameters')
+    positionalParams.push("callOptions?: HttpCallOptions");
+    parameterNames.push("callOptions");
+
+    const parameter = positionalParams.join(", ");
+    const optionsType =
+        slots.length === 0
+            ? undefined
+            : `{ ${slots.map((s) => `${s.name}${s.required ? "" : "?"}: ${s.type}`).join("; ")} }`;
+
+    const requestBodyObj = selectBody(method.request.body, options, onSkipped);
+    const requestType = requestBodyObj?.content;
+    const requestMimetype = requestBodyObj?.mimetype ?? JSON_MIME;
+    const requestName = requestType?.name;
+    const requestIdentifier = requestName ? identifiers.get(requestName) : undefined;
+    const encode = requestIdentifier ? codecName("encode", requestIdentifier) : undefined;
+
+    const isSuccess = (response: HttpResponseIR) =>
+        typeof response.status === "number" && response.status >= 200 && response.status < 300;
+    const responses = method.responses.filter(isSuccess);
+    const chosen =
+        responses.length > 0 ? responses : method.responses.filter((response) => response.status === "default");
+    const responseBodyObj = selectBody(chosen[0]?.body, options, onSkipped);
+    const responseType = responseBodyObj?.content;
+    const responseName = responseType?.name;
+    const responseIdentifier = responseName ? identifiers.get(responseName) : undefined;
+    const decode = responseIdentifier ? codecName("decode", responseIdentifier) : undefined;
+
+    const has = (name: string) => slots.some((slot) => slot.name === name);
+    const pathExpr = has("path") ? "path" : "undefined";
+    const queryExpr = has("query") ? "query" : undefined;
+
+    const call = [
+        `        method: ${JSON.stringify(method.address.method)},`,
+        `        url: ${urlTemplate(method, pathExpr, queryExpr)},`,
+        `        headers: headerRecord(${[
+            has("headers") ? "headers" : "undefined",
+            has("cookie") ? "cookie" : "undefined",
+            has("body") ? JSON.stringify(requestMimetype) : "undefined",
+        ].join(", ")}),`,
+        ...(has("body") ? [`        body: ${bodySerializer(requestMimetype, "body", encode)},`] : []),
+    ].join("\n");
+    const isStreamResponse = chosen.some(
+        (r) => r.streaming || r.body?.some((b) => b.mimetype.includes("event-stream") || b.mimetype.includes("ndjson")),
     );
-  }
-  if (queryTypeIR && isValidationEnabled(options, 'query')) {
-    requestChecks.push(
-      slotCheck(
-        'query',
-        queryTypeIR,
-        'query',
-        grouped('query').some((parameter) => parameter.required),
-        'Missing required query parameters'
-      )
-    );
-  }
-  if (bodyTypeIR && isValidationEnabled(options, 'body')) {
-    requestChecks.push(
-      slotCheck(
-        'body',
-        bodyTypeIR,
-        'body',
-        method.request.bodyRequired !== false,
-        'Missing required request body'
-      )
-    );
-  }
-  if (headerTypeIR && isValidationEnabled(options, 'headers')) {
-    requestChecks.push(
-      slotCheck(
-        'headers',
-        headerTypeIR,
-        'headers',
-        grouped('header').some((parameter) => parameter.required),
-        'Missing required header parameters'
-      )
-    );
-  }
+    const send = isStreamResponse
+        ? `sendStream(config, {\n${call}\n      }, callOptions)`
+        : `send(config, {\n${call}\n      }, callOptions)`;
 
-  const validatesResponse =
-    responseTypeIR !== undefined && isValidationEnabled(options, 'response');
+    const parameters = method.request.parameters ?? [];
+    const grouped = (location: ParameterIR["in"]) => parameters.filter((parameter) => parameter.in === location);
+    const resolved = (ir: TypeIR | undefined): TypeIR | undefined => (ir ? inlineRefs(ir, declared) : undefined);
 
-  // The response is checked after decoding, so what the caller is handed and
-  // what was checked are the same value rather than two readings of one body.
-  const responseCheck = (): string => {
-    const root = validationRoot('response');
-    return [
-      `      const errors: ValidationError[] = [];`,
-      `      ${root.declaration}`,
-      generateValidationBlock(responseTypeIR!, 'result', root.expression, 0, true)
-        .split('\n')
-        .map((line) => `      ${line}`)
-        .join('\n'),
-      `      if (errors.length > 0) throw new ClientValidationError("response", errors);`,
-    ].join('\n');
-  };
+    const pathTypeIR = resolved(parameterGroupTypeIR(grouped("path"), "path"));
+    const queryTypeIR = resolved(parameterGroupTypeIR(grouped("query"), "query"));
+    const headerTypeIR = resolved(parameterGroupTypeIR(grouped("header"), "header"));
+    const bodyTypeIR = resolved(jsonBody(method.request.body, options, onSkipped));
+    const responseTypeIR = resolved(jsonBody(chosen[0]?.body, options, onSkipped));
+    const requestChecks: string[] = [];
 
-  const hasValidation = requestChecks.length > 0 || validatesResponse;
-  const valPrefix = hasValidation
-    ? `      const __prune = false;\n${requestChecks.length > 0 ? `${requestChecks.join('\n')}\n` : ''}`
-    : '';
+    /**
+     * One slot's checks, as a guarded block.
+     * a required one that is missing is itself a failure, and saying so here is
+     * what stops the request going out with a URL that has `undefined` in it.
+     */
+    const slotCheck = (
+        target: ValidateTarget,
+        ir: TypeIR,
+        expression: string,
+        required: boolean,
+        missing: string,
+    ): string => {
+        const root = validationRoot(target);
+        const lines = [
+            `      if (${expression} !== undefined) {`,
+            `        const errors: ValidationError[] = [];`,
+            `        ${root.declaration}`,
+            generateValidationBlock(ir, expression, root.expression, 0, true)
+                .split("\n")
+                .map((line) => `        ${line}`)
+                .join("\n"),
+            `        if (errors.length > 0) throw new ClientValidationError(${JSON.stringify(target)}, errors);`,
+        ];
+        if (required) {
+            lines.push(`      } else {`);
+            lines.push(
+                `        throw new ClientValidationError(${JSON.stringify(target)}, [{ path: ${JSON.stringify(target)}, message: ${JSON.stringify(missing)} }]);`,
+            );
+        }
+        lines.push(`      }`);
+        return lines.join("\n");
+    };
+    if (pathTypeIR && isValidationEnabled(options, "path")) {
+        // A path parameter is always required: it is part of the URL.
+        requestChecks.push(slotCheck("path", pathTypeIR, "path", true, "Missing required path parameters"));
+    }
+    if (queryTypeIR && isValidationEnabled(options, "query")) {
+        requestChecks.push(
+            slotCheck(
+                "query",
+                queryTypeIR,
+                "query",
+                grouped("query").some((parameter) => parameter.required),
+                "Missing required query parameters",
+            ),
+        );
+    }
+    if (bodyTypeIR && isValidationEnabled(options, "body")) {
+        requestChecks.push(
+            slotCheck(
+                "body",
+                bodyTypeIR,
+                "body",
+                method.request.bodyRequired !== false,
+                "Missing required request body",
+            ),
+        );
+    }
+    if (headerTypeIR && isValidationEnabled(options, "headers")) {
+        requestChecks.push(
+            slotCheck(
+                "headers",
+                headerTypeIR,
+                "headers",
+                grouped("header").some((parameter) => parameter.required),
+                "Missing required header parameters",
+            ),
+        );
+    }
 
-  // A response extension can rewrite what the body is read from - unwrapping
-  // an envelope the schema does not describe - before the cast and before the
-  // response is validated, so what is checked is what the caller is handed.
-  const selected = (value: string): string =>
-    applied.responseBody(name, chosen[0]?.extensions, value);
+    const validatesResponse = responseTypeIR !== undefined && isValidationEnabled(options, "response");
 
-  let body: string;
-  if (isStreamResponse) {
-    const yieldExpr = decode ? `${decode}(chunk as string)` : `chunk as ${returns}`;
-    body = `${valPrefix}      for await (const chunk of ${send}) {\n        yield ${yieldExpr};\n      }`;
-  } else if (returns === 'void') {
-    body = `${valPrefix}      await ${send};`;
-  } else if (decode) {
-    const value = selected(`${decode}(await ${send} as string)`);
-    body = validatesResponse
-      ? `${valPrefix}      const result = ${value} as ${returns};\n${responseCheck()}\n      return result;`
-      : `${valPrefix}      return ${value} as ${returns};`;
-  } else {
-    const value = selected(`await ${send}`);
-    body = validatesResponse
-      ? `${valPrefix}      const result = (${value}) as ${returns};\n${responseCheck()}\n      return result;`
-      : `${valPrefix}      return (${value}) as ${returns};`;
-  }
-  return {
-    name,
-    doc: docComment(
-      {
-        description:
-          [method.summary, method.description]
-            .filter((line): line is string => Boolean(line))
-            .join('\n\n') || undefined,
-        deprecated: method.deprecated ? { isDeprecated: true } : undefined,
-      },
-      ''
-    ),
-    parameter,
-    parameterNames,
-    optionsType: optionsType ?? 'HttpCallOptions',
-    resultType: returns,
-    returns: isStreamResponse
-      ? `AsyncIterable<${aliases.result}>`
-      : returns === 'void'
-        ? 'Promise<void>'
-        : `Promise<${aliases.result}>`,
-    // Parameters are left unannotated: the object literal is contextually typed
-    // by `Client`, so the signature has exactly one source of truth.
-    implementation: isStreamResponse
-      ? `    async *${name}(${parameterNames.join(', ')}) {\n${body}\n    },`
-      : `    async ${name}(${parameterNames.join(', ')}) {\n${body}\n    },`,
-    streaming: isStreamResponse,
-  };
+    // The response is checked after decoding, so what the caller is handed and
+    // what was checked are the same value rather than two readings of one body.
+    const responseCheck = (): string => {
+        const root = validationRoot("response");
+        return [
+            `      const errors: ValidationError[] = [];`,
+            `      ${root.declaration}`,
+            generateValidationBlock(responseTypeIR!, "result", root.expression, 0, true)
+                .split("\n")
+                .map((line) => `      ${line}`)
+                .join("\n"),
+            `      if (errors.length > 0) throw new ClientValidationError("response", errors);`,
+        ].join("\n");
+    };
+
+    const hasValidation = requestChecks.length > 0 || validatesResponse;
+    const valPrefix = hasValidation
+        ? `      const __prune = false;\n${requestChecks.length > 0 ? `${requestChecks.join("\n")}\n` : ""}`
+        : "";
+
+    // A response extension can rewrite what the body is read from - unwrapping
+    // an envelope the schema does not describe - before the cast and before the
+    // response is validated, so what is checked is what the caller is handed.
+    const selected = (value: string): string => applied.responseBody(name, chosen[0]?.extensions, value);
+
+    let body: string;
+    if (isStreamResponse) {
+        const yieldExpr = decode ? `${decode}(chunk as string)` : `chunk as ${returns}`;
+        body = `${valPrefix}      for await (const chunk of ${send}) {\n        yield ${yieldExpr};\n      }`;
+    } else if (returns === "void") {
+        body = `${valPrefix}      await ${send};`;
+    } else if (decode) {
+        const value = selected(`${decode}(await ${send} as string)`);
+        body = validatesResponse
+            ? `${valPrefix}      const result = ${value} as ${returns};\n${responseCheck()}\n      return result;`
+            : `${valPrefix}      return ${value} as ${returns};`;
+    } else {
+        const value = selected(`await ${send}`);
+        body = validatesResponse
+            ? `${valPrefix}      const result = (${value}) as ${returns};\n${responseCheck()}\n      return result;`
+            : `${valPrefix}      return (${value}) as ${returns};`;
+    }
+    return {
+        name,
+        doc: docComment(
+            {
+                description:
+                    [method.summary, method.description].filter((line): line is string => Boolean(line)).join("\n\n") ||
+                    undefined,
+                deprecated: method.deprecated ? { isDeprecated: true } : undefined,
+            },
+            "",
+        ),
+        parameter,
+        parameterNames,
+        optionsType: optionsType ?? "HttpCallOptions",
+        resultType: returns,
+        returns: isStreamResponse
+            ? `AsyncIterable<${aliases.result}>`
+            : returns === "void"
+              ? "Promise<void>"
+              : `Promise<${aliases.result}>`,
+        // Parameters are left unannotated: the object literal is contextually typed
+        // by `Client`, so the signature has exactly one source of truth.
+        implementation: isStreamResponse
+            ? `    async *${name}(${parameterNames.join(", ")}) {\n${body}\n    },`
+            : `    async ${name}(${parameterNames.join(", ")}) {\n${body}\n    },`,
+        streaming: isStreamResponse,
+    };
 }
 
 /** `encodePet`, from the identifier the model declares the message under. */
-function codecName(kind: 'encode' | 'decode', identifier: string): string {
-  return `${kind}${identifier.charAt(0).toUpperCase()}${identifier.slice(1)}`;
+function codecName(kind: "encode" | "decode", identifier: string): string {
+    return `${kind}${identifier.charAt(0).toUpperCase()}${identifier.slice(1)}`;
 }
 function grpcPath(method: GrpcServiceMethodIR): string {
-  const qualified = method.address.package
-    ? `${method.address.package}.${method.address.service}`
-    : method.address.service;
-  return `/${qualified}/${method.address.method}`;
+    const qualified = method.address.package
+        ? `${method.address.package}.${method.address.service}`
+        : method.address.service;
+    return `/${qualified}/${method.address.method}`;
 }
 function openRpcOperation(
-  method: OpenRpcServiceMethodIR,
-  name: string,
-  identifiers: ReadonlyMap<string, string>,
-  aliases: { options: string; result: string }
+    method: OpenRpcServiceMethodIR,
+    name: string,
+    identifiers: ReadonlyMap<string, string>,
+    aliases: { options: string; result: string },
 ): Operation {
-  const params = method.request.params;
-  const paramMembers: string[] = [];
-  for (const p of params) {
-    paramMembers.push(`${p.name}${p.required ? '' : '?'}: ${typeText(p.type, identifiers)}`);
-  }
+    const params = method.request.params;
+    const paramMembers: string[] = [];
+    for (const p of params) {
+        paramMembers.push(`${p.name}${p.required ? "" : "?"}: ${typeText(p.type, identifiers)}`);
+    }
 
-  const hasParams = paramMembers.length > 0;
-  const optionsType = hasParams ? `{ ${paramMembers.join('; ')} }` : undefined;
-  const parameter = `${hasParams ? `params: ${aliases.options}, ` : ''}callOptions?: HttpCallOptions`;
+    const hasParams = paramMembers.length > 0;
+    const optionsType = hasParams ? `{ ${paramMembers.join("; ")} }` : undefined;
+    const parameter = `${hasParams ? `params: ${aliases.options}, ` : ""}callOptions?: HttpCallOptions`;
 
-  const response0 = method.responses[0];
-  const returnsType = response0?.result ? typeText(response0.result, identifiers) : 'unknown';
-  const returns = `Promise<${aliases.result}>`;
+    const response0 = method.responses[0];
+    const returnsType = response0?.result ? typeText(response0.result, identifiers) : "unknown";
+    const returns = `Promise<${aliases.result}>`;
 
-  const methodName = method.address.service
-    ? `${method.address.service}.${method.address.method}`
-    : method.address.method;
+    const methodName = method.address.service
+        ? `${method.address.service}.${method.address.method}`
+        : method.address.method;
 
-  const doc = docComment(
-    {
-      description:
-        [method.summary, method.description]
-          .filter((line): line is string => Boolean(line))
-          .join('\n\n') || undefined,
-      deprecated: method.deprecated ? { isDeprecated: true } : undefined,
-    },
-    ''
-  );
+    const doc = docComment(
+        {
+            description:
+                [method.summary, method.description].filter((line): line is string => Boolean(line)).join("\n\n") ||
+                undefined,
+            deprecated: method.deprecated ? { isDeprecated: true } : undefined,
+        },
+        "",
+    );
 
-  // A JSON-RPC call is one POST to the single endpoint the document describes,
-  // so it goes through the same `send` as an HTTP method and gains the same
-  // interceptors, deadline and body parsing. Only the envelope differs.
-  const implementation = [
-    `    async ${name}(${hasParams ? 'params, callOptions' : 'callOptions'}) {`,
-    `      const body = JSON.stringify({`,
-    `        jsonrpc: "2.0",`,
-    `        id: ++rpcId,`,
-    `        method: ${JSON.stringify(methodName)},`,
-    `        params: ${hasParams ? (method.request.paramsByName ? 'params' : 'Object.values(params ?? {})') : '{}'},`,
-    `      });`,
-    `      const res = (await send(config, {`,
-    `        method: "POST",`,
-    `        url: config.baseUrl,`,
-    `        headers: { "content-type": "application/json" },`,
-    `        body,`,
-    `      }, callOptions)) as JsonRpcResponse;`,
-    `      if (res?.error) throw new RpcError(res.error);`,
-    `      return res?.result as ${returnsType};`,
-    `    },`,
-  ].join('\n');
+    // A JSON-RPC call is one POST to the single endpoint the document describes,
+    // so it goes through the same `send` as an HTTP method and gains the same
+    // interceptors, deadline and body parsing. Only the envelope differs.
+    const implementation = [
+        `    async ${name}(${hasParams ? "params, callOptions" : "callOptions"}) {`,
+        `      const body = JSON.stringify({`,
+        `        jsonrpc: "2.0",`,
+        `        id: ++rpcId,`,
+        `        method: ${JSON.stringify(methodName)},`,
+        `        params: ${hasParams ? (method.request.paramsByName ? "params" : "Object.values(params ?? {})") : "{}"},`,
+        `      });`,
+        `      const res = (await send(config, {`,
+        `        method: "POST",`,
+        `        url: config.baseUrl,`,
+        `        headers: { "content-type": "application/json" },`,
+        `        body,`,
+        `      }, callOptions)) as JsonRpcResponse;`,
+        `      if (res?.error) throw new RpcError(res.error);`,
+        `      return res?.result as ${returnsType};`,
+        `    },`,
+    ].join("\n");
 
-  return {
-    name,
-    parameter,
-    parameterNames: hasParams ? ['params', 'callOptions'] : ['callOptions'],
-    returns,
-    optionsType: optionsType ?? 'HttpCallOptions',
-    resultType: returnsType,
-    doc,
-    implementation,
-    // A JSON-RPC call resolves once; there is no server-stream form of it.
-    streaming: false,
-  };
+    return {
+        name,
+        parameter,
+        parameterNames: hasParams ? ["params", "callOptions"] : ["callOptions"],
+        returns,
+        optionsType: optionsType ?? "HttpCallOptions",
+        resultType: returnsType,
+        doc,
+        implementation,
+        // A JSON-RPC call resolves once; there is no server-stream form of it.
+        streaming: false,
+    };
 }
 
 function grpcOperation(
-  method: GrpcServiceMethodIR,
-  name: string,
-  identifiers: ReadonlyMap<string, string>,
-  onUnsupported: (name: string, reason: string) => void,
-  aliases: { options: string; result: string }
+    method: GrpcServiceMethodIR,
+    name: string,
+    identifiers: ReadonlyMap<string, string>,
+    onUnsupported: (name: string, reason: string) => void,
+    aliases: { options: string; result: string },
 ): Operation {
-  const response = method.responses[0];
-  const requestName = method.request.message.name;
-  const responseName = response?.message.name;
-  const requestIdentifier = requestName ? identifiers.get(requestName) : undefined;
-  const responseIdentifier = responseName ? identifiers.get(responseName) : undefined;
+    const response = method.responses[0];
+    const requestName = method.request.message.name;
+    const responseName = response?.message.name;
+    const requestIdentifier = requestName ? identifiers.get(requestName) : undefined;
+    const responseIdentifier = responseName ? identifiers.get(responseName) : undefined;
 
-  const doc = docComment(
-    {
-      description:
-        [method.summary, method.description]
-          .filter((line): line is string => Boolean(line))
-          .join('\n\n') || undefined,
-      deprecated: method.deprecated ? { isDeprecated: true } : undefined,
-    },
-    ''
-  );
+    const doc = docComment(
+        {
+            description:
+                [method.summary, method.description].filter((line): line is string => Boolean(line)).join("\n\n") ||
+                undefined,
+            deprecated: method.deprecated ? { isDeprecated: true } : undefined,
+        },
+        "",
+    );
 
-  // A message the document never declared leaves nothing to encode with, so the
-  // method is emitted and says so rather than quietly disappearing.
-  if (!requestIdentifier || !responseIdentifier) {
-    const reason = 'its request or response message is not declared in this document';
-    onUnsupported(name, reason);
+    // A message the document never declared leaves nothing to encode with, so the
+    // method is emitted and says so rather than quietly disappearing.
+    if (!requestIdentifier || !responseIdentifier) {
+        const reason = "its request or response message is not declared in this document";
+        onUnsupported(name, reason);
+
+        return {
+            name,
+            doc,
+            parameter: "",
+            parameterNames: [],
+            returns: "Promise<never>",
+            optionsType: undefined,
+            resultType: "never",
+            implementation: `    async ${name}() {\n      throw new Error(${JSON.stringify(
+                `[wiz] ${name} is not callable: ${reason}`,
+            )});\n    },`,
+            streaming: false,
+        };
+    }
+
+    const path = JSON.stringify(grpcPath(method));
+    const encode = codecName("encode", requestIdentifier);
+    const decode = codecName("decode", responseIdentifier);
+    const streamsIn = method.request.streaming;
+    const streamsOut = response?.streaming === true;
+
+    // The caller's side of each direction: one message or a stream of them,
+    // resolving once or yielding until the server is done. The transport decides
+    // whether the streaming-in directions can run at all, and says so at the
+    // call rather than here, because a client can be reconfigured.
+    const optionsType = streamsIn ? `AsyncIterable<${requestIdentifier}>` : requestIdentifier;
+    const parameter = `${streamsIn ? "requests" : "request"}: ${aliases.options}, options?: GrpcCallOptions`;
+
+    const outgoing = streamsIn ? `grpcEncoded(requests, ${encode})` : `[${encode}(request)]`;
+
+    if (streamsOut) {
+        return {
+            name,
+            doc,
+            parameter,
+            parameterNames: [streamsIn ? "requests" : "request", "options"],
+            optionsType,
+            resultType: `AsyncIterable<${responseIdentifier}>`,
+            returns: aliases.result,
+            implementation: [
+                `    async *${name}(${streamsIn ? "requests" : "request"}, options) {`,
+                `      const messages = grpcCall(config, ${path}, ${outgoing}, options, ${streamsIn});`,
+                `      for await (const message of messages) yield ${decode}(message);`,
+                `    },`,
+            ].join("\n"),
+            streaming: true,
+        };
+    }
 
     return {
-      name,
-      doc,
-      parameter: '',
-      parameterNames: [],
-      returns: 'Promise<never>',
-      optionsType: undefined,
-      resultType: 'never',
-      implementation: `    async ${name}() {\n      throw new Error(${JSON.stringify(
-        `[wiz] ${name} is not callable: ${reason}`
-      )});\n    },`,
-      streaming: false,
+        name,
+        doc,
+        parameter,
+        parameterNames: [streamsIn ? "requests" : "request", "options"],
+        optionsType,
+        resultType: responseIdentifier,
+        returns: `Promise<${aliases.result}>`,
+        implementation: streamsIn
+            ? [
+                  `    async ${name}(requests, options) {`,
+                  `      return ${decode}(`,
+                  `        await grpcClientStream(config, ${path}, ${outgoing}, options)`,
+                  `      );`,
+                  `    },`,
+              ].join("\n")
+            : [
+                  `    async ${name}(request, options) {`,
+                  `      return ${decode}(await grpcUnary(config, ${path}, ${encode}(request), options));`,
+                  `    },`,
+              ].join("\n"),
+        streaming: false,
     };
-  }
-
-  const path = JSON.stringify(grpcPath(method));
-  const encode = codecName('encode', requestIdentifier);
-  const decode = codecName('decode', responseIdentifier);
-  const streamsIn = method.request.streaming;
-  const streamsOut = response?.streaming === true;
-
-  // The caller's side of each direction: one message or a stream of them,
-  // resolving once or yielding until the server is done. The transport decides
-  // whether the streaming-in directions can run at all, and says so at the
-  // call rather than here, because a client can be reconfigured.
-  const optionsType = streamsIn ? `AsyncIterable<${requestIdentifier}>` : requestIdentifier;
-  const parameter = `${streamsIn ? 'requests' : 'request'}: ${aliases.options}, options?: GrpcCallOptions`;
-
-  const outgoing = streamsIn ? `grpcEncoded(requests, ${encode})` : `[${encode}(request)]`;
-
-  if (streamsOut) {
-    return {
-      name,
-      doc,
-      parameter,
-      parameterNames: [streamsIn ? 'requests' : 'request', 'options'],
-      optionsType,
-      resultType: `AsyncIterable<${responseIdentifier}>`,
-      returns: aliases.result,
-      implementation: [
-        `    async *${name}(${streamsIn ? 'requests' : 'request'}, options) {`,
-        `      const messages = grpcCall(config, ${path}, ${outgoing}, options, ${streamsIn});`,
-        `      for await (const message of messages) yield ${decode}(message);`,
-        `    },`,
-      ].join('\n'),
-      streaming: true,
-    };
-  }
-
-  return {
-    name,
-    doc,
-    parameter,
-    parameterNames: [streamsIn ? 'requests' : 'request', 'options'],
-    optionsType,
-    resultType: responseIdentifier,
-    returns: `Promise<${aliases.result}>`,
-    implementation: streamsIn
-      ? [
-          `    async ${name}(requests, options) {`,
-          `      return ${decode}(`,
-          `        await grpcClientStream(config, ${path}, ${outgoing}, options)`,
-          `      );`,
-          `    },`,
-        ].join('\n')
-      : [
-          `    async ${name}(request, options) {`,
-          `      return ${decode}(await grpcUnary(config, ${path}, ${encode}(request), options));`,
-          `    },`,
-        ].join('\n'),
-    streaming: false,
-  };
 }
 
 /**
@@ -2548,59 +2512,59 @@ async function grpcClientStream(
 
 /** Top-level names the emitted runtime already declares, so an operation type never shadows one. */
 function preludeDeclaredNames(): Set<string> {
-  const pattern =
-    /^(?:export\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\s*\*?|const|let|var|class|interface|type|enum)\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm;
-  const found = new Set<string>([
-    'Client',
-    'createClient',
-    'configure',
-    'currentConfig',
-    'defaultClient',
-    'defaults',
-    'client',
-    'rpcId',
-  ]);
-  for (const source of [PRELUDE, HTTP_ENCODING, OPENRPC_PRELUDE, GRPC_PRELUDE, HTTP2_TRANSPORT]) {
-    pattern.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(source))) {
-      found.add(match[1]!);
+    const pattern =
+        /^(?:export\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\s*\*?|const|let|var|class|interface|type|enum)\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm;
+    const found = new Set<string>([
+        "Client",
+        "createClient",
+        "configure",
+        "currentConfig",
+        "defaultClient",
+        "defaults",
+        "client",
+        "rpcId",
+    ]);
+    for (const source of [PRELUDE, HTTP_ENCODING, OPENRPC_PRELUDE, GRPC_PRELUDE, HTTP2_TRANSPORT]) {
+        pattern.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(source))) {
+            found.add(match[1]!);
+        }
     }
-  }
-  return found;
+    return found;
 }
 
 /** `<Cap>Options` / `<Cap>Result` per operation, unique against models, runtime names and each other. */
 export function operationTypeNames(
-  methodOrder: readonly string[],
-  identifiers: ReadonlyMap<string, string>
+    methodOrder: readonly string[],
+    identifiers: ReadonlyMap<string, string>,
 ): Map<string, { options: string; result: string }> {
-  const taken = preludeDeclaredNames();
-  for (const identifier of identifiers.values()) {
-    taken.add(identifier);
-  }
-  for (const name of methodOrder) {
-    taken.add(name);
-  }
-
-  const allocate = (base: string): string => {
-    let unique = base;
-    for (let index = 2; taken.has(unique); index += 1) {
-      unique = `${base}${index}`;
+    const taken = preludeDeclaredNames();
+    for (const identifier of identifiers.values()) {
+        taken.add(identifier);
     }
-    taken.add(unique);
-    return unique;
-  };
+    for (const name of methodOrder) {
+        taken.add(name);
+    }
 
-  const result = new Map<string, { options: string; result: string }>();
-  for (const name of methodOrder) {
-    const capital = name.charAt(0).toUpperCase() + name.slice(1);
-    result.set(name, {
-      options: allocate(`${capital}Options`),
-      result: allocate(`${capital}Result`),
-    });
-  }
-  return result;
+    const allocate = (base: string): string => {
+        let unique = base;
+        for (let index = 2; taken.has(unique); index += 1) {
+            unique = `${base}${index}`;
+        }
+        taken.add(unique);
+        return unique;
+    };
+
+    const result = new Map<string, { options: string; result: string }>();
+    for (const name of methodOrder) {
+        const capital = name.charAt(0).toUpperCase() + name.slice(1);
+        result.set(name, {
+            options: allocate(`${capital}Options`),
+            result: allocate(`${capital}Result`),
+        });
+    }
+    return result;
 }
 
 /**
@@ -2610,438 +2574,417 @@ export function operationTypeNames(
  * only inside an operation, and those have to be declared too or the emitted
  * signatures would reference nothing.
  */
-export function declaredTypes(
-  service: ServiceIR,
-  types: Map<string, TypeIR> | undefined
-): Map<string, TypeIR> {
-  const declared = new Map<string, TypeIR>(types ?? []);
+export function declaredTypes(service: ServiceIR, types: Map<string, TypeIR> | undefined): Map<string, TypeIR> {
+    const declared = new Map<string, TypeIR>(types ?? []);
 
-  const collect = (ir: TypeIR | undefined) => {
-    if (!ir) {
-      return;
-    }
-    for (const [name, named] of collectNamedTypes(ir)) {
-      // A `ref` names its target without defining it.
-      if (named.kind === 'ref') {
-        continue;
-      }
-      if (!declared.has(name)) {
-        declared.set(name, named);
-      }
-    }
-  };
+    const collect = (ir: TypeIR | undefined) => {
+        if (!ir) {
+            return;
+        }
+        for (const [name, named] of collectNamedTypes(ir)) {
+            // A `ref` names its target without defining it.
+            if (named.kind === "ref") {
+                continue;
+            }
+            if (!declared.has(name)) {
+                declared.set(name, named);
+            }
+        }
+    };
 
-  for (const method of service.methods) {
-    if (isGrpcMethod(method)) {
-      collect(method.request.message);
-      for (const response of method.responses) {
-        collect(response.message);
-      }
-      continue;
+    for (const method of service.methods) {
+        if (isGrpcMethod(method)) {
+            collect(method.request.message);
+            for (const response of method.responses) {
+                collect(response.message);
+            }
+            continue;
+        }
+        if (!isHttpMethod(method)) {
+            continue;
+        }
+        for (const parameter of method.request.parameters ?? []) {
+            collect(parameter.type);
+        }
+        for (const body of method.request.body ?? []) {
+            collect(body.content);
+        }
+        for (const response of method.responses) {
+            for (const body of response.body ?? []) {
+                collect(body.content);
+            }
+            for (const header of response.headers ?? []) {
+                collect(header.type);
+            }
+        }
     }
-    if (!isHttpMethod(method)) {
-      continue;
-    }
-    for (const parameter of method.request.parameters ?? []) {
-      collect(parameter.type);
-    }
-    for (const body of method.request.body ?? []) {
-      collect(body.content);
-    }
-    for (const response of method.responses) {
-      for (const body of response.body ?? []) {
-        collect(body.content);
-      }
-      for (const header of response.headers ?? []) {
-        collect(header.type);
-      }
-    }
-  }
 
-  return declared;
+    return declared;
 }
 
 function emitFiles(
-  service: ServiceIR,
-  types: Map<string, TypeIR> | undefined,
-  context: GeneratorContext<TsClientOptions>
+    service: ServiceIR,
+    types: Map<string, TypeIR> | undefined,
+    context: GeneratorContext<TsClientOptions>,
 ): GeneratedFiles {
-  const declared = declaredTypes(service, types);
-  const identifiers = typeIdentifiers(declared.keys());
+    const declared = declaredTypes(service, types);
+    const identifiers = typeIdentifiers(declared.keys());
 
-  const speaksHttp = service.methods.some(isHttpMethod);
-  const speaksGrpc = service.methods.some(isGrpcMethod);
-  const speaksAsyncApi = service.methods.some((m) => m.protocol === 'asyncapi');
-  const speaksOpenRpc = service.methods.some(isOpenRpcMethod);
-  const isOnlyAsyncApi = speaksAsyncApi && !speaksHttp && !speaksGrpc && !speaksOpenRpc;
+    const speaksHttp = service.methods.some(isHttpMethod);
+    const speaksGrpc = service.methods.some(isGrpcMethod);
+    const speaksAsyncApi = service.methods.some((m) => m.protocol === "asyncapi");
+    const speaksOpenRpc = service.methods.some(isOpenRpcMethod);
+    const isOnlyAsyncApi = speaksAsyncApi && !speaksHttp && !speaksGrpc && !speaksOpenRpc;
 
-  const banner = (what: string) =>
-    `// Generated by wiz from ${service.name ?? 'an API document'}.\n` +
-    `// ${what} Edit the document, not this file.\n`;
+    const banner = (what: string) =>
+        `// Generated by wiz from ${service.name ?? "an API document"}.\n` +
+        `// ${what} Edit the document, not this file.\n`;
 
-  const applied = applyPlugins(
-    declared,
-    [...BUILTIN_TS_CLIENT_PLUGINS, ...(context.options.plugins ?? [])],
-    context.logger
-  );
+    const applied = applyPlugins(
+        declared,
+        [...BUILTIN_TS_CLIENT_PLUGINS, ...(context.options.plugins ?? [])],
+        context.logger,
+    );
 
-  const model = `${banner('Types the API exchanges.')}\n${tsDeclarations(
-    applied.types,
-    identifiers,
-    applied.declaration
-  )}\n`;
+    const model = `${banner("Types the API exchanges.")}\n${tsDeclarations(
+        applied.types,
+        identifiers,
+        applied.declaration,
+    )}\n`;
 
-  if (isOnlyAsyncApi) {
-    const codecTypes =
-      service.methods.length > 0 ? messageTypes(service.methods, declared, context.options) : [];
-    const parts: string[] = [];
-    if (codecTypes.length > 0) {
-      parts.push(
-        generateJsonCodecCode(codecTypes, { modelModule: `./${MODEL_FILE}`, identifiers })
-      );
+    if (isOnlyAsyncApi) {
+        const codecTypes = service.methods.length > 0 ? messageTypes(service.methods, declared, context.options) : [];
+        const parts: string[] = [];
+        if (codecTypes.length > 0) {
+            parts.push(generateJsonCodecCode(codecTypes, { modelModule: `./${MODEL_FILE}`, identifiers }));
+        }
+        const codecContent = `${banner("Wire encoders and decoders.")}\n${parts.join("\n\n")}\n`;
+        return {
+            [MODEL_FILE]: model,
+            [CODEC_FILE]: parts.length > 0 ? codecContent : `${banner("Wire encoders and decoders.")}\n`,
+        };
     }
-    const codecContent = `${banner('Wire encoders and decoders.')}\n${parts.join('\n\n')}\n`;
-    return {
-      [MODEL_FILE]: model,
-      [CODEC_FILE]: parts.length > 0 ? codecContent : `${banner('Wire encoders and decoders.')}\n`,
+
+    const skipped: Record<string, true> = {};
+    const onSkipped = (mimetype: string) => {
+        if (skipped[mimetype]) {
+            return;
+        }
+        skipped[mimetype] = true;
+        context.logger.warn(`[wiz] ${mimetype} payloads are not emitted; the client speaks ${JSON_MIME}`);
     };
-  }
 
-  const skipped: Record<string, true> = {};
-  const onSkipped = (mimetype: string) => {
-    if (skipped[mimetype]) {
-      return;
+    const unsupported: Record<string, true> = {};
+    const onUnsupported = (name: string, reason: string) => {
+        if (unsupported[name]) {
+            return;
+        }
+        unsupported[name] = true;
+        context.logger.warn(`[wiz] ${name} is emitted as a throwing stub: ${reason}`);
+    };
+
+    const names = methodNames(service);
+    const grpcMethods = service.methods.filter(isGrpcMethod);
+    const aliasNames = operationTypeNames([...names.values()], identifiers);
+    const operations = service.methods.map((method) => {
+        const name = names.get(method)!;
+        const aliases = aliasNames.get(name)!;
+        if (isGrpcMethod(method)) {
+            return grpcOperation(method, name, identifiers, onUnsupported, aliases);
+        }
+        if (isOpenRpcMethod(method)) {
+            return openRpcOperation(method, name, identifiers, aliases);
+        }
+        return httpOperation(
+            method as HttpServiceMethodIR,
+            name,
+            identifiers,
+            declared,
+            context.options,
+            onSkipped,
+            aliases,
+            applied,
+        );
+    });
+
+    // Every published contract has a name of its own here, so a consumer can
+    // annotate a variable without deriving anything from the method's type.
+    const operationTypes = operations
+        .flatMap((operation) => {
+            const alias = aliasNames.get(operation.name)!;
+            return [
+                `/** Call options for \`${operation.name}\`. */`,
+                `export type ${alias.options} = ${operation.optionsType ?? "undefined"};`,
+                `/** What \`${operation.name}\` resolves to. */`,
+                `export type ${alias.result} = ${operation.resultType};`,
+            ];
+        })
+        .join("\n");
+    const clientInterface = [
+        "/**",
+        " * Every operation the document declares.",
+        " *",
+        " * A caller that talks to one deployment can ignore this and use the",
+        " * module-level functions below; a caller that talks to several holds one",
+        " * client per configuration.",
+        " */",
+        "export interface Client {",
+        "  /** Sets or updates the Bearer token / token provider for this client. */",
+        "  setBearerToken(token: TokenProvider): void;",
+        "  /** Sets or updates the API Key / key provider for this client. */",
+        "  setApiKey(key: TokenProvider): void;",
+        operations
+            .map((operation) => {
+                const doc = operation.doc
+                    ? `${operation.doc
+                          .split("\n")
+                          .filter((line) => line.length > 0)
+                          .map((line) => `  ${line}`)
+                          .join("\n")}\n`
+                    : "";
+                return `${doc}  ${operation.name}(${operation.parameter}): ${operation.returns};`;
+            })
+            .join("\n"),
+        "}",
+    ].join("\n");
+
+    const factory = [
+        "/**",
+        " * A client bound to its own configuration.",
+        " *",
+        " * Two tenants, two base URLs or two credentials are two clients; nothing is",
+        " * shared between them, and the module-level default is just one more.",
+        " */",
+        "export function createClient(overrides: Partial<ClientConfig> = {}): Client {",
+        "  const config: ClientConfig = { ...DEFAULTS, ...overrides };",
+        ...(speaksOpenRpc
+            ? ["  // A JSON-RPC id only has to be unique per connection, so it counts per client.", "  let rpcId = 0;"]
+            : []),
+        "",
+        "  return {",
+        "    setBearerToken(token: TokenProvider) {",
+        "      config.auth = { ...config.auth, bearer: token };",
+        "    },",
+        "    setApiKey(key: TokenProvider) {",
+        "      config.auth = { ...config.auth, apiKey: key };",
+        "    },",
+        operations.map((operation) => operation.implementation).join("\n"),
+        "  };",
+        "}",
+    ].join("\n");
+
+    const moduleLevel = [
+        "let defaults: ClientConfig = { ...DEFAULTS };",
+        "let client: Client = createClient();",
+        "",
+        "/** Sets or updates the module-level Bearer token / token provider. */",
+        "export function setBearerToken(token: TokenProvider): void {",
+        "  defaults.auth = { ...defaults.auth, bearer: token };",
+        "  client.setBearerToken(token);",
+        "}",
+        "",
+        "/** Sets or updates the module-level API Key / key provider. */",
+        "export function setApiKey(key: TokenProvider): void {",
+        "  defaults.auth = { ...defaults.auth, apiKey: key };",
+        "  client.setApiKey(key);",
+        "}",
+        "",
+        "/**",
+        " * Merges into the configuration the module-level functions use, so a base",
+        " * URL and an interceptor can be set from different places.",
+        " */",
+        "export function configure(next: Partial<ClientConfig>): void {",
+        "  defaults = { ...defaults, ...next };",
+        "  client = createClient(defaults);",
+        "}",
+        "",
+        "export function currentConfig(): ClientConfig {",
+        "  return defaults;",
+        "}",
+        "",
+        "/** The client `configure()` maintains, which hooks and other consumers default to. */",
+        "export function defaultClient(): Client {",
+        "  return client;",
+        "}",
+        "",
+        operations
+            .map((operation) => {
+                // Typed from `Client`, so a delegate cannot drift from the method it
+                // forwards to, and reads `client` per call so `configure` still
+                // applies. The names come from the operation rather than from its
+                // parameter text, which is a type and can hold anything.
+                const forwarded = operation.parameterNames.join(", ");
+                return `${operation.doc}export const ${operation.name}: Client[${JSON.stringify(
+                    operation.name,
+                )}] = (${forwarded}) => client.${operation.name}(${forwarded});`;
+            })
+            .join("\n\n"),
+    ].join("\n");
+
+    // Only the names the signatures actually mention are imported, so the file
+    // stays clean under `noUnusedLocals`.
+    const declarations = `${operationTypes}\n\n${clientInterface}\n\n${factory}\n\n${moduleLevel}`;
+    const imported = [...identifiers.values()]
+        .filter((identifier) => new RegExp(`\\b${identifier}\\b`).test(declarations))
+        .sort();
+
+    // The wire codec is a file of its own: it is the only generated code with no
+    // types in it, it is large, and a caller may well want to frame a message
+    // without going through a method.
+    const codecTypes = service.methods.length > 0 ? messageTypes(service.methods, declared, context.options) : [];
+    const speaksErlangText = service.methods.some((m) => {
+        if (!isHttpMethod(m)) {
+            return false;
+        }
+        const http = m as HttpServiceMethodIR;
+        const reqBody = selectBody(http.request.body, context.options, () => {});
+        const respBody = selectBody(http.responses[0]?.body, context.options, () => {});
+        const reqMime = reqBody?.mimetype.toLowerCase() ?? "";
+        const respMime = respBody?.mimetype.toLowerCase() ?? "";
+        const isErlangText = (mime: string) =>
+            mime.includes("erlang") && !mime.includes("binary") && !mime.includes("etf");
+        return isErlangText(reqMime) || isErlangText(respMime);
+    });
+
+    const speaksErlangBinary = service.methods.some((m) => {
+        if (!isHttpMethod(m)) {
+            return false;
+        }
+        const http = m as HttpServiceMethodIR;
+        const reqBody = selectBody(http.request.body, context.options, () => {});
+        const respBody = selectBody(http.responses[0]?.body, context.options, () => {});
+        const reqMime = reqBody?.mimetype.toLowerCase() ?? "";
+        const respMime = respBody?.mimetype.toLowerCase() ?? "";
+        const isErlangBinary = (mime: string) =>
+            mime.includes("erlang-binary") || mime.includes("x-erlang-binary") || mime.includes("etf");
+        return isErlangBinary(reqMime) || isErlangBinary(respMime);
+    });
+
+    const speaksCbor = service.methods.some((m) => {
+        if (!isHttpMethod(m)) {
+            return false;
+        }
+        const http = m as HttpServiceMethodIR;
+        const reqBody = selectBody(http.request.body, context.options, () => {});
+        const respBody = selectBody(http.responses[0]?.body, context.options, () => {});
+        const reqMime = reqBody?.mimetype.toLowerCase() ?? "";
+        const respMime = respBody?.mimetype.toLowerCase() ?? "";
+        const isCbor = (mime: string) => mime.includes("cbor");
+        return isCbor(reqMime) || isCbor(respMime);
+    });
+
+    const codecImports = [
+        ...new Set([
+            ...codecTypes.flatMap(({ name }) => {
+                const identifier = identifiers.get(name);
+                return identifier ? [codecName("encode", identifier), codecName("decode", identifier)] : [];
+            }),
+            ...(speaksErlangText ? ["encodeErlangText", "decodeErlangText"] : []),
+            ...(speaksErlangBinary ? ["encodeErlangBinary", "decodeErlangBinary"] : []),
+            ...(speaksCbor ? ["encodeCbor", "decodeCbor"] : []),
+        ]),
+    ]
+        .filter(
+            (fn) =>
+                new RegExp(`\\b${fn}\\b`).test(declarations) || speaksErlangText || speaksErlangBinary || speaksCbor,
+        )
+        .sort();
+    // The gRPC fields only exist on a client that has rpcs to make, so the shared
+    // configuration carries them conditionally rather than always.
+    const transportConfig = speaksGrpc
+        ? [
+              "  /**",
+              "   * Custom transport. Defaults to `fetch` for HTTP or gRPC-Web over `fetch`",
+              "   * for gRPC; `createHttp2Transport()` speaks gRPC proper over HTTP/2.",
+              "   */",
+              "  transport?: GrpcTransport | HttpTransport | FetchLike;",
+          ].join("\n")
+        : [
+              "  /**",
+              "   * Custom HTTP transport. Defaults to globalThis.fetch when omitted.",
+              "   */",
+              "  transport?: HttpTransport | FetchLike;",
+          ].join("\n");
+
+    const grpcConfig = speaksGrpc
+        ? [
+              "  /**",
+              "   * Compresses outgoing messages. A client always advertises that it",
+              "   * accepts `gzip` and `deflate`, so a server may compress its replies",
+              "   * whatever this is set to.",
+              "   */",
+              "  compression?: GrpcCompression;",
+              "",
+          ].join("\n")
+        : "";
+
+    // A key per protocol the document speaks, so an interceptor array is never
+    // written into a slot nothing reads. A JSON-RPC call is an HTTP one, so it
+    // is wrapped by the same `http` chain. Both are the same mechanism either way.
+    const usesHttpChain = speaksHttp || speaksOpenRpc;
+    const interceptorKeys = [
+        ...(usesHttpChain
+            ? ["  /** Outermost first: `[a, b]` runs a around b around the request. */", "  http?: HttpInterceptor[];"]
+            : []),
+        ...(speaksGrpc
+            ? [
+                  usesHttpChain
+                      ? "  /** Outermost first, exactly as `http`. */"
+                      : "  /** Outermost first: `[a, b]` runs a around b around the call. */",
+                  "  grpc?: GrpcInterceptor[];",
+              ]
+            : []),
+        "",
+    ].join("\n");
+
+    // The checks are emitted per operation, but the helpers they call and the
+    // error they throw are shared, so the set is collected once over the whole
+    // service. Refs are inlined first for the same reason they are at the
+    // callsite: a ref carries no constraints, and the type it names carries them.
+    const valHelpers = new Set<string>();
+    const validatedIRs: TypeIR[] = [];
+    for (const method of service.methods) {
+        if (!isHttpMethod(method)) {
+            continue;
+        }
+        const http = method as HttpServiceMethodIR;
+        const params = http.request.parameters ?? [];
+        const grouped = (location: ParameterIR["in"]) => params.filter((parameter) => parameter.in === location);
+
+        const isSuccess = (response: HttpResponseIR) =>
+            typeof response.status === "number" && response.status >= 200 && response.status < 300;
+        const successes = http.responses.filter(isSuccess);
+        const chosen =
+            successes.length > 0 ? successes : http.responses.filter((response) => response.status === "default");
+
+        const candidates: Array<[ValidateTarget, TypeIR | undefined]> = [
+            ["path", parameterGroupTypeIR(grouped("path"), "path")],
+            ["query", parameterGroupTypeIR(grouped("query"), "query")],
+            ["headers", parameterGroupTypeIR(grouped("header"), "header")],
+            ["body", jsonBody(http.request.body, context.options, onSkipped)],
+            ["response", jsonBody(chosen[0]?.body, context.options, onSkipped)],
+        ];
+
+        for (const [target, ir] of candidates) {
+            if (!ir || !isValidationEnabled(context.options, target)) {
+                continue;
+            }
+            validatedIRs.push(inlineRefs(ir, declared));
+        }
     }
-    skipped[mimetype] = true;
-    context.logger.warn(
-      `[wiz] ${mimetype} payloads are not emitted; the client speaks ${JSON_MIME}`
-    );
-  };
-
-  const unsupported: Record<string, true> = {};
-  const onUnsupported = (name: string, reason: string) => {
-    if (unsupported[name]) {
-      return;
+    for (const ir of validatedIRs) {
+        // `annotate`: this file is compiled by the consumer, not loaded as JS.
+        for (const helper of helpersFor(ir, true)) {
+            valHelpers.add(helper);
+        }
     }
-    unsupported[name] = true;
-    context.logger.warn(`[wiz] ${name} is emitted as a throwing stub: ${reason}`);
-  };
 
-  const names = methodNames(service);
-  const grpcMethods = service.methods.filter(isGrpcMethod);
-  const aliasNames = operationTypeNames([...names.values()], identifiers);
-  const operations = service.methods.map((method) => {
-    const name = names.get(method)!;
-    const aliases = aliasNames.get(name)!;
-    if (isGrpcMethod(method)) {
-      return grpcOperation(method, name, identifiers, onUnsupported, aliases);
-    }
-    if (isOpenRpcMethod(method)) {
-      return openRpcOperation(method, name, identifiers, aliases);
-    }
-    return httpOperation(
-      method as HttpServiceMethodIR,
-      name,
-      identifiers,
-      declared,
-      context.options,
-      onSkipped,
-      aliases,
-      applied
-    );
-  });
+    // Only a client that validates carries the error type: an unused exported
+    // class in every other client is noise a consumer has to read past.
+    const validates = validatedIRs.length > 0;
 
-  // Every published contract has a name of its own here, so a consumer can
-  // annotate a variable without deriving anything from the method's type.
-  const operationTypes = operations
-    .flatMap((operation) => {
-      const alias = aliasNames.get(operation.name)!;
-      return [
-        `/** Call options for \`${operation.name}\`. */`,
-        `export type ${alias.options} = ${operation.optionsType ?? 'undefined'};`,
-        `/** What \`${operation.name}\` resolves to. */`,
-        `export type ${alias.result} = ${operation.resultType};`,
-      ];
-    })
-    .join('\n');
-  const clientInterface = [
-    '/**',
-    ' * Every operation the document declares.',
-    ' *',
-    ' * A caller that talks to one deployment can ignore this and use the',
-    ' * module-level functions below; a caller that talks to several holds one',
-    ' * client per configuration.',
-    ' */',
-    'export interface Client {',
-    '  /** Sets or updates the Bearer token / token provider for this client. */',
-    '  setBearerToken(token: TokenProvider): void;',
-    '  /** Sets or updates the API Key / key provider for this client. */',
-    '  setApiKey(key: TokenProvider): void;',
-    operations
-      .map((operation) => {
-        const doc = operation.doc
-          ? `${operation.doc
-              .split('\n')
-              .filter((line) => line.length > 0)
-              .map((line) => `  ${line}`)
-              .join('\n')}\n`
-          : '';
-        return `${doc}  ${operation.name}(${operation.parameter}): ${operation.returns};`;
-      })
-      .join('\n'),
-    '}',
-  ].join('\n');
-
-  const factory = [
-    '/**',
-    ' * A client bound to its own configuration.',
-    ' *',
-    ' * Two tenants, two base URLs or two credentials are two clients; nothing is',
-    ' * shared between them, and the module-level default is just one more.',
-    ' */',
-    'export function createClient(overrides: Partial<ClientConfig> = {}): Client {',
-    '  const config: ClientConfig = { ...DEFAULTS, ...overrides };',
-    ...(speaksOpenRpc
-      ? [
-          '  // A JSON-RPC id only has to be unique per connection, so it counts per client.',
-          '  let rpcId = 0;',
-        ]
-      : []),
-    '',
-    '  return {',
-    '    setBearerToken(token: TokenProvider) {',
-    '      config.auth = { ...config.auth, bearer: token };',
-    '    },',
-    '    setApiKey(key: TokenProvider) {',
-    '      config.auth = { ...config.auth, apiKey: key };',
-    '    },',
-    operations.map((operation) => operation.implementation).join('\n'),
-    '  };',
-    '}',
-  ].join('\n');
-
-  const moduleLevel = [
-    'let defaults: ClientConfig = { ...DEFAULTS };',
-    'let client: Client = createClient();',
-    '',
-    '/** Sets or updates the module-level Bearer token / token provider. */',
-    'export function setBearerToken(token: TokenProvider): void {',
-    '  defaults.auth = { ...defaults.auth, bearer: token };',
-    '  client.setBearerToken(token);',
-    '}',
-    '',
-    '/** Sets or updates the module-level API Key / key provider. */',
-    'export function setApiKey(key: TokenProvider): void {',
-    '  defaults.auth = { ...defaults.auth, apiKey: key };',
-    '  client.setApiKey(key);',
-    '}',
-    '',
-    '/**',
-    ' * Merges into the configuration the module-level functions use, so a base',
-    ' * URL and an interceptor can be set from different places.',
-    ' */',
-    'export function configure(next: Partial<ClientConfig>): void {',
-    '  defaults = { ...defaults, ...next };',
-    '  client = createClient(defaults);',
-    '}',
-    '',
-    'export function currentConfig(): ClientConfig {',
-    '  return defaults;',
-    '}',
-    '',
-    '/** The client `configure()` maintains, which hooks and other consumers default to. */',
-    'export function defaultClient(): Client {',
-    '  return client;',
-    '}',
-    '',
-    operations
-      .map((operation) => {
-        // Typed from `Client`, so a delegate cannot drift from the method it
-        // forwards to, and reads `client` per call so `configure` still
-        // applies. The names come from the operation rather than from its
-        // parameter text, which is a type and can hold anything.
-        const forwarded = operation.parameterNames.join(', ');
-        return `${operation.doc}export const ${operation.name}: Client[${JSON.stringify(
-          operation.name
-        )}] = (${forwarded}) => client.${operation.name}(${forwarded});`;
-      })
-      .join('\n\n'),
-  ].join('\n');
-
-  // Only the names the signatures actually mention are imported, so the file
-  // stays clean under `noUnusedLocals`.
-  const declarations = `${operationTypes}\n\n${clientInterface}\n\n${factory}\n\n${moduleLevel}`;
-  const imported = [...identifiers.values()]
-    .filter((identifier) => new RegExp(`\\b${identifier}\\b`).test(declarations))
-    .sort();
-
-  // The wire codec is a file of its own: it is the only generated code with no
-  // types in it, it is large, and a caller may well want to frame a message
-  // without going through a method.
-  const codecTypes =
-    service.methods.length > 0 ? messageTypes(service.methods, declared, context.options) : [];
-  const speaksErlangText = service.methods.some((m) => {
-    if (!isHttpMethod(m)) {
-      return false;
-    }
-    const http = m as HttpServiceMethodIR;
-    const reqBody = selectBody(http.request.body, context.options, () => {});
-    const respBody = selectBody(http.responses[0]?.body, context.options, () => {});
-    const reqMime = reqBody?.mimetype.toLowerCase() ?? '';
-    const respMime = respBody?.mimetype.toLowerCase() ?? '';
-    const isErlangText = (mime: string) =>
-      mime.includes('erlang') && !mime.includes('binary') && !mime.includes('etf');
-    return isErlangText(reqMime) || isErlangText(respMime);
-  });
-
-  const speaksErlangBinary = service.methods.some((m) => {
-    if (!isHttpMethod(m)) {
-      return false;
-    }
-    const http = m as HttpServiceMethodIR;
-    const reqBody = selectBody(http.request.body, context.options, () => {});
-    const respBody = selectBody(http.responses[0]?.body, context.options, () => {});
-    const reqMime = reqBody?.mimetype.toLowerCase() ?? '';
-    const respMime = respBody?.mimetype.toLowerCase() ?? '';
-    const isErlangBinary = (mime: string) =>
-      mime.includes('erlang-binary') || mime.includes('x-erlang-binary') || mime.includes('etf');
-    return isErlangBinary(reqMime) || isErlangBinary(respMime);
-  });
-
-  const speaksCbor = service.methods.some((m) => {
-    if (!isHttpMethod(m)) {
-      return false;
-    }
-    const http = m as HttpServiceMethodIR;
-    const reqBody = selectBody(http.request.body, context.options, () => {});
-    const respBody = selectBody(http.responses[0]?.body, context.options, () => {});
-    const reqMime = reqBody?.mimetype.toLowerCase() ?? '';
-    const respMime = respBody?.mimetype.toLowerCase() ?? '';
-    const isCbor = (mime: string) => mime.includes('cbor');
-    return isCbor(reqMime) || isCbor(respMime);
-  });
-
-  const codecImports = [
-    ...new Set([
-      ...codecTypes.flatMap(({ name }) => {
-        const identifier = identifiers.get(name);
-        return identifier ? [codecName('encode', identifier), codecName('decode', identifier)] : [];
-      }),
-      ...(speaksErlangText ? ['encodeErlangText', 'decodeErlangText'] : []),
-      ...(speaksErlangBinary ? ['encodeErlangBinary', 'decodeErlangBinary'] : []),
-      ...(speaksCbor ? ['encodeCbor', 'decodeCbor'] : []),
-    ]),
-  ]
-    .filter(
-      (fn) =>
-        new RegExp(`\\b${fn}\\b`).test(declarations) ||
-        speaksErlangText ||
-        speaksErlangBinary ||
-        speaksCbor
-    )
-    .sort();
-  // The gRPC fields only exist on a client that has rpcs to make, so the shared
-  // configuration carries them conditionally rather than always.
-  const transportConfig = speaksGrpc
-    ? [
-        '  /**',
-        '   * Custom transport. Defaults to `fetch` for HTTP or gRPC-Web over `fetch`',
-        '   * for gRPC; `createHttp2Transport()` speaks gRPC proper over HTTP/2.',
-        '   */',
-        '  transport?: GrpcTransport | HttpTransport | FetchLike;',
-      ].join('\n')
-    : [
-        '  /**',
-        '   * Custom HTTP transport. Defaults to globalThis.fetch when omitted.',
-        '   */',
-        '  transport?: HttpTransport | FetchLike;',
-      ].join('\n');
-
-  const grpcConfig = speaksGrpc
-    ? [
-        '  /**',
-        '   * Compresses outgoing messages. A client always advertises that it',
-        '   * accepts `gzip` and `deflate`, so a server may compress its replies',
-        '   * whatever this is set to.',
-        '   */',
-        '  compression?: GrpcCompression;',
-        '',
-      ].join('\n')
-    : '';
-
-  // A key per protocol the document speaks, so an interceptor array is never
-  // written into a slot nothing reads. A JSON-RPC call is an HTTP one, so it
-  // is wrapped by the same `http` chain. Both are the same mechanism either way.
-  const usesHttpChain = speaksHttp || speaksOpenRpc;
-  const interceptorKeys = [
-    ...(usesHttpChain
-      ? [
-          '  /** Outermost first: `[a, b]` runs a around b around the request. */',
-          '  http?: HttpInterceptor[];',
-        ]
-      : []),
-    ...(speaksGrpc
-      ? [
-          usesHttpChain
-            ? '  /** Outermost first, exactly as `http`. */'
-            : '  /** Outermost first: `[a, b]` runs a around b around the call. */',
-          '  grpc?: GrpcInterceptor[];',
-        ]
-      : []),
-    '',
-  ].join('\n');
-
-  // The checks are emitted per operation, but the helpers they call and the
-  // error they throw are shared, so the set is collected once over the whole
-  // service. Refs are inlined first for the same reason they are at the
-  // callsite: a ref carries no constraints, and the type it names carries them.
-  const valHelpers = new Set<string>();
-  const validatedIRs: TypeIR[] = [];
-  for (const method of service.methods) {
-    if (!isHttpMethod(method)) {
-      continue;
-    }
-    const http = method as HttpServiceMethodIR;
-    const params = http.request.parameters ?? [];
-    const grouped = (location: ParameterIR['in']) =>
-      params.filter((parameter) => parameter.in === location);
-
-    const isSuccess = (response: HttpResponseIR) =>
-      typeof response.status === 'number' && response.status >= 200 && response.status < 300;
-    const successes = http.responses.filter(isSuccess);
-    const chosen =
-      successes.length > 0
-        ? successes
-        : http.responses.filter((response) => response.status === 'default');
-
-    const candidates: Array<[ValidateTarget, TypeIR | undefined]> = [
-      ['path', parameterGroupTypeIR(grouped('path'), 'path')],
-      ['query', parameterGroupTypeIR(grouped('query'), 'query')],
-      ['headers', parameterGroupTypeIR(grouped('header'), 'header')],
-      ['body', jsonBody(http.request.body, context.options, onSkipped)],
-      ['response', jsonBody(chosen[0]?.body, context.options, onSkipped)],
-    ];
-
-    for (const [target, ir] of candidates) {
-      if (!ir || !isValidationEnabled(context.options, target)) {
-        continue;
-      }
-      validatedIRs.push(inlineRefs(ir, declared));
-    }
-  }
-  for (const ir of validatedIRs) {
-    // `annotate`: this file is compiled by the consumer, not loaded as JS.
-    for (const helper of helpersFor(ir, true)) {
-      valHelpers.add(helper);
-    }
-  }
-
-  // Only a client that validates carries the error type: an unused exported
-  // class in every other client is noise a consumer has to read past.
-  const validates = validatedIRs.length > 0;
-
-  const validationPrelude = validates
-    ? `
+    const validationPrelude = validates
+        ? `
 /** One failed check, in the shape \`wiz\`'s own validators report. */
 export interface ValidationError {
   path: string;
@@ -3076,132 +3019,122 @@ export class ClientValidationError extends Error {
   }
 }
 
-${valHelpers.size > 0 ? `${[...valHelpers].join('\n\n')}\n` : ''}`
-    : '';
+${valHelpers.size > 0 ? `${[...valHelpers].join("\n\n")}\n` : ""}`
+        : "";
 
-  const api = [
-    banner('Every operation the document declares.'),
-    imported.length > 0 ? `\nimport type { ${imported.join(', ')} } from "./${MODEL_FILE}";\n` : '',
-    codecImports.length > 0
-      ? `import { ${codecImports.join(', ')} } from "./${CODEC_FILE}";\n`
-      : '',
-    `\n${validationPrelude}${PRELUDE.replace('__GRPC_CONFIG__', grpcConfig)
-      .replace('__TRANSPORT_CONFIG__', transportConfig)
-      .replace('__INTERCEPTOR_KEYS__', interceptorKeys)
-      .replace('\n__HTTP_ENCODING__\n', speaksHttp ? `\n${HTTP_ENCODING}\n` : '')
-      .replaceAll(
-        '__HTTP_CHAIN__',
-        usesHttpChain ? 'chain(config.interceptors?.http, invoke)' : 'invoke'
-      )}\n`,
-    speaksOpenRpc ? `\n${OPENRPC_PRELUDE}\n` : '',
-    grpcMethods.length > 0 ? `\n${GRPC_PRELUDE}\n` : '',
-    operations.length > 0 ? `\n${declarations}\n` : '',
-  ].join('');
+    const api = [
+        banner("Every operation the document declares."),
+        imported.length > 0 ? `\nimport type { ${imported.join(", ")} } from "./${MODEL_FILE}";\n` : "",
+        codecImports.length > 0 ? `import { ${codecImports.join(", ")} } from "./${CODEC_FILE}";\n` : "",
+        `\n${validationPrelude}${PRELUDE.replace("__GRPC_CONFIG__", grpcConfig)
+            .replace("__TRANSPORT_CONFIG__", transportConfig)
+            .replace("__INTERCEPTOR_KEYS__", interceptorKeys)
+            .replace("\n__HTTP_ENCODING__\n", speaksHttp ? `\n${HTTP_ENCODING}\n` : "")
+            .replaceAll("__HTTP_CHAIN__", usesHttpChain ? "chain(config.interceptors?.http, invoke)" : "invoke")}\n`,
+        speaksOpenRpc ? `\n${OPENRPC_PRELUDE}\n` : "",
+        grpcMethods.length > 0 ? `\n${GRPC_PRELUDE}\n` : "",
+        operations.length > 0 ? `\n${declarations}\n` : "",
+    ].join("");
 
-  const parts: string[] = [];
-  if (speaksGrpc) {
-    parts.push(
-      generateProtobufCodecCode(codecTypes, { modelModule: `./${MODEL_FILE}`, identifiers })
-    );
-  }
-  if ((speaksHttp || speaksAsyncApi) && codecTypes.length > 0) {
-    parts.push(generateJsonCodecCode(codecTypes, { modelModule: `./${MODEL_FILE}`, identifiers }));
-  }
-  const emptyIR: TypeIR = { id: 'erlang', kind: 'primitive', type: 'unknown' };
-  if (speaksErlangText) {
-    parts.push(generateErlangTextCode(emptyIR));
-  }
-  if (speaksErlangBinary) {
-    parts.push(generateErlangBinaryCode(emptyIR));
-  }
-  if (speaksCbor) {
-    parts.push(generateCborCode(emptyIR));
-  }
-
-  const codecContent = `${banner('Wire encoders and decoders.')}\n${parts.join('\n\n')}\n`;
-
-  if (isOnlyAsyncApi) {
-    return {
-      [MODEL_FILE]: model,
-      [CODEC_FILE]: parts.length > 0 ? codecContent : `${banner('Wire encoders and decoders.')}\n`,
-    };
-  }
-
-  const files: GeneratedFiles = { [MODEL_FILE]: model, [API_FILE]: api };
-  if (parts.length > 0) {
-    files[CODEC_FILE] = codecContent;
+    const parts: string[] = [];
     if (speaksGrpc) {
-      files[TRANSPORT_FILE] = `${banner(
-        'The HTTP/2 transport, for a server that speaks gRPC proper.'
-      )}\n${HTTP2_TRANSPORT}\n`;
+        parts.push(generateProtobufCodecCode(codecTypes, { modelModule: `./${MODEL_FILE}`, identifiers }));
     }
-  }
-  return files;
+    if ((speaksHttp || speaksAsyncApi) && codecTypes.length > 0) {
+        parts.push(generateJsonCodecCode(codecTypes, { modelModule: `./${MODEL_FILE}`, identifiers }));
+    }
+    const emptyIR: TypeIR = { id: "erlang", kind: "primitive", type: "unknown" };
+    if (speaksErlangText) {
+        parts.push(generateErlangTextCode(emptyIR));
+    }
+    if (speaksErlangBinary) {
+        parts.push(generateErlangBinaryCode(emptyIR));
+    }
+    if (speaksCbor) {
+        parts.push(generateCborCode(emptyIR));
+    }
+
+    const codecContent = `${banner("Wire encoders and decoders.")}\n${parts.join("\n\n")}\n`;
+
+    if (isOnlyAsyncApi) {
+        return {
+            [MODEL_FILE]: model,
+            [CODEC_FILE]: parts.length > 0 ? codecContent : `${banner("Wire encoders and decoders.")}\n`,
+        };
+    }
+
+    const files: GeneratedFiles = { [MODEL_FILE]: model, [API_FILE]: api };
+    if (parts.length > 0) {
+        files[CODEC_FILE] = codecContent;
+        if (speaksGrpc) {
+            files[TRANSPORT_FILE] = `${banner(
+                "The HTTP/2 transport, for a server that speaks gRPC proper.",
+            )}\n${HTTP2_TRANSPORT}\n`;
+        }
+    }
+    return files;
 }
 
 /** Every message or body a service method puts on the wire, in a stable order. */
 function messageTypes(
-  methods: ServiceMethodIR[],
-  declared: ReadonlyMap<string, TypeIR>,
-  options: TsClientOptions
+    methods: ServiceMethodIR[],
+    declared: ReadonlyMap<string, TypeIR>,
+    options: TsClientOptions,
 ): Array<{ name: string; ir: TypeIR }> {
-  const wanted = new Map<string, TypeIR>();
+    const wanted = new Map<string, TypeIR>();
 
-  for (const method of methods) {
-    if (isGrpcMethod(method)) {
-      for (const message of [
-        method.request.message,
-        ...method.responses.map((response) => response.message),
-      ]) {
-        const name = message.name;
-        if (!name) {
-          continue;
-        }
-        const ir = declared.get(name) ?? message;
-        if (ir.kind !== 'ref') {
-          wanted.set(name, ir);
-        }
-      }
-    } else {
-      const http = method as HttpServiceMethodIR;
-      const reqBody = jsonBody(http.request.body, options, () => {});
-      if (reqBody) {
-        const name = reqBody.name;
-        if (name) {
-          const ir = declared.get(name) ?? reqBody;
-          if (ir.kind !== 'ref') {
-            wanted.set(name, ir);
-          }
-        }
-      }
-      for (const response of http.responses) {
-        const resBody = jsonBody(response.body, options, () => {});
-        if (resBody) {
-          const name = resBody.name;
-          if (name) {
-            const ir = declared.get(name) ?? resBody;
-            if (ir.kind !== 'ref') {
-              wanted.set(name, ir);
+    for (const method of methods) {
+        if (isGrpcMethod(method)) {
+            for (const message of [method.request.message, ...method.responses.map((response) => response.message)]) {
+                const name = message.name;
+                if (!name) {
+                    continue;
+                }
+                const ir = declared.get(name) ?? message;
+                if (ir.kind !== "ref") {
+                    wanted.set(name, ir);
+                }
             }
-          }
+        } else {
+            const http = method as HttpServiceMethodIR;
+            const reqBody = jsonBody(http.request.body, options, () => {});
+            if (reqBody) {
+                const name = reqBody.name;
+                if (name) {
+                    const ir = declared.get(name) ?? reqBody;
+                    if (ir.kind !== "ref") {
+                        wanted.set(name, ir);
+                    }
+                }
+            }
+            for (const response of http.responses) {
+                const resBody = jsonBody(response.body, options, () => {});
+                if (resBody) {
+                    const name = resBody.name;
+                    if (name) {
+                        const ir = declared.get(name) ?? resBody;
+                        if (ir.kind !== "ref") {
+                            wanted.set(name, ir);
+                        }
+                    }
+                }
+            }
         }
-      }
     }
-  }
-  return [...wanted].map(([name, ir]) => ({ name, ir }));
+    return [...wanted].map(([name, ir]) => ({ name, ir }));
 }
 
 export const tsClientGenerator: Generator<TsClientOptions> = {
-  name: 'typescript-client',
+    name: "typescript-client",
 
-  api(ir: ApiIR, context) {
-    return emitFiles(ir.service, ir.types, context);
-  },
+    api(ir: ApiIR, context) {
+        return emitFiles(ir.service, ir.types, context);
+    },
 
-  /** A service on its own still needs its types declared to compile. */
-  service(ir: ServiceIR, context) {
-    return emitFiles(ir, undefined, context);
-  },
+    /** A service on its own still needs its types declared to compile. */
+    service(ir: ServiceIR, context) {
+        return emitFiles(ir, undefined, context);
+    },
 };
 
 export default tsClientGenerator;

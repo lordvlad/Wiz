@@ -1,13 +1,7 @@
-import { dirname, resolve as resolvePath } from 'node:path';
-import { emptyApiComponents, type ApiDiagnostic, type ApiIR } from '../ir/api.ts';
-import type { GrpcServiceMethodIR, ServiceIR } from '../ir/service.ts';
-import type {
-  EnumMemberIR,
-  PrimitiveTypeIR,
-  PropertyIR,
-  TypeIR,
-  UnionTypeIR,
-} from '../ir/types.ts';
+import { dirname, resolve as resolvePath } from "node:path";
+import { emptyApiComponents, type ApiDiagnostic, type ApiIR } from "../ir/api.ts";
+import type { GrpcServiceMethodIR, ServiceIR } from "../ir/service.ts";
+import type { EnumMemberIR, PrimitiveTypeIR, PropertyIR, TypeIR, UnionTypeIR } from "../ir/types.ts";
 
 /**
  * `.proto` in, `ApiIR` out: the gRPC counterpart of the OpenAPI extractor.
@@ -20,310 +14,305 @@ import type {
  * at here: an independent oracle in the tests.
  */
 export interface ExtractProtoOptions {
-  /** Throw on the first diagnostic instead of collecting them. Default false. */
-  strict?: boolean;
+    /** Throw on the first diagnostic instead of collecting them. Default false. */
+    strict?: boolean;
 }
 
 /* --------------------------------------------------------------- tokenizer */
 
 interface Token {
-  kind: 'ident' | 'number' | 'string' | 'punct';
-  value: string;
-  /**
-   * The comment block that sat on its own line(s) directly above, cleaned of
-   * its markers. A comment trailing a field on the same line documents that
-   * field, not the next one, so it is dropped rather than misattributed.
-   */
-  comment?: string;
-  line: number;
+    kind: "ident" | "number" | "string" | "punct";
+    value: string;
+    /**
+     * The comment block that sat on its own line(s) directly above, cleaned of
+     * its markers. A comment trailing a field on the same line documents that
+     * field, not the next one, so it is dropped rather than misattributed.
+     */
+    comment?: string;
+    line: number;
 }
 
-const PUNCTUATION = '{}()[]<>=;,:';
+const PUNCTUATION = "{}()[]<>=;,:";
 
 function isDigit(code: number): boolean {
-  return code >= 48 && code <= 57;
+    return code >= 48 && code <= 57;
 }
 
 function isIdentStart(code: number): boolean {
-  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95;
+    return (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95;
 }
 
 function isIdentPart(code: number): boolean {
-  return isIdentStart(code) || isDigit(code);
+    return isIdentStart(code) || isDigit(code);
 }
 
 /** Strips `//`, `/*` and per-line `*` decoration without touching the prose. */
 function cleanComment(lines: string[]): string {
-  return lines
-    .map((line) => line.replace(/^\s*(?:\/\/+|\*+|\/\*+|\*+\/)\s?/, '').trimEnd())
-    .join('\n')
-    .trim();
+    return lines
+        .map((line) => line.replace(/^\s*(?:\/\/+|\*+|\/\*+|\*+\/)\s?/, "").trimEnd())
+        .join("\n")
+        .trim();
 }
 
 function tokenize(text: string, path: string): Token[] {
-  const tokens: Token[] = [];
-  let index = 0;
-  let line = 1;
-  let pending: string[] = [];
-  // Whether anything other than whitespace has appeared on the current line.
-  // Drives both comment attachment and the blank-line rule that cuts a pending
-  // comment loose from a declaration it is no longer adjacent to.
-  let sawContent = false;
+    const tokens: Token[] = [];
+    let index = 0;
+    let line = 1;
+    let pending: string[] = [];
+    // Whether anything other than whitespace has appeared on the current line.
+    // Drives both comment attachment and the blank-line rule that cuts a pending
+    // comment loose from a declaration it is no longer adjacent to.
+    let sawContent = false;
 
-  const fail = (message: string): never => {
-    throw new Error(`[wiz] ${message} at ${path}:${line}`);
-  };
+    const fail = (message: string): never => {
+        throw new Error(`[wiz] ${message} at ${path}:${line}`);
+    };
 
-  while (index < text.length) {
-    const code = text.charCodeAt(index);
+    while (index < text.length) {
+        const code = text.charCodeAt(index);
 
-    if (code === 10) {
-      if (!sawContent && pending.length > 0) {
+        if (code === 10) {
+            if (!sawContent && pending.length > 0) {
+                pending = [];
+            }
+            line += 1;
+            sawContent = false;
+            index += 1;
+            continue;
+        }
+        if (code === 32 || code === 9 || code === 13 || code === 12) {
+            index += 1;
+            continue;
+        }
+
+        if (code === 47 && text.charCodeAt(index + 1) === 47) {
+            const end = text.indexOf("\n", index);
+            const stop = end === -1 ? text.length : end;
+            if (!sawContent) {
+                pending.push(cleanComment([text.slice(index, stop)]));
+            }
+            sawContent = true;
+            index = stop;
+            continue;
+        }
+        if (code === 47 && text.charCodeAt(index + 1) === 42) {
+            const end = text.indexOf("*/", index + 2);
+            if (end === -1) {
+                fail("unterminated block comment");
+            }
+            const body = text.slice(index, end + 2);
+            if (!sawContent) {
+                pending.push(cleanComment(body.split("\n")));
+            }
+            sawContent = true;
+            for (let i = 0; i < body.length; i += 1) {
+                if (body.charCodeAt(i) === 10) {
+                    line += 1;
+                }
+            }
+            index = end + 2;
+            continue;
+        }
+
+        const comment = pending.length > 0 ? pending.join("\n") : undefined;
         pending = [];
-      }
-      line += 1;
-      sawContent = false;
-      index += 1;
-      continue;
-    }
-    if (code === 32 || code === 9 || code === 13 || code === 12) {
-      index += 1;
-      continue;
-    }
+        sawContent = true;
+        const start = index;
 
-    if (code === 47 && text.charCodeAt(index + 1) === 47) {
-      const end = text.indexOf('\n', index);
-      const stop = end === -1 ? text.length : end;
-      if (!sawContent) {
-        pending.push(cleanComment([text.slice(index, stop)]));
-      }
-      sawContent = true;
-      index = stop;
-      continue;
-    }
-    if (code === 47 && text.charCodeAt(index + 1) === 42) {
-      const end = text.indexOf('*/', index + 2);
-      if (end === -1) {
-        fail('unterminated block comment');
-      }
-      const body = text.slice(index, end + 2);
-      if (!sawContent) {
-        pending.push(cleanComment(body.split('\n')));
-      }
-      sawContent = true;
-      for (let i = 0; i < body.length; i += 1) {
-        if (body.charCodeAt(i) === 10) {
-          line += 1;
+        if (code === 34 || code === 39) {
+            index += 1;
+            while (index < text.length) {
+                const c = text.charCodeAt(index);
+                if (c === 92) {
+                    index += 2;
+                    continue;
+                }
+                if (c === code) {
+                    break;
+                }
+                if (c === 10) {
+                    fail("unterminated string");
+                }
+                index += 1;
+            }
+            if (index >= text.length) {
+                fail("unterminated string");
+            }
+            const value = text.slice(start + 1, index);
+            index += 1;
+            tokens.push({ kind: "string", value, comment, line });
+            continue;
         }
-      }
-      index = end + 2;
-      continue;
-    }
 
-    const comment = pending.length > 0 ? pending.join('\n') : undefined;
-    pending = [];
-    sawContent = true;
-    const start = index;
+        const nextCode = text.charCodeAt(index + 1);
+        if (isDigit(code) || ((code === 45 || code === 43) && isDigit(nextCode))) {
+            index += 1;
+            while (index < text.length) {
+                const c = text.charCodeAt(index);
+                const exponent =
+                    (c === 45 || c === 43) && (text.charCodeAt(index - 1) === 101 || text.charCodeAt(index - 1) === 69);
+                if (isIdentPart(c) || c === 46 || exponent) {
+                    index += 1;
+                    continue;
+                }
+                break;
+            }
+            tokens.push({ kind: "number", value: text.slice(start, index), comment, line });
+            continue;
+        }
 
-    if (code === 34 || code === 39) {
-      index += 1;
-      while (index < text.length) {
-        const c = text.charCodeAt(index);
-        if (c === 92) {
-          index += 2;
-          continue;
+        // A dotted path is one name in every position it can appear, including the
+        // leading dot that makes a type reference fully qualified.
+        if (isIdentStart(code) || (code === 46 && isIdentStart(nextCode))) {
+            index += 1;
+            while (index < text.length) {
+                const c = text.charCodeAt(index);
+                if (isIdentPart(c)) {
+                    index += 1;
+                    continue;
+                }
+                if (c === 46 && isIdentStart(text.charCodeAt(index + 1))) {
+                    index += 1;
+                    continue;
+                }
+                break;
+            }
+            tokens.push({ kind: "ident", value: text.slice(start, index), comment, line });
+            continue;
         }
-        if (c === code) {
-          break;
-        }
-        if (c === 10) {
-          fail('unterminated string');
+
+        const punct = text[index]!;
+        if (!PUNCTUATION.includes(punct)) {
+            fail(`unexpected character '${punct}'`);
         }
         index += 1;
-      }
-      if (index >= text.length) {
-        fail('unterminated string');
-      }
-      const value = text.slice(start + 1, index);
-      index += 1;
-      tokens.push({ kind: 'string', value, comment, line });
-      continue;
+        tokens.push({ kind: "punct", value: punct, comment, line });
     }
 
-    const nextCode = text.charCodeAt(index + 1);
-    if (isDigit(code) || ((code === 45 || code === 43) && isDigit(nextCode))) {
-      index += 1;
-      while (index < text.length) {
-        const c = text.charCodeAt(index);
-        const exponent =
-          (c === 45 || c === 43) &&
-          (text.charCodeAt(index - 1) === 101 || text.charCodeAt(index - 1) === 69);
-        if (isIdentPart(c) || c === 46 || exponent) {
-          index += 1;
-          continue;
-        }
-        break;
-      }
-      tokens.push({ kind: 'number', value: text.slice(start, index), comment, line });
-      continue;
-    }
-
-    // A dotted path is one name in every position it can appear, including the
-    // leading dot that makes a type reference fully qualified.
-    if (isIdentStart(code) || (code === 46 && isIdentStart(nextCode))) {
-      index += 1;
-      while (index < text.length) {
-        const c = text.charCodeAt(index);
-        if (isIdentPart(c)) {
-          index += 1;
-          continue;
-        }
-        if (c === 46 && isIdentStart(text.charCodeAt(index + 1))) {
-          index += 1;
-          continue;
-        }
-        break;
-      }
-      tokens.push({ kind: 'ident', value: text.slice(start, index), comment, line });
-      continue;
-    }
-
-    const punct = text[index]!;
-    if (!PUNCTUATION.includes(punct)) {
-      fail(`unexpected character '${punct}'`);
-    }
-    index += 1;
-    tokens.push({ kind: 'punct', value: punct, comment, line });
-  }
-
-  return tokens;
+    return tokens;
 }
 
 /* ------------------------------------------------------------------ parser */
 
 interface FieldNode {
-  kind: 'field';
-  name: string;
-  /** Written type name, unresolved: scoping is a whole-program question. */
-  type: string;
-  number: number;
-  repeated: boolean;
-  /** The `optional` keyword, which is the only presence proto3 spells out. */
-  optional: boolean;
-  map?: { key: string; value: string };
-  description?: string;
-  /** proto2's `default = X`, which `Annotated.default` carries verbatim. */
-  default?: unknown;
+    kind: "field";
+    name: string;
+    /** Written type name, unresolved: scoping is a whole-program question. */
+    type: string;
+    number: number;
+    repeated: boolean;
+    /** The `optional` keyword, which is the only presence proto3 spells out. */
+    optional: boolean;
+    map?: { key: string; value: string };
+    description?: string;
+    /** proto2's `default = X`, which `Annotated.default` carries verbatim. */
+    default?: unknown;
 }
 
 interface OneofNode {
-  kind: 'oneof';
-  name: string;
-  fields: FieldNode[];
-  description?: string;
+    kind: "oneof";
+    name: string;
+    fields: FieldNode[];
+    description?: string;
 }
 
 interface MessageNode {
-  name: string;
-  /** Fields and oneofs in declaration order, which the IR preserves. */
-  members: Array<FieldNode | OneofNode>;
-  messages: MessageNode[];
-  enums: EnumNode[];
-  description?: string;
+    name: string;
+    /** Fields and oneofs in declaration order, which the IR preserves. */
+    members: Array<FieldNode | OneofNode>;
+    messages: MessageNode[];
+    enums: EnumNode[];
+    description?: string;
 }
 
 interface EnumNode {
-  name: string;
-  values: { name: string; value: number }[];
-  description?: string;
+    name: string;
+    values: { name: string; value: number }[];
+    description?: string;
 }
 
 interface RpcNode {
-  name: string;
-  requestType: string;
-  requestStream: boolean;
-  responseType: string;
-  responseStream: boolean;
-  description?: string;
+    name: string;
+    requestType: string;
+    requestStream: boolean;
+    responseType: string;
+    responseStream: boolean;
+    description?: string;
 }
 
 interface ServiceNode {
-  name: string;
-  rpcs: RpcNode[];
-  description?: string;
+    name: string;
+    rpcs: RpcNode[];
+    description?: string;
 }
 
 interface ProtoFile {
-  syntax?: string;
-  package?: string;
-  imports: string[];
-  messages: MessageNode[];
-  enums: EnumNode[];
-  services: ServiceNode[];
+    syntax?: string;
+    package?: string;
+    imports: string[];
+    messages: MessageNode[];
+    enums: EnumNode[];
+    services: ServiceNode[];
 }
 
 /** Cursor over one file's tokens, plus what diagnostics need to name a spot. */
 interface P {
-  tokens: Token[];
-  index: number;
-  path: string;
-  ctx: Ctx;
-  /**
-   * Package seen so far, so a parse-time diagnostic can point at
-   * `pkg.Msg.field`. Files declare their package before their declarations;
-   * one that does not simply gets an unprefixed pointer.
-   */
-  scope: string;
+    tokens: Token[];
+    index: number;
+    path: string;
+    ctx: Ctx;
+    /**
+     * Package seen so far, so a parse-time diagnostic can point at
+     * `pkg.Msg.field`. Files declare their package before their declarations;
+     * one that does not simply gets an unprefixed pointer.
+     */
+    scope: string;
 }
 
 function peek(p: P): Token | undefined {
-  return p.tokens[p.index];
+    return p.tokens[p.index];
 }
 
 function next(p: P): Token {
-  const token = p.tokens[p.index];
-  if (!token) {
-    throw new Error(`[wiz] unexpected end of ${p.path}`);
-  }
-  p.index += 1;
-  return token;
+    const token = p.tokens[p.index];
+    if (!token) {
+        throw new Error(`[wiz] unexpected end of ${p.path}`);
+    }
+    p.index += 1;
+    return token;
 }
 
 function accept(p: P, value: string): boolean {
-  if (p.tokens[p.index]?.value !== value) {
-    return false;
-  }
-  p.index += 1;
-  return true;
+    if (p.tokens[p.index]?.value !== value) {
+        return false;
+    }
+    p.index += 1;
+    return true;
 }
 
 function expect(p: P, value: string): Token {
-  const token = next(p);
-  if (token.value !== value) {
-    throw new Error(
-      `[wiz] expected '${value}' but found '${token.value}' at ${p.path}:${token.line}`
-    );
-  }
-  return token;
+    const token = next(p);
+    if (token.value !== value) {
+        throw new Error(`[wiz] expected '${value}' but found '${token.value}' at ${p.path}:${token.line}`);
+    }
+    return token;
 }
 
 function expectName(p: P): string {
-  const token = next(p);
-  if (token.kind !== 'ident') {
-    throw new Error(`[wiz] expected a name but found '${token.value}' at ${p.path}:${token.line}`);
-  }
-  return token.value;
+    const token = next(p);
+    if (token.kind !== "ident") {
+        throw new Error(`[wiz] expected a name but found '${token.value}' at ${p.path}:${token.line}`);
+    }
+    return token.value;
 }
 
 function expectInteger(p: P): number {
-  const token = next(p);
-  const value = Number(token.value);
-  if (token.kind !== 'number' || !Number.isInteger(value)) {
-    throw new Error(
-      `[wiz] expected an integer but found '${token.value}' at ${p.path}:${token.line}`
-    );
-  }
-  return value;
+    const token = next(p);
+    const value = Number(token.value);
+    if (token.kind !== "number" || !Number.isInteger(value)) {
+        throw new Error(`[wiz] expected an integer but found '${token.value}' at ${p.path}:${token.line}`);
+    }
+    return value;
 }
 
 /**
@@ -333,44 +322,44 @@ function expectInteger(p: P): number {
  * aggregate form nests braces and brackets arbitrarily.
  */
 function skipOption(p: P): void {
-  let depth = 0;
-  while (p.index < p.tokens.length) {
-    const token = next(p);
-    if (token.value === '{' || token.value === '[') {
-      depth += 1;
-    } else if (token.value === '}' || token.value === ']') {
-      depth -= 1;
-    } else if (token.value === ';' && depth <= 0) {
-      return;
+    let depth = 0;
+    while (p.index < p.tokens.length) {
+        const token = next(p);
+        if (token.value === "{" || token.value === "[") {
+            depth += 1;
+        } else if (token.value === "}" || token.value === "]") {
+            depth -= 1;
+        } else if (token.value === ";" && depth <= 0) {
+            return;
+        }
     }
-  }
 }
 
 /** Consumes a `{ ... }` body, balanced, for constructs that are dropped whole. */
 function skipBlock(p: P): void {
-  while (p.index < p.tokens.length && peek(p)!.value !== '{') {
-    next(p);
-  }
-  if (p.index >= p.tokens.length) {
-    return;
-  }
-  let depth = 0;
-  do {
-    const token = next(p);
-    if (token.value === '{') {
-      depth += 1;
-    } else if (token.value === '}') {
-      depth -= 1;
+    while (p.index < p.tokens.length && peek(p)!.value !== "{") {
+        next(p);
     }
-  } while (depth > 0 && p.index < p.tokens.length);
+    if (p.index >= p.tokens.length) {
+        return;
+    }
+    let depth = 0;
+    do {
+        const token = next(p);
+        if (token.value === "{") {
+            depth += 1;
+        } else if (token.value === "}") {
+            depth -= 1;
+        }
+    } while (depth > 0 && p.index < p.tokens.length);
 }
 
 function skipStatement(p: P): void {
-  while (p.index < p.tokens.length) {
-    if (next(p).value === ';') {
-      return;
+    while (p.index < p.tokens.length) {
+        if (next(p).value === ";") {
+            return;
+        }
     }
-  }
 }
 
 /**
@@ -382,407 +371,400 @@ function skipStatement(p: P): void {
  * IR has no slot for, and is skipped in silence because options are ubiquitous.
  */
 function parseFieldOptions(p: P): { default?: unknown } {
-  const options: { default?: unknown } = {};
-  let depth = 1;
+    const options: { default?: unknown } = {};
+    let depth = 1;
 
-  while (depth > 0 && p.index < p.tokens.length) {
-    const token = next(p);
-    if (token.value === '[' || token.value === '{') {
-      depth += 1;
-    } else if (token.value === ']' || token.value === '}') {
-      depth -= 1;
-    } else if (depth === 1 && token.value === 'default' && peek(p)?.value === '=') {
-      next(p);
-      const value = next(p);
-      options.default =
-        value.kind === 'number'
-          ? Number(value.value)
-          : value.value === 'true'
-            ? true
-            : value.value === 'false'
-              ? false
-              : value.value;
+    while (depth > 0 && p.index < p.tokens.length) {
+        const token = next(p);
+        if (token.value === "[" || token.value === "{") {
+            depth += 1;
+        } else if (token.value === "]" || token.value === "}") {
+            depth -= 1;
+        } else if (depth === 1 && token.value === "default" && peek(p)?.value === "=") {
+            next(p);
+            const value = next(p);
+            options.default =
+                value.kind === "number"
+                    ? Number(value.value)
+                    : value.value === "true"
+                      ? true
+                      : value.value === "false"
+                        ? false
+                        : value.value;
+        }
     }
-  }
 
-  return options;
+    return options;
 }
 
 function parseField(p: P, scope: string, description?: string): FieldNode | undefined {
-  let repeated = false;
-  let optional = false;
-  let required = false;
+    let repeated = false;
+    let optional = false;
+    let required = false;
 
-  for (;;) {
-    if (accept(p, 'repeated')) {
-      repeated = true;
-      continue;
+    for (;;) {
+        if (accept(p, "repeated")) {
+            repeated = true;
+            continue;
+        }
+        if (accept(p, "optional")) {
+            optional = true;
+            continue;
+        }
+        if (accept(p, "required")) {
+            required = true;
+            continue;
+        }
+        break;
     }
-    if (accept(p, 'optional')) {
-      optional = true;
-      continue;
-    }
-    if (accept(p, 'required')) {
-      required = true;
-      continue;
-    }
-    break;
-  }
 
-  if (peek(p)?.value === 'group') {
-    next(p);
+    if (peek(p)?.value === "group") {
+        next(p);
+        const name = expectName(p);
+        expect(p, "=");
+        expectInteger(p);
+        skipBlock(p);
+        diagnose(p.ctx, `${scope}.${name}`, "group", "dropped proto2 group; declare it as a nested message instead");
+        return undefined;
+    }
+
+    let map: FieldNode["map"] | undefined;
+    let type: string;
+    if (peek(p)?.value === "map" && p.tokens[p.index + 1]?.value === "<") {
+        next(p);
+        expect(p, "<");
+        const key = expectName(p);
+        expect(p, ",");
+        const value = expectName(p);
+        expect(p, ">");
+        map = { key, value };
+        type = value;
+    } else {
+        type = expectName(p);
+    }
+
     const name = expectName(p);
-    expect(p, '=');
-    expectInteger(p);
-    skipBlock(p);
-    diagnose(
-      p.ctx,
-      `${scope}.${name}`,
-      'group',
-      'dropped proto2 group; declare it as a nested message instead'
-    );
-    return undefined;
-  }
+    expect(p, "=");
+    const number = expectInteger(p);
+    const _pointer = `${scope}.${name}`;
+    const options = accept(p, "[") ? parseFieldOptions(p) : {};
+    expect(p, ";");
 
-  let map: FieldNode['map'] | undefined;
-  let type: string;
-  if (peek(p)?.value === 'map' && p.tokens[p.index + 1]?.value === '<') {
-    next(p);
-    expect(p, '<');
-    const key = expectName(p);
-    expect(p, ',');
-    const value = expectName(p);
-    expect(p, '>');
-    map = { key, value };
-    type = value;
-  } else {
-    type = expectName(p);
-  }
-
-  const name = expectName(p);
-  expect(p, '=');
-  const number = expectInteger(p);
-  const pointer = `${scope}.${name}`;
-  const options = accept(p, '[') ? parseFieldOptions(p) : {};
-  expect(p, ';');
-
-  // proto2's `required` is presence the other way round, which is what
-  // `optional: false` already means to every generator downstream.
-  const field: FieldNode = {
-    kind: 'field',
-    name,
-    type,
-    number,
-    repeated,
-    optional: optional && !required,
-  };
-  if (map) {
-    field.map = map;
-  }
-  if (description) {
-    field.description = description;
-  }
-  if (options.default !== undefined) {
-    field.default = options.default;
-  }
-  return field;
+    // proto2's `required` is presence the other way round, which is what
+    // `optional: false` already means to every generator downstream.
+    const field: FieldNode = {
+        kind: "field",
+        name,
+        type,
+        number,
+        repeated,
+        optional: optional && !required,
+    };
+    if (map) {
+        field.map = map;
+    }
+    if (description) {
+        field.description = description;
+    }
+    if (options.default !== undefined) {
+        field.default = options.default;
+    }
+    return field;
 }
 
 function parseOneof(p: P, scope: string, description?: string): OneofNode {
-  const name = expectName(p);
-  const node: OneofNode = { kind: 'oneof', name, fields: [] };
-  if (description) {
-    node.description = description;
-  }
+    const name = expectName(p);
+    const node: OneofNode = { kind: "oneof", name, fields: [] };
+    if (description) {
+        node.description = description;
+    }
 
-  expect(p, '{');
-  while (!accept(p, '}')) {
-    const token = peek(p)!;
-    if (accept(p, ';')) {
-      continue;
+    expect(p, "{");
+    while (!accept(p, "}")) {
+        const token = peek(p)!;
+        if (accept(p, ";")) {
+            continue;
+        }
+        if (token.value === "option") {
+            next(p);
+            skipOption(p);
+            continue;
+        }
+        const field = parseField(p, scope, token.comment);
+        if (field) {
+            node.fields.push(field);
+        }
     }
-    if (token.value === 'option') {
-      next(p);
-      skipOption(p);
-      continue;
-    }
-    const field = parseField(p, scope, token.comment);
-    if (field) {
-      node.fields.push(field);
-    }
-  }
-  return node;
+    return node;
 }
 
 function parseEnum(p: P, scope: string, description?: string): EnumNode {
-  const name = expectName(p);
-  const node: EnumNode = { name, values: [] };
-  if (description) {
-    node.description = description;
-  }
-  const fqn = scope ? `${scope}.${name}` : name;
+    const name = expectName(p);
+    const node: EnumNode = { name, values: [] };
+    if (description) {
+        node.description = description;
+    }
+    const fqn = scope ? `${scope}.${name}` : name;
 
-  expect(p, '{');
-  while (!accept(p, '}')) {
-    const token = peek(p)!;
-    if (accept(p, ';')) {
-      continue;
+    expect(p, "{");
+    while (!accept(p, "}")) {
+        const token = peek(p)!;
+        if (accept(p, ";")) {
+            continue;
+        }
+        if (token.value === "option") {
+            next(p);
+            skipOption(p);
+            continue;
+        }
+        if (token.value === "reserved") {
+            next(p);
+            skipStatement(p);
+            diagnose(
+                p.ctx,
+                fqn,
+                "reserved",
+                "dropped 'reserved'; the IR records the names a message has, not the ones it may not have",
+            );
+            continue;
+        }
+        // A member comment has nowhere to live: `EnumMemberIR` is a name and a
+        // value, by design, so it is read and discarded rather than stored.
+        const valueName = expectName(p);
+        expect(p, "=");
+        const value = expectInteger(p);
+        // An enum value's options have no slot in `EnumMemberIR`; they are consumed
+        // so the parser stays in step, and dropped.
+        if (accept(p, "[")) {
+            parseFieldOptions(p);
+        }
+        expect(p, ";");
+        node.values.push({ name: valueName, value });
     }
-    if (token.value === 'option') {
-      next(p);
-      skipOption(p);
-      continue;
-    }
-    if (token.value === 'reserved') {
-      next(p);
-      skipStatement(p);
-      diagnose(
-        p.ctx,
-        fqn,
-        'reserved',
-        "dropped 'reserved'; the IR records the names a message has, not the ones it may not have"
-      );
-      continue;
-    }
-    // A member comment has nowhere to live: `EnumMemberIR` is a name and a
-    // value, by design, so it is read and discarded rather than stored.
-    const valueName = expectName(p);
-    expect(p, '=');
-    const value = expectInteger(p);
-    // An enum value's options have no slot in `EnumMemberIR`; they are consumed
-    // so the parser stays in step, and dropped.
-    if (accept(p, '[')) {
-      parseFieldOptions(p);
-    }
-    expect(p, ';');
-    node.values.push({ name: valueName, value });
-  }
-  return node;
+    return node;
 }
 
 function parseMessage(p: P, scope: string, description?: string): MessageNode {
-  const name = expectName(p);
-  const node: MessageNode = { name, members: [], messages: [], enums: [] };
-  if (description) {
-    node.description = description;
-  }
-  const fqn = scope ? `${scope}.${name}` : name;
-
-  expect(p, '{');
-  while (!accept(p, '}')) {
-    const token = peek(p)!;
-    if (accept(p, ';')) {
-      continue;
+    const name = expectName(p);
+    const node: MessageNode = { name, members: [], messages: [], enums: [] };
+    if (description) {
+        node.description = description;
     }
+    const fqn = scope ? `${scope}.${name}` : name;
 
-    switch (token.value) {
-      case 'message':
-        next(p);
-        node.messages.push(parseMessage(p, fqn, token.comment));
-        continue;
-      case 'enum':
-        next(p);
-        node.enums.push(parseEnum(p, fqn, token.comment));
-        continue;
-      case 'oneof':
-        next(p);
-        node.members.push(parseOneof(p, fqn, token.comment));
-        continue;
-      case 'option':
-        next(p);
-        skipOption(p);
-        continue;
-      case 'extend':
-        next(p);
-        skipBlock(p);
-        diagnose(
-          p.ctx,
-          fqn,
-          'extend',
-          "dropped 'extend'; the IR has no slot for a field added from outside its message"
-        );
-        continue;
-      case 'reserved':
-      case 'extensions':
-        next(p);
-        skipStatement(p);
-        diagnose(
-          p.ctx,
-          fqn,
-          token.value,
-          `dropped '${token.value}'; the IR records the fields a message has, not the numbers it may not use`
-        );
-        continue;
-      default: {
-        const field = parseField(p, fqn, token.comment);
-        if (field) {
-          node.members.push(field);
+    expect(p, "{");
+    while (!accept(p, "}")) {
+        const token = peek(p)!;
+        if (accept(p, ";")) {
+            continue;
         }
-        continue;
-      }
+
+        switch (token.value) {
+            case "message":
+                next(p);
+                node.messages.push(parseMessage(p, fqn, token.comment));
+                continue;
+            case "enum":
+                next(p);
+                node.enums.push(parseEnum(p, fqn, token.comment));
+                continue;
+            case "oneof":
+                next(p);
+                node.members.push(parseOneof(p, fqn, token.comment));
+                continue;
+            case "option":
+                next(p);
+                skipOption(p);
+                continue;
+            case "extend":
+                next(p);
+                skipBlock(p);
+                diagnose(
+                    p.ctx,
+                    fqn,
+                    "extend",
+                    "dropped 'extend'; the IR has no slot for a field added from outside its message",
+                );
+                continue;
+            case "reserved":
+            case "extensions":
+                next(p);
+                skipStatement(p);
+                diagnose(
+                    p.ctx,
+                    fqn,
+                    token.value,
+                    `dropped '${token.value}'; the IR records the fields a message has, not the numbers it may not use`,
+                );
+                continue;
+            default: {
+                const field = parseField(p, fqn, token.comment);
+                if (field) {
+                    node.members.push(field);
+                }
+                continue;
+            }
+        }
     }
-  }
-  return node;
+    return node;
 }
 
 function parseRpc(p: P, scope: string, description?: string): RpcNode {
-  const name = expectName(p);
-  expect(p, '(');
-  const requestStream = accept(p, 'stream');
-  const requestType = expectName(p);
-  expect(p, ')');
-  expect(p, 'returns');
-  expect(p, '(');
-  const responseStream = accept(p, 'stream');
-  const responseType = expectName(p);
-  expect(p, ')');
+    const name = expectName(p);
+    expect(p, "(");
+    const requestStream = accept(p, "stream");
+    const requestType = expectName(p);
+    expect(p, ")");
+    expect(p, "returns");
+    expect(p, "(");
+    const responseStream = accept(p, "stream");
+    const responseType = expectName(p);
+    expect(p, ")");
 
-  if (peek(p)?.value === '{') {
-    skipBlock(p);
-  } else {
-    expect(p, ';');
-  }
+    if (peek(p)?.value === "{") {
+        skipBlock(p);
+    } else {
+        expect(p, ";");
+    }
 
-  const rpc: RpcNode = {
-    name,
-    requestType,
-    requestStream,
-    responseType,
-    responseStream,
-  };
-  if (description) {
-    rpc.description = description;
-  }
-  void scope;
-  return rpc;
+    const rpc: RpcNode = {
+        name,
+        requestType,
+        requestStream,
+        responseType,
+        responseStream,
+    };
+    if (description) {
+        rpc.description = description;
+    }
+    void scope;
+    return rpc;
 }
 
 function parseService(p: P, scope: string, description?: string): ServiceNode {
-  const name = expectName(p);
-  const node: ServiceNode = { name, rpcs: [] };
-  if (description) {
-    node.description = description;
-  }
-  const fqn = scope ? `${scope}.${name}` : name;
+    const name = expectName(p);
+    const node: ServiceNode = { name, rpcs: [] };
+    if (description) {
+        node.description = description;
+    }
+    const fqn = scope ? `${scope}.${name}` : name;
 
-  expect(p, '{');
-  while (!accept(p, '}')) {
-    const token = peek(p)!;
-    if (accept(p, ';')) {
-      continue;
+    expect(p, "{");
+    while (!accept(p, "}")) {
+        const token = peek(p)!;
+        if (accept(p, ";")) {
+            continue;
+        }
+        if (token.value === "option") {
+            next(p);
+            skipOption(p);
+            continue;
+        }
+        if (token.value === "rpc") {
+            next(p);
+            node.rpcs.push(parseRpc(p, fqn, token.comment));
+            continue;
+        }
+        throw new Error(`[wiz] unexpected '${token.value}' in service '${fqn}' at ${p.path}:${token.line}`);
     }
-    if (token.value === 'option') {
-      next(p);
-      skipOption(p);
-      continue;
-    }
-    if (token.value === 'rpc') {
-      next(p);
-      node.rpcs.push(parseRpc(p, fqn, token.comment));
-      continue;
-    }
-    throw new Error(
-      `[wiz] unexpected '${token.value}' in service '${fqn}' at ${p.path}:${token.line}`
-    );
-  }
-  return node;
+    return node;
 }
 
 function parseProtoFile(ctx: Ctx, path: string, text: string): ProtoFile {
-  const file: ProtoFile = {
-    imports: [],
-    messages: [],
-    enums: [],
-    services: [],
-  };
-  const p: P = { tokens: tokenize(text, path), index: 0, path, ctx, scope: '' };
+    const file: ProtoFile = {
+        imports: [],
+        messages: [],
+        enums: [],
+        services: [],
+    };
+    const p: P = { tokens: tokenize(text, path), index: 0, path, ctx, scope: "" };
 
-  while (p.index < p.tokens.length) {
-    const token = peek(p)!;
-    if (accept(p, ';')) {
-      continue;
-    }
-
-    switch (token.value) {
-      case 'syntax': {
-        next(p);
-        expect(p, '=');
-        file.syntax = next(p).value;
-        expect(p, ';');
-        continue;
-      }
-      case 'package': {
-        next(p);
-        file.package = expectName(p);
-        p.scope = file.package;
-        expect(p, ';');
-        continue;
-      }
-      case 'import': {
-        next(p);
-        // `public` and `weak` change how a descriptor re-exports an import,
-        // which only matters to a compiler that emits descriptors.
-        accept(p, 'public');
-        accept(p, 'weak');
-        const target = next(p);
-        if (target.kind !== 'string') {
-          throw new Error(
-            `[wiz] expected an import path but found '${target.value}' at ${path}:${target.line}`
-          );
+    while (p.index < p.tokens.length) {
+        const token = peek(p)!;
+        if (accept(p, ";")) {
+            continue;
         }
-        file.imports.push(target.value);
-        expect(p, ';');
-        continue;
-      }
-      case 'option':
-        next(p);
-        skipOption(p);
-        continue;
-      case 'message':
-        next(p);
-        file.messages.push(parseMessage(p, p.scope, token.comment));
-        continue;
-      case 'enum':
-        next(p);
-        file.enums.push(parseEnum(p, p.scope, token.comment));
-        continue;
-      case 'service':
-        next(p);
-        file.services.push(parseService(p, p.scope, token.comment));
-        continue;
-      case 'extend':
-        next(p);
-        skipBlock(p);
-        diagnose(
-          ctx,
-          p.scope || path,
-          'extend',
-          "dropped 'extend'; the IR has no slot for a field added from outside its message"
-        );
-        continue;
-      default:
-        throw new Error(`[wiz] unexpected '${token.value}' at ${path}:${token.line}`);
+
+        switch (token.value) {
+            case "syntax": {
+                next(p);
+                expect(p, "=");
+                file.syntax = next(p).value;
+                expect(p, ";");
+                continue;
+            }
+            case "package": {
+                next(p);
+                file.package = expectName(p);
+                p.scope = file.package;
+                expect(p, ";");
+                continue;
+            }
+            case "import": {
+                next(p);
+                // `public` and `weak` change how a descriptor re-exports an import,
+                // which only matters to a compiler that emits descriptors.
+                accept(p, "public");
+                accept(p, "weak");
+                const target = next(p);
+                if (target.kind !== "string") {
+                    throw new Error(
+                        `[wiz] expected an import path but found '${target.value}' at ${path}:${target.line}`,
+                    );
+                }
+                file.imports.push(target.value);
+                expect(p, ";");
+                continue;
+            }
+            case "option":
+                next(p);
+                skipOption(p);
+                continue;
+            case "message":
+                next(p);
+                file.messages.push(parseMessage(p, p.scope, token.comment));
+                continue;
+            case "enum":
+                next(p);
+                file.enums.push(parseEnum(p, p.scope, token.comment));
+                continue;
+            case "service":
+                next(p);
+                file.services.push(parseService(p, p.scope, token.comment));
+                continue;
+            case "extend":
+                next(p);
+                skipBlock(p);
+                diagnose(
+                    ctx,
+                    p.scope || path,
+                    "extend",
+                    "dropped 'extend'; the IR has no slot for a field added from outside its message",
+                );
+                continue;
+            default:
+                throw new Error(`[wiz] unexpected '${token.value}' at ${path}:${token.line}`);
+        }
     }
-  }
 
-  if (file.syntax !== 'proto3') {
-    diagnose(
-      ctx,
-      file.package || path,
-      'syntax',
-      `expected syntax 'proto3' but found '${file.syntax ?? 'none'}'; parsed best-effort as proto3`
-    );
-  }
+    if (file.syntax !== "proto3") {
+        diagnose(
+            ctx,
+            file.package || path,
+            "syntax",
+            `expected syntax 'proto3' but found '${file.syntax ?? "none"}'; parsed best-effort as proto3`,
+        );
+    }
 
-  return file;
+    return file;
 }
 
 /* -------------------------------------------------------------- resolution */
 
 interface ProtoScalar {
-  type: PrimitiveTypeIR['type'];
-  /** The width, where protobuf promises less than the JS type it lands in. */
-  format?: string;
+    type: PrimitiveTypeIR["type"];
+    /** The width, where protobuf promises less than the JS type it lands in. */
+    format?: string;
 }
 
 /**
@@ -793,21 +775,21 @@ interface ProtoScalar {
  * The 64-bit widths land on `bigint` because a `number` cannot hold them.
  */
 const SCALARS: Record<string, ProtoScalar> = {
-  double: { type: 'number' },
-  float: { type: 'number', format: 'float' },
-  int32: { type: 'number', format: 'int32' },
-  uint32: { type: 'number', format: 'uint32' },
-  sint32: { type: 'number', format: 'sint32' },
-  fixed32: { type: 'number', format: 'fixed32' },
-  sfixed32: { type: 'number', format: 'sfixed32' },
-  int64: { type: 'bigint', format: 'int64' },
-  uint64: { type: 'bigint', format: 'uint64' },
-  sint64: { type: 'bigint', format: 'sint64' },
-  fixed64: { type: 'bigint', format: 'fixed64' },
-  sfixed64: { type: 'bigint', format: 'sfixed64' },
-  bool: { type: 'boolean' },
-  string: { type: 'string' },
-  bytes: { type: 'bytes' },
+    double: { type: "number" },
+    float: { type: "number", format: "float" },
+    int32: { type: "number", format: "int32" },
+    uint32: { type: "number", format: "uint32" },
+    sint32: { type: "number", format: "sint32" },
+    fixed32: { type: "number", format: "fixed32" },
+    sfixed32: { type: "number", format: "sfixed32" },
+    int64: { type: "bigint", format: "int64" },
+    uint64: { type: "bigint", format: "uint64" },
+    sint64: { type: "bigint", format: "sint64" },
+    fixed64: { type: "bigint", format: "fixed64" },
+    sfixed64: { type: "bigint", format: "sfixed64" },
+    bool: { type: "boolean" },
+    string: { type: "string" },
+    bytes: { type: "bytes" },
 };
 
 /**
@@ -823,89 +805,82 @@ const SCALARS: Record<string, ProtoScalar> = {
  * in the runtime rather than in their fields, so they stay diagnosed.
  */
 const WELL_KNOWN_SOURCES: Record<string, string> = {
-  'google.protobuf.Timestamp': 'int64 seconds = 1; int32 nanos = 2;',
-  'google.protobuf.Duration': 'int64 seconds = 1; int32 nanos = 2;',
-  'google.protobuf.Empty': '',
-  'google.protobuf.FieldMask': 'repeated string paths = 1;',
-  'google.protobuf.DoubleValue': 'double value = 1;',
-  'google.protobuf.FloatValue': 'float value = 1;',
-  'google.protobuf.Int64Value': 'int64 value = 1;',
-  'google.protobuf.UInt64Value': 'uint64 value = 1;',
-  'google.protobuf.Int32Value': 'int32 value = 1;',
-  'google.protobuf.UInt32Value': 'uint32 value = 1;',
-  'google.protobuf.BoolValue': 'bool value = 1;',
-  'google.protobuf.StringValue': 'string value = 1;',
-  'google.protobuf.BytesValue': 'bytes value = 1;',
+    "google.protobuf.Timestamp": "int64 seconds = 1; int32 nanos = 2;",
+    "google.protobuf.Duration": "int64 seconds = 1; int32 nanos = 2;",
+    "google.protobuf.Empty": "",
+    "google.protobuf.FieldMask": "repeated string paths = 1;",
+    "google.protobuf.DoubleValue": "double value = 1;",
+    "google.protobuf.FloatValue": "float value = 1;",
+    "google.protobuf.Int64Value": "int64 value = 1;",
+    "google.protobuf.UInt64Value": "uint64 value = 1;",
+    "google.protobuf.Int32Value": "int32 value = 1;",
+    "google.protobuf.UInt32Value": "uint32 value = 1;",
+    "google.protobuf.BoolValue": "bool value = 1;",
+    "google.protobuf.StringValue": "string value = 1;",
+    "google.protobuf.BytesValue": "bytes value = 1;",
 };
 
 /** Imports satisfied by {@link WELL_KNOWN_SOURCES} rather than from disk. */
-const WELL_KNOWN_PREFIX = 'google/protobuf/';
+const WELL_KNOWN_PREFIX = "google/protobuf/";
 
-type Declaration =
-  | { kind: 'message'; fqn: string; node: MessageNode }
-  | { kind: 'enum'; fqn: string; node: EnumNode };
+type Declaration = { kind: "message"; fqn: string; node: MessageNode } | { kind: "enum"; fqn: string; node: EnumNode };
 
 interface Unit {
-  path: string;
-  file: ProtoFile;
+    path: string;
+    file: ProtoFile;
 }
 
 interface Ctx {
-  /** Every declaration of every parsed unit, by fully qualified name. */
-  declarations: Map<string, Declaration>;
-  types: Map<string, TypeIR>;
-  /** Names whose IR is mid-construction, which is what makes a `ref` needed. */
-  building: Set<string>;
-  diagnostics: ApiDiagnostic[];
-  strict: boolean;
-  /** Per-extraction node id counter, so two runs produce equal IR. */
-  ids: number;
+    /** Every declaration of every parsed unit, by fully qualified name. */
+    declarations: Map<string, Declaration>;
+    types: Map<string, TypeIR>;
+    /** Names whose IR is mid-construction, which is what makes a `ref` needed. */
+    building: Set<string>;
+    diagnostics: ApiDiagnostic[];
+    strict: boolean;
+    /** Per-extraction node id counter, so two runs produce equal IR. */
+    ids: number;
 }
 
 /** Ids only need to be unique within one extraction; `p_` marks the origin. */
 function nextId(ctx: Ctx): string {
-  return `p_${++ctx.ids}`;
+    return `p_${++ctx.ids}`;
 }
 
 function diagnose(ctx: Ctx, pointer: string, keyword: string, message: string): void {
-  if (ctx.strict) {
-    throw new Error(`[wiz] ${message} at ${pointer}`);
-  }
-  ctx.diagnostics.push({ pointer, keyword, message });
+    if (ctx.strict) {
+        throw new Error(`[wiz] ${message} at ${pointer}`);
+    }
+    ctx.diagnostics.push({ pointer, keyword, message });
 }
 
-function registerDeclarations(
-  ctx: Ctx,
-  scope: string,
-  messages: MessageNode[],
-  enums: EnumNode[]
-): void {
-  const register = (declaration: Declaration): boolean => {
-    const existing = ctx.declarations.get(declaration.fqn);
-    if (existing) {
-      diagnose(
-        ctx,
-        declaration.fqn,
-        'duplicate',
-        `ignored a second declaration of '${declaration.fqn}'; the first one wins`
-      );
-      return false;
-    }
-    ctx.declarations.set(declaration.fqn, declaration);
-    return true;
-  };
+function registerDeclarations(ctx: Ctx, scope: string, messages: MessageNode[], enums: EnumNode[]): void {
+    const register = (declaration: Declaration): boolean => {
+        const existing = ctx.declarations.get(declaration.fqn);
+        if (existing) {
+            diagnose(
+                ctx,
+                declaration.fqn,
+                "duplicate",
+                `ignored a second declaration of '${declaration.fqn}'; the first one wins`,
+            );
+            return false;
+        }
+        ctx.declarations.set(declaration.fqn, declaration);
+        return true;
+    };
 
-  // Outer before inner, so `types` reads top-down for a human looking at it.
-  for (const node of messages) {
-    const fqn = scope ? `${scope}.${node.name}` : node.name;
-    if (!register({ kind: 'message', fqn, node })) {
-      continue;
+    // Outer before inner, so `types` reads top-down for a human looking at it.
+    for (const node of messages) {
+        const fqn = scope ? `${scope}.${node.name}` : node.name;
+        if (!register({ kind: "message", fqn, node })) {
+            continue;
+        }
+        registerDeclarations(ctx, fqn, node.messages, node.enums);
     }
-    registerDeclarations(ctx, fqn, node.messages, node.enums);
-  }
-  for (const node of enums) {
-    register({ kind: 'enum', fqn: scope ? `${scope}.${node.name}` : node.name, node });
-  }
+    for (const node of enums) {
+        register({ kind: "enum", fqn: scope ? `${scope}.${node.name}` : node.name, node });
+    }
 }
 
 /**
@@ -917,24 +892,24 @@ function registerDeclarations(
  * document wrote itself.
  */
 function wellKnownDeclaration(ctx: Ctx, qualified: string): Declaration | undefined {
-  const existing = ctx.declarations.get(qualified);
-  if (existing) {
-    return existing;
-  }
+    const existing = ctx.declarations.get(qualified);
+    if (existing) {
+        return existing;
+    }
 
-  const body = WELL_KNOWN_SOURCES[qualified];
-  if (body === undefined) {
-    return undefined;
-  }
+    const body = WELL_KNOWN_SOURCES[qualified];
+    if (body === undefined) {
+        return undefined;
+    }
 
-  const simple = qualified.slice('google.protobuf.'.length);
-  const file = parseProtoFile(
-    ctx,
-    `<${qualified}>`,
-    `syntax = "proto3";\npackage google.protobuf;\nmessage ${simple} { ${body} }`
-  );
-  registerDeclarations(ctx, 'google.protobuf', file.messages, file.enums);
-  return ctx.declarations.get(qualified);
+    const simple = qualified.slice("google.protobuf.".length);
+    const file = parseProtoFile(
+        ctx,
+        `<${qualified}>`,
+        `syntax = "proto3";\npackage google.protobuf;\nmessage ${simple} { ${body} }`,
+    );
+    registerDeclarations(ctx, "google.protobuf", file.messages, file.enums);
+    return ctx.declarations.get(qualified);
 }
 /**
  * proto scoping: an unqualified name is looked up in the innermost enclosing
@@ -942,26 +917,26 @@ function wellKnownDeclaration(ctx: Ctx, qualified: string): Declaration | undefi
  * `pkg.Outer.Inner` before `pkg.Inner`. A leading dot skips the search.
  */
 function resolveDeclaration(ctx: Ctx, name: string, scope: string): Declaration | undefined {
-  if (name.startsWith('.')) {
-    return ctx.declarations.get(name.slice(1));
-  }
+    if (name.startsWith(".")) {
+        return ctx.declarations.get(name.slice(1));
+    }
 
-  let prefix = scope;
-  for (;;) {
-    const found = ctx.declarations.get(prefix ? `${prefix}.${name}` : name);
-    if (found) {
-      return found;
+    let prefix = scope;
+    for (;;) {
+        const found = ctx.declarations.get(prefix ? `${prefix}.${name}` : name);
+        if (found) {
+            return found;
+        }
+        if (!prefix) {
+            return undefined;
+        }
+        const cut = prefix.lastIndexOf(".");
+        prefix = cut === -1 ? "" : prefix.slice(0, cut);
     }
-    if (!prefix) {
-      return undefined;
-    }
-    const cut = prefix.lastIndexOf('.');
-    prefix = cut === -1 ? '' : prefix.slice(0, cut);
-  }
 }
 
 function unknownIR(ctx: Ctx): PrimitiveTypeIR {
-  return { id: nextId(ctx), kind: 'primitive', type: 'unknown' };
+    return { id: nextId(ctx), kind: "primitive", type: "unknown" };
 }
 
 /**
@@ -970,44 +945,42 @@ function unknownIR(ctx: Ctx): PrimitiveTypeIR {
  * recurse forever, and that is the one case a `ref` exists for.
  */
 function declarationIR(ctx: Ctx, declaration: Declaration): TypeIR {
-  const built = ctx.types.get(declaration.fqn);
-  if (built) {
-    return built;
-  }
-  if (ctx.building.has(declaration.fqn)) {
-    return {
-      id: nextId(ctx),
-      kind: 'ref',
-      targetId: declaration.fqn,
-      name: declaration.fqn,
-    };
-  }
+    const built = ctx.types.get(declaration.fqn);
+    if (built) {
+        return built;
+    }
+    if (ctx.building.has(declaration.fqn)) {
+        return {
+            id: nextId(ctx),
+            kind: "ref",
+            targetId: declaration.fqn,
+            name: declaration.fqn,
+        };
+    }
 
-  ctx.building.add(declaration.fqn);
-  const ir =
-    declaration.kind === 'enum'
-      ? enumIR(ctx, declaration)
-      : messageIR(ctx, declaration.fqn, declaration.node);
-  ctx.building.delete(declaration.fqn);
-  ctx.types.set(declaration.fqn, ir);
-  return ir;
+    ctx.building.add(declaration.fqn);
+    const ir =
+        declaration.kind === "enum" ? enumIR(ctx, declaration) : messageIR(ctx, declaration.fqn, declaration.node);
+    ctx.building.delete(declaration.fqn);
+    ctx.types.set(declaration.fqn, ir);
+    return ir;
 }
 
 function enumIR(ctx: Ctx, declaration: { fqn: string; node: EnumNode }): TypeIR {
-  const members: EnumMemberIR[] = declaration.node.values.map((value) => ({
-    name: value.name,
-    value: value.value,
-  }));
-  const ir: TypeIR = {
-    id: nextId(ctx),
-    name: declaration.fqn,
-    kind: 'enum',
-    members,
-  };
-  if (declaration.node.description) {
-    ir.description = declaration.node.description;
-  }
-  return ir;
+    const members: EnumMemberIR[] = declaration.node.values.map((value) => ({
+        name: value.name,
+        value: value.value,
+    }));
+    const ir: TypeIR = {
+        id: nextId(ctx),
+        name: declaration.fqn,
+        kind: "enum",
+        members,
+    };
+    if (declaration.node.description) {
+        ir.description = declaration.node.description;
+    }
+    return ir;
 }
 
 /**
@@ -1016,114 +989,112 @@ function enumIR(ctx: Ctx, declaration: { fqn: string; node: EnumNode }): TypeIR 
  * resolves in.
  */
 function fieldTypeIR(ctx: Ctx, field: FieldNode, scope: string, pointer: string): TypeIR {
-  if (field.map) {
-    return {
-      id: nextId(ctx),
-      kind: 'record',
-      keyType: singularIR(ctx, field.map.key, scope, pointer),
-      valueType: singularIR(ctx, field.map.value, scope, pointer),
-    };
-  }
-  const singular = singularIR(ctx, field.type, scope, pointer);
-  return field.repeated ? { id: nextId(ctx), kind: 'array', element: singular } : singular;
+    if (field.map) {
+        return {
+            id: nextId(ctx),
+            kind: "record",
+            keyType: singularIR(ctx, field.map.key, scope, pointer),
+            valueType: singularIR(ctx, field.map.value, scope, pointer),
+        };
+    }
+    const singular = singularIR(ctx, field.type, scope, pointer);
+    return field.repeated ? { id: nextId(ctx), kind: "array", element: singular } : singular;
 }
 
 function singularIR(ctx: Ctx, name: string, scope: string, pointer: string): TypeIR {
-  const scalar = SCALARS[name];
-  if (scalar) {
-    const ir: PrimitiveTypeIR = {
-      id: nextId(ctx),
-      kind: 'primitive',
-      type: scalar.type,
-    };
-    if (scalar.format) {
-      ir.constraints = [{ kind: 'format', value: scalar.format }];
+    const scalar = SCALARS[name];
+    if (scalar) {
+        const ir: PrimitiveTypeIR = {
+            id: nextId(ctx),
+            kind: "primitive",
+            type: scalar.type,
+        };
+        if (scalar.format) {
+            ir.constraints = [{ kind: "format", value: scalar.format }];
+        }
+        return ir;
     }
-    return ir;
-  }
 
-  // A user declaration wins over a well-known name, so a package that declares
-  // its own `Timestamp` keeps it.
-  const declaration = resolveDeclaration(ctx, name, scope);
-  if (declaration) {
-    return declarationIR(ctx, declaration);
-  }
+    // A user declaration wins over a well-known name, so a package that declares
+    // its own `Timestamp` keeps it.
+    const declaration = resolveDeclaration(ctx, name, scope);
+    if (declaration) {
+        return declarationIR(ctx, declaration);
+    }
 
-  const qualified = name.startsWith('.') ? name.slice(1) : name;
-  const wellKnown = wellKnownDeclaration(ctx, qualified);
-  if (wellKnown) {
-    return declarationIR(ctx, wellKnown);
-  }
+    const qualified = name.startsWith(".") ? name.slice(1) : name;
+    const wellKnown = wellKnownDeclaration(ctx, qualified);
+    if (wellKnown) {
+        return declarationIR(ctx, wellKnown);
+    }
 
-  diagnose(
-    ctx,
-    pointer,
-    'type',
-    qualified.startsWith('google.protobuf.')
-      ? `unmapped well-known type '${qualified}'; the field is carried as 'unknown'`
-      : `unresolved type '${name}'; the field is carried as 'unknown'`
-  );
-  return unknownIR(ctx);
+    diagnose(
+        ctx,
+        pointer,
+        "type",
+        qualified.startsWith("google.protobuf.")
+            ? `unmapped well-known type '${qualified}'; the field is carried as 'unknown'`
+            : `unresolved type '${name}'; the field is carried as 'unknown'`,
+    );
+    return unknownIR(ctx);
 }
 
 function messageIR(ctx: Ctx, fqn: string, node: MessageNode): TypeIR {
-  const properties: PropertyIR[] = [];
+    const properties: PropertyIR[] = [];
 
-  for (const member of node.members) {
-    if (member.kind === 'field') {
-      const property: PropertyIR = {
-        name: member.name,
-        type: fieldTypeIR(ctx, member, fqn, `${fqn}.${member.name}`),
-        optional: member.optional,
-        readonly: false,
-        fieldNumber: member.number,
-      };
-      if (member.description) {
-        property.description = member.description;
-      }
-      if (member.default !== undefined) {
-        property.default = member.default;
-      }
-      properties.push(property);
-      continue;
+    for (const member of node.members) {
+        if (member.kind === "field") {
+            const property: PropertyIR = {
+                name: member.name,
+                type: fieldTypeIR(ctx, member, fqn, `${fqn}.${member.name}`),
+                optional: member.optional,
+                readonly: false,
+                fieldNumber: member.number,
+            };
+            if (member.description) {
+                property.description = member.description;
+            }
+            if (member.default !== undefined) {
+                property.default = member.default;
+            }
+            properties.push(property);
+            continue;
+        }
+
+        // A oneof is one property holding one of several shapes, and the numbers
+        // travel positionally beside them: exactly what `NumberedUnion` produces on
+        // the TypeScript side, so the protobuf generator reads both the same way.
+        // The member *names* have no slot in a union and are dropped, as they are
+        // for a `NumberedUnion`.
+        const union: UnionTypeIR = {
+            id: nextId(ctx),
+            kind: "union",
+            types: member.fields.map((field) => fieldTypeIR(ctx, field, fqn, `${fqn}.${member.name}.${field.name}`)),
+            fieldNumbers: member.fields.map((field) => field.number),
+        };
+        const property: PropertyIR = {
+            name: member.name,
+            type: union,
+            // At most one variant is set, and none has to be.
+            optional: true,
+            readonly: false,
+        };
+        if (member.description) {
+            property.description = member.description;
+        }
+        properties.push(property);
     }
 
-    // A oneof is one property holding one of several shapes, and the numbers
-    // travel positionally beside them: exactly what `NumberedUnion` produces on
-    // the TypeScript side, so the protobuf generator reads both the same way.
-    // The member *names* have no slot in a union and are dropped, as they are
-    // for a `NumberedUnion`.
-    const union: UnionTypeIR = {
-      id: nextId(ctx),
-      kind: 'union',
-      types: member.fields.map((field) =>
-        fieldTypeIR(ctx, field, fqn, `${fqn}.${member.name}.${field.name}`)
-      ),
-      fieldNumbers: member.fields.map((field) => field.number),
+    const ir: TypeIR = {
+        id: nextId(ctx),
+        name: fqn,
+        kind: "object",
+        properties,
     };
-    const property: PropertyIR = {
-      name: member.name,
-      type: union,
-      // At most one variant is set, and none has to be.
-      optional: true,
-      readonly: false,
-    };
-    if (member.description) {
-      property.description = member.description;
+    if (node.description) {
+        ir.description = node.description;
     }
-    properties.push(property);
-  }
-
-  const ir: TypeIR = {
-    id: nextId(ctx),
-    name: fqn,
-    kind: 'object',
-    properties,
-  };
-  if (node.description) {
-    ir.description = node.description;
-  }
-  return ir;
+    return ir;
 }
 
 /**
@@ -1131,157 +1102,150 @@ function messageIR(ctx: Ctx, fqn: string, node: MessageNode): TypeIR {
  * addressable on the wire, and neither is a name that never resolved.
  */
 function payloadIR(
-  ctx: Ctx,
-  name: string,
-  scope: string,
-  pointer: string,
-  side: 'request' | 'response',
-  streaming: boolean
+    ctx: Ctx,
+    name: string,
+    scope: string,
+    pointer: string,
+    side: "request" | "response",
+    streaming: boolean,
 ): TypeIR {
-  const declaration = resolveDeclaration(ctx, name, scope);
-  if (declaration?.kind === 'message') {
-    return declarationIR(ctx, declaration);
-  }
+    const declaration = resolveDeclaration(ctx, name, scope);
+    if (declaration?.kind === "message") {
+        return declarationIR(ctx, declaration);
+    }
 
-  const qualified = name.startsWith('.') ? name.slice(1) : name;
-  const stream = streaming ? 'streamed ' : '';
-  diagnose(
-    ctx,
-    pointer,
-    'rpc',
-    declaration
-      ? `${stream}${side} type '${name}' is an enum, not a message; the payload is carried as 'unknown'`
-      : qualified.startsWith('google.protobuf.')
-        ? `unmapped well-known ${stream}${side} type '${qualified}'; the payload is carried as 'unknown'`
-        : `unresolved ${stream}${side} type '${name}'; the payload is carried as 'unknown'`
-  );
-  return unknownIR(ctx);
+    const qualified = name.startsWith(".") ? name.slice(1) : name;
+    const stream = streaming ? "streamed " : "";
+    diagnose(
+        ctx,
+        pointer,
+        "rpc",
+        declaration
+            ? `${stream}${side} type '${name}' is an enum, not a message; the payload is carried as 'unknown'`
+            : qualified.startsWith("google.protobuf.")
+              ? `unmapped well-known ${stream}${side} type '${qualified}'; the payload is carried as 'unknown'`
+              : `unresolved ${stream}${side} type '${name}'; the payload is carried as 'unknown'`,
+    );
+    return unknownIR(ctx);
 }
 
 function buildService(ctx: Ctx, units: Unit[], entry: Unit): ServiceIR {
-  const service: ServiceIR = { kind: 'service', methods: [] };
-  // A proto file has no `info`: the package is the only identity on offer, and
-  // it is the entry file's, even when an import contributes rpcs of its own.
-  if (entry.file.package) {
-    service.name = entry.file.package;
-  }
-
-  for (const unit of units) {
-    const scope = unit.file.package ?? '';
-    for (const node of unit.file.services) {
-      const serviceFqn = scope ? `${scope}.${node.name}` : node.name;
-      for (const rpc of node.rpcs) {
-        const pointer = `${serviceFqn}.${rpc.name}`;
-        const method: GrpcServiceMethodIR = {
-          kind: 'serviceMethod',
-          protocol: 'grpc',
-          address: {
-            protocol: 'grpc',
-            ...(unit.file.package ? { package: unit.file.package } : {}),
-            service: node.name,
-            method: rpc.name,
-          },
-          request: {
-            protocol: 'grpc',
-            message: payloadIR(
-              ctx,
-              rpc.requestType,
-              serviceFqn,
-              pointer,
-              'request',
-              rpc.requestStream
-            ),
-            streaming: rpc.requestStream,
-          },
-          responses: [
-            {
-              protocol: 'grpc',
-              message: payloadIR(
-                ctx,
-                rpc.responseType,
-                serviceFqn,
-                pointer,
-                'response',
-                rpc.responseStream
-              ),
-              streaming: rpc.responseStream,
-            },
-          ],
-          // A proto rpc name is already the unique operation identifier the
-          // rest of the pipeline keys generated members on.
-          operationId: rpc.name,
-        };
-        if (rpc.description) {
-          method.description = rpc.description;
-        }
-        service.methods.push(method);
-      }
+    const service: ServiceIR = { kind: "service", methods: [] };
+    // A proto file has no `info`: the package is the only identity on offer, and
+    // it is the entry file's, even when an import contributes rpcs of its own.
+    if (entry.file.package) {
+        service.name = entry.file.package;
     }
-  }
 
-  return service;
+    for (const unit of units) {
+        const scope = unit.file.package ?? "";
+        for (const node of unit.file.services) {
+            const serviceFqn = scope ? `${scope}.${node.name}` : node.name;
+            for (const rpc of node.rpcs) {
+                const pointer = `${serviceFqn}.${rpc.name}`;
+                const method: GrpcServiceMethodIR = {
+                    kind: "serviceMethod",
+                    protocol: "grpc",
+                    address: {
+                        protocol: "grpc",
+                        ...(unit.file.package ? { package: unit.file.package } : {}),
+                        service: node.name,
+                        method: rpc.name,
+                    },
+                    request: {
+                        protocol: "grpc",
+                        message: payloadIR(ctx, rpc.requestType, serviceFqn, pointer, "request", rpc.requestStream),
+                        streaming: rpc.requestStream,
+                    },
+                    responses: [
+                        {
+                            protocol: "grpc",
+                            message: payloadIR(
+                                ctx,
+                                rpc.responseType,
+                                serviceFqn,
+                                pointer,
+                                "response",
+                                rpc.responseStream,
+                            ),
+                            streaming: rpc.responseStream,
+                        },
+                    ],
+                    // A proto rpc name is already the unique operation identifier the
+                    // rest of the pipeline keys generated members on.
+                    operationId: rpc.name,
+                };
+                if (rpc.description) {
+                    method.description = rpc.description;
+                }
+                service.methods.push(method);
+            }
+        }
+    }
+
+    return service;
 }
 
 function buildApi(ctx: Ctx, units: Unit[]): ApiIR {
-  for (const unit of units) {
-    registerDeclarations(ctx, unit.file.package ?? '', unit.file.messages, unit.file.enums);
-  }
+    for (const unit of units) {
+        registerDeclarations(ctx, unit.file.package ?? "", unit.file.messages, unit.file.enums);
+    }
 
-  // Declarations before services, so an rpc finds its payload already built.
-  // Iterating a snapshot: building a message registers nothing new, but it does
-  // fill `types`, and the registry is what defines the set.
-  for (const declaration of [...ctx.declarations.values()]) {
-    declarationIR(ctx, declaration);
-  }
+    // Declarations before services, so an rpc finds its payload already built.
+    // Iterating a snapshot: building a message registers nothing new, but it does
+    // fill `types`, and the registry is what defines the set.
+    for (const declaration of [...ctx.declarations.values()]) {
+        declarationIR(ctx, declaration);
+    }
 
-  const entry = units[0];
-  if (!entry) {
-    throw new Error('[wiz] no proto file to extract');
-  }
+    const entry = units[0];
+    if (!entry) {
+        throw new Error("[wiz] no proto file to extract");
+    }
 
-  return {
-    kind: 'api',
-    version: 'proto3',
-    types: ctx.types,
-    components: emptyApiComponents(),
-    service: buildService(ctx, units, entry),
-    diagnostics: ctx.diagnostics,
-  };
+    return {
+        kind: "api",
+        version: "proto3",
+        types: ctx.types,
+        components: emptyApiComponents(),
+        service: buildService(ctx, units, entry),
+        diagnostics: ctx.diagnostics,
+    };
 }
 
 /* ------------------------------------------------------------------- entry */
 
 function createCtx(options: ExtractProtoOptions): Ctx {
-  return {
-    declarations: new Map(),
-    types: new Map(),
-    building: new Set(),
-    diagnostics: [],
-    strict: options.strict === true,
-    ids: 0,
-  };
+    return {
+        declarations: new Map(),
+        types: new Map(),
+        building: new Set(),
+        diagnostics: [],
+        strict: options.strict === true,
+        ids: 0,
+    };
 }
 
 export function extractProtoIR(text: string, options: ExtractProtoOptions = {}): ApiIR {
-  const ctx = createCtx(options);
-  const unit: Unit = { path: '<proto>', file: parseProtoFile(ctx, '<proto>', text) };
+    const ctx = createCtx(options);
+    const unit: Unit = { path: "<proto>", file: parseProtoFile(ctx, "<proto>", text) };
 
-  // Nothing an import names can be resolved from text alone: there is no base
-  // path to resolve it against. The well-known types are the exception,
-  // because they are synthesised rather than read.
-  for (const target of unit.file.imports) {
-    if (target.startsWith(WELL_KNOWN_PREFIX)) {
-      continue;
+    // Nothing an import names can be resolved from text alone: there is no base
+    // path to resolve it against. The well-known types are the exception,
+    // because they are synthesised rather than read.
+    for (const target of unit.file.imports) {
+        if (target.startsWith(WELL_KNOWN_PREFIX)) {
+            continue;
+        }
+        diagnose(
+            ctx,
+            target,
+            "import",
+            `unresolved import '${target}'; imports are only followed by extractProtoIRFromFile`,
+        );
     }
-    diagnose(
-      ctx,
-      target,
-      'import',
-      `unresolved import '${target}'; imports are only followed by extractProtoIRFromFile`
-    );
-  }
 
-  return buildApi(ctx, [unit]);
+    return buildApi(ctx, [unit]);
 }
 
 /**
@@ -1291,40 +1255,32 @@ export function extractProtoIR(text: string, options: ExtractProtoOptions = {}):
  * reporting anything.
  */
 async function loadUnit(ctx: Ctx, path: string, seen: Set<string>, units: Unit[]): Promise<void> {
-  if (seen.has(path)) {
-    return;
-  }
-  seen.add(path);
-
-  const file = Bun.file(path);
-  if (!(await file.exists())) {
-    diagnose(
-      ctx,
-      path,
-      'import',
-      `unresolved import '${path}'; references into it are carried as 'unknown'`
-    );
-    return;
-  }
-
-  const unit: Unit = { path, file: parseProtoFile(ctx, path, await file.text()) };
-  units.push(unit);
-
-  const base = dirname(path);
-  for (const target of unit.file.imports) {
-    if (target.startsWith(WELL_KNOWN_PREFIX)) {
-      continue;
+    if (seen.has(path)) {
+        return;
     }
-    await loadUnit(ctx, resolvePath(base, target), seen, units);
-  }
+    seen.add(path);
+
+    const file = Bun.file(path);
+    if (!(await file.exists())) {
+        diagnose(ctx, path, "import", `unresolved import '${path}'; references into it are carried as 'unknown'`);
+        return;
+    }
+
+    const unit: Unit = { path, file: parseProtoFile(ctx, path, await file.text()) };
+    units.push(unit);
+
+    const base = dirname(path);
+    for (const target of unit.file.imports) {
+        if (target.startsWith(WELL_KNOWN_PREFIX)) {
+            continue;
+        }
+        await loadUnit(ctx, resolvePath(base, target), seen, units);
+    }
 }
 
-export async function extractProtoIRFromFile(
-  path: string,
-  options: ExtractProtoOptions = {}
-): Promise<ApiIR> {
-  const ctx = createCtx(options);
-  const units: Unit[] = [];
-  await loadUnit(ctx, resolvePath(path), new Set(), units);
-  return buildApi(ctx, units);
+export async function extractProtoIRFromFile(path: string, options: ExtractProtoOptions = {}): Promise<ApiIR> {
+    const ctx = createCtx(options);
+    const units: Unit[] = [];
+    await loadUnit(ctx, resolvePath(path), new Set(), units);
+    return buildApi(ctx, units);
 }

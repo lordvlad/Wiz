@@ -1,16 +1,12 @@
-import { mkdir } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import {
-  extractApiIR,
-  extractApiIRFromFile,
-  type ExtractApiOptions,
-} from '../extractors/openapi.ts';
-import { extractProtoIR, extractProtoIRFromFile } from '../extractors/proto.ts';
-import { generate, type GeneratedFiles, type Generator } from '../generators/generator.ts';
-import type { ValidateTarget } from '../generators/tsClient.ts';
-import type { ApiIR } from '../ir/api.ts';
-import { consoleLogger } from '../logger.ts';
+import { mkdir } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { extractApiIR, extractApiIRFromFile, type ExtractApiOptions } from "../extractors/openapi.ts";
+import { extractProtoIR, extractProtoIRFromFile } from "../extractors/proto.ts";
+import { generate, type GeneratedFiles, type Generator } from "../generators/generator.ts";
+import type { ValidateTarget } from "../generators/tsClient.ts";
+import type { ApiIR } from "../ir/api.ts";
+import { consoleLogger } from "../logger.ts";
 
 /**
  * Running one emitter over one document from the command line.
@@ -24,49 +20,49 @@ import { consoleLogger } from '../logger.ts';
 
 /** What the CLI can configure on a generator; the rest is the generator's own. */
 interface GenerateOptions {
-  /** Passed through, not interpreted: a generator decides what it relaxes. */
-  lenient: boolean;
-  validate?: boolean | ValidateTarget[];
-  mediaTypes?: string[] | 'all';
+    /** Passed through, not interpreted: a generator decides what it relaxes. */
+    lenient: boolean;
+    validate?: boolean | ValidateTarget[];
+    mediaTypes?: string[] | "all";
 }
 
 /**
  * `--format` values, as a table rather than a list so an unknown value is one
  * lookup and the parsed result is already the extractor's own union.
  */
-const FORMATS: Record<string, ExtractApiOptions['format']> = {
-  json: 'json',
-  jsonc: 'jsonc',
-  json5: 'json5',
-  yaml: 'yaml',
+const FORMATS: Record<string, ExtractApiOptions["format"]> = {
+    json: "json",
+    jsonc: "jsonc",
+    json5: "json5",
+    yaml: "yaml",
 };
 
 interface Invocation {
-  generator: string;
-  /** Undefined means stdin; a literal `-` is normalized to it. */
-  input: string | undefined;
-  /** Undefined means stdout; a literal `-` is normalized to it. */
-  outdir: string | undefined;
-  lenient: boolean;
-  validate?: boolean | ValidateTarget[];
-  mediaTypes?: string[] | 'all';
-  format: ExtractApiOptions['format'];
+    generator: string;
+    /** Undefined means stdin; a literal `-` is normalized to it. */
+    input: string | undefined;
+    /** Undefined means stdout; a literal `-` is normalized to it. */
+    outdir: string | undefined;
+    lenient: boolean;
+    validate?: boolean | ValidateTarget[];
+    mediaTypes?: string[] | "all";
+    format: ExtractApiOptions["format"];
 }
 /** The parts of a call `--validate` can name, in the order they are checked. */
-const VALIDATE_TARGETS = ['path', 'query', 'headers', 'body', 'response'] as const;
+const VALIDATE_TARGETS = ["path", "query", "headers", "body", "response"] as const;
 
 function isValidateTarget(value: string): value is ValidateTarget {
-  return (VALIDATE_TARGETS as readonly string[]).includes(value);
+    return (VALIDATE_TARGETS as readonly string[]).includes(value);
 }
 
 function parseValidateTargets(raw: string): ValidateTarget[] {
-  const parts = raw.split(',').map((part) => part.trim());
-  for (const part of parts) {
-    if (!isValidateTarget(part)) {
-      throw new Error(`unknown validate target '${part}'; expected ${VALIDATE_TARGETS.join(', ')}`);
+    const parts = raw.split(",").map((part) => part.trim());
+    for (const part of parts) {
+        if (!isValidateTarget(part)) {
+            throw new Error(`unknown validate target '${part}'; expected ${VALIDATE_TARGETS.join(", ")}`);
+        }
     }
-  }
-  return parts as ValidateTarget[];
+    return parts as ValidateTarget[];
 }
 
 /**
@@ -76,184 +72,182 @@ function parseValidateTargets(raw: string): ValidateTarget[] {
  */
 
 function parse(argv: string[]): Invocation {
-  let generator: string | undefined;
-  let input: string | undefined;
-  let outdir: string | undefined;
-  let lenient = false;
-  let validate: boolean | ValidateTarget[] | undefined;
-  let mediaTypes: string[] | 'all' | undefined;
-  let format: ExtractApiOptions['format'];
-  /**
-   * Flags that take a value must not silently swallow the next flag. A bare `-`
-   * is exempt: it is a value, and the one `--outdir` legitimately takes.
-   */
-  const valueOf = (flag: string, raw: string | undefined): string => {
-    if (raw === undefined || (raw.startsWith('-') && raw !== '-')) {
-      throw new Error(`${flag} needs a value`);
-    }
-    return raw;
-  };
+    let generator: string | undefined;
+    let input: string | undefined;
+    let outdir: string | undefined;
+    let lenient = false;
+    let validate: boolean | ValidateTarget[] | undefined;
+    let mediaTypes: string[] | "all" | undefined;
+    let format: ExtractApiOptions["format"];
+    /**
+     * Flags that take a value must not silently swallow the next flag. A bare `-`
+     * is exempt: it is a value, and the one `--outdir` legitimately takes.
+     */
+    const valueOf = (flag: string, raw: string | undefined): string => {
+        if (raw === undefined || (raw.startsWith("-") && raw !== "-")) {
+            throw new Error(`${flag} needs a value`);
+        }
+        return raw;
+    };
 
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i]!;
+    for (let i = 0; i < argv.length; i++) {
+        const arg = argv[i]!;
 
-    if (arg === '--generator' || arg === '-g') {
-      generator = valueOf(arg, argv[++i]);
-      continue;
-    }
-    if (arg === '--outdir' || arg === '-o') {
-      outdir = valueOf(arg, argv[++i]);
-      continue;
-    }
-    if (arg === '--format') {
-      const raw = valueOf(arg, argv[++i]);
-      format = FORMATS[raw];
-      if (format === undefined) {
-        throw new Error(`unknown format '${raw}'; expected ${Object.keys(FORMATS).join(', ')}`);
-      }
-      continue;
-    }
-    if (arg === '--lenient') {
-      lenient = true;
-      continue;
-    }
-    if (
-      arg === '--media-types' ||
-      arg === '--mediaTypes' ||
-      arg === '--media-type' ||
-      arg.startsWith('--media-types=') ||
-      arg.startsWith('--mediaTypes=') ||
-      arg.startsWith('--media-type=')
-    ) {
-      let raw: string;
-      if (arg.includes('=')) {
-        raw = arg.slice(arg.indexOf('=') + 1);
-      } else {
-        raw = valueOf(arg, argv[++i]);
-      }
-      const parts = raw
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-      if (parts.includes('all') || parts.includes('ALL')) {
-        mediaTypes = 'all';
-      } else {
-        mediaTypes = parts;
-      }
-      continue;
-    }
-    // The one flag whose value is optional: bare it means "everything", and a
-    // comma-separated list narrows it. The value is only claimed when it can
-    // be one - otherwise `--validate document.json` would eat the input - but
-    // a comma is unambiguous enough to be worth a precise error on a typo,
-    // since no input filename this command accepts contains one.
-    if (arg === '--validate' || arg.startsWith('--validate=')) {
-      if (arg.startsWith('--validate=')) {
-        const raw = arg.slice('--validate='.length);
-        validate = raw.length > 0 ? parseValidateTargets(raw) : true;
-        continue;
-      }
+        if (arg === "--generator" || arg === "-g") {
+            generator = valueOf(arg, argv[++i]);
+            continue;
+        }
+        if (arg === "--outdir" || arg === "-o") {
+            outdir = valueOf(arg, argv[++i]);
+            continue;
+        }
+        if (arg === "--format") {
+            const raw = valueOf(arg, argv[++i]);
+            format = FORMATS[raw];
+            if (format === undefined) {
+                throw new Error(`unknown format '${raw}'; expected ${Object.keys(FORMATS).join(", ")}`);
+            }
+            continue;
+        }
+        if (arg === "--lenient") {
+            lenient = true;
+            continue;
+        }
+        if (
+            arg === "--media-types" ||
+            arg === "--mediaTypes" ||
+            arg === "--media-type" ||
+            arg.startsWith("--media-types=") ||
+            arg.startsWith("--mediaTypes=") ||
+            arg.startsWith("--media-type=")
+        ) {
+            let raw: string;
+            if (arg.includes("=")) {
+                raw = arg.slice(arg.indexOf("=") + 1);
+            } else {
+                raw = valueOf(arg, argv[++i]);
+            }
+            const parts = raw
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean);
+            if (parts.includes("all") || parts.includes("ALL")) {
+                mediaTypes = "all";
+            } else {
+                mediaTypes = parts;
+            }
+            continue;
+        }
+        // The one flag whose value is optional: bare it means "everything", and a
+        // comma-separated list narrows it. The value is only claimed when it can
+        // be one - otherwise `--validate document.json` would eat the input - but
+        // a comma is unambiguous enough to be worth a precise error on a typo,
+        // since no input filename this command accepts contains one.
+        if (arg === "--validate" || arg.startsWith("--validate=")) {
+            if (arg.startsWith("--validate=")) {
+                const raw = arg.slice("--validate=".length);
+                validate = raw.length > 0 ? parseValidateTargets(raw) : true;
+                continue;
+            }
 
-      const next = argv[i + 1];
-      const claimable =
-        next !== undefined &&
-        (!next.startsWith('-') || next === '-') &&
-        (next.includes(',') || isValidateTarget(next));
+            const next = argv[i + 1];
+            const claimable =
+                next !== undefined &&
+                (!next.startsWith("-") || next === "-") &&
+                (next.includes(",") || isValidateTarget(next));
 
-      if (claimable) {
-        validate = parseValidateTargets(next);
-        i++;
-      } else {
-        validate = true;
-      }
-      continue;
+            if (claimable) {
+                validate = parseValidateTargets(next);
+                i++;
+            } else {
+                validate = true;
+            }
+            continue;
+        }
+        // A bare `-` is the stdin positional, so only longer dashed words are flags.
+        if (arg.startsWith("-") && arg !== "-") {
+            throw new Error(`unknown option '${arg}'`);
+        }
+        if (input !== undefined) {
+            throw new Error(`unexpected argument '${arg}'`);
+        }
+        input = arg;
     }
-    // A bare `-` is the stdin positional, so only longer dashed words are flags.
-    if (arg.startsWith('-') && arg !== '-') {
-      throw new Error(`unknown option '${arg}'`);
-    }
-    if (input !== undefined) {
-      throw new Error(`unexpected argument '${arg}'`);
-    }
-    input = arg;
-  }
 
-  if (generator === undefined) {
-    throw new Error('needs --generator <module>');
-  }
+    if (generator === undefined) {
+        throw new Error("needs --generator <module>");
+    }
 
-  // Normalized here so nothing downstream has to know that `-` and an absent
-  // argument mean the same thing at either end of the pipe.
-  return {
-    generator,
-    input: input === '-' ? undefined : input,
-    outdir: outdir === '-' ? undefined : outdir,
-    lenient,
-    validate,
-    mediaTypes,
-    format,
-  };
+    // Normalized here so nothing downstream has to know that `-` and an absent
+    // argument mean the same thing at either end of the pipe.
+    return {
+        generator,
+        input: input === "-" ? undefined : input,
+        outdir: outdir === "-" ? undefined : outdir,
+        lenient,
+        validate,
+        mediaTypes,
+        format,
+    };
 }
 
 function usable(value: unknown): value is Generator<GenerateOptions> {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-  const candidate = value as Partial<Generator<GenerateOptions>>;
-  if (typeof candidate.name !== 'string') {
-    return false;
-  }
-  return (
-    typeof candidate.type === 'function' ||
-    typeof candidate.service === 'function' ||
-    typeof candidate.api === 'function'
-  );
+    if (typeof value !== "object" || value === null) {
+        return false;
+    }
+    const candidate = value as Partial<Generator<GenerateOptions>>;
+    if (typeof candidate.name !== "string") {
+        return false;
+    }
+    return (
+        typeof candidate.type === "function" ||
+        typeof candidate.service === "function" ||
+        typeof candidate.api === "function"
+    );
 }
 
 const GENERATOR_SHORTCUTS: Record<string, string> = {
-  reactQuery: '../generators/reactQuery.ts',
-  'reactQuery.ts': '../generators/reactQuery.ts',
-  tsClient: '../generators/tsClient.ts',
-  'tsClient.ts': '../generators/tsClient.ts',
-  asyncapiClient: '../generators/tsClient.ts',
-  'asyncapiClient.ts': '../generators/tsClient.ts',
-  openrpc: '../generators/openrpc.ts',
-  'openrpc.ts': '../generators/openrpc.ts',
-  asyncapi: '../generators/asyncapi.ts',
-  'asyncapi.ts': '../generators/asyncapi.ts',
-  java: '../generators/java.ts',
-  'java.ts': '../generators/java.ts',
+    reactQuery: "../generators/reactQuery.ts",
+    "reactQuery.ts": "../generators/reactQuery.ts",
+    tsClient: "../generators/tsClient.ts",
+    "tsClient.ts": "../generators/tsClient.ts",
+    asyncapiClient: "../generators/tsClient.ts",
+    "asyncapiClient.ts": "../generators/tsClient.ts",
+    openrpc: "../generators/openrpc.ts",
+    "openrpc.ts": "../generators/openrpc.ts",
+    asyncapi: "../generators/asyncapi.ts",
+    "asyncapi.ts": "../generators/asyncapi.ts",
+    java: "../generators/java.ts",
+    "java.ts": "../generators/java.ts",
 };
 
 async function loadGenerator(module: string): Promise<Generator<GenerateOptions>> {
-  // The sanctioned exception to the repo's no-dynamic-import rule: the module
-  // is named on the command line, so no static specifier can exist for it.
-  // `resolve` pins it to the cwd rather than to this file, which is what makes
-  // `--generator ./gen.ts` mean what the caller typed, and `pathToFileURL`
-  // keeps an absolute path a legal specifier on Windows too.
-  const shortcut = GENERATOR_SHORTCUTS[module];
-  const url = shortcut
-    ? new URL(shortcut, import.meta.url).href
-    : pathToFileURL(resolve(module)).href;
+    // The sanctioned exception to the repo's no-dynamic-import rule: the module
+    // is named on the command line, so no static specifier can exist for it.
+    // `resolve` pins it to the cwd rather than to this file, which is what makes
+    // `--generator ./gen.ts` mean what the caller typed, and `pathToFileURL`
+    // keeps an absolute path a legal specifier on Windows too.
+    const shortcut = GENERATOR_SHORTCUTS[module];
+    const url = shortcut ? new URL(shortcut, import.meta.url).href : pathToFileURL(resolve(module)).href;
 
-  let loaded: Record<string, unknown>;
-  try {
-    loaded = (await import(url)) as Record<string, unknown>;
-  } catch (error) {
-    throw new Error(`cannot load generator '${module}': ${(error as Error).message}`);
-  }
+    let loaded: Record<string, unknown>;
+    try {
+        loaded = (await import(url)) as Record<string, unknown>;
+    } catch (error) {
+        throw new Error(`cannot load generator '${module}': ${(error as Error).message}`);
+    }
 
-  // `default` first: a module written for this command exports one generator.
-  // A named `generator` export lets a module that already has a default (a
-  // plugin, a config) still be addressable here.
-  const candidate = loaded.default ?? loaded.generator;
-  if (!usable(candidate)) {
-    throw new Error(
-      `'${module}' exports no usable generator; expected a default or 'generator' ` +
-        'export with a string name and a type, service or api method'
-    );
-  }
-  return candidate;
+    // `default` first: a module written for this command exports one generator.
+    // A named `generator` export lets a module that already has a default (a
+    // plugin, a config) still be addressable here.
+    const candidate = loaded.default ?? loaded.generator;
+    if (!usable(candidate)) {
+        throw new Error(
+            `'${module}' exports no usable generator; expected a default or 'generator' ` +
+                "export with a string name and a type, service or api method",
+        );
+    }
+    return candidate;
 }
 
 /**
@@ -265,12 +259,12 @@ async function loadGenerator(module: string): Promise<Generator<GenerateOptions>
  * output stays copy-pasteable.
  */
 async function writeFiles(outdir: string, files: GeneratedFiles): Promise<void> {
-  await mkdir(outdir, { recursive: true });
-  for (const [name, contents] of Object.entries(files)) {
-    const path = join(outdir, name);
-    await Bun.write(resolve(path), contents);
-    console.log(`  ${path}`);
-  }
+    await mkdir(outdir, { recursive: true });
+    for (const [name, contents] of Object.entries(files)) {
+        const path = join(outdir, name);
+        await Bun.write(resolve(path), contents);
+        console.log(`  ${path}`);
+    }
 }
 
 /**
@@ -281,59 +275,57 @@ async function writeFiles(outdir: string, files: GeneratedFiles): Promise<void> 
  * a reliable one because a proto file must open with it.
  */
 async function extractInput(invocation: Invocation, options: ExtractApiOptions): Promise<ApiIR> {
-  if (invocation.input === undefined) {
-    const text = await Bun.stdin.text();
-    return /^\s*syntax\s*=\s*["']proto[23]["']/m.test(text)
-      ? extractProtoIR(text)
-      : extractApiIR(text, options);
-  }
+    if (invocation.input === undefined) {
+        const text = await Bun.stdin.text();
+        return /^\s*syntax\s*=\s*["']proto[23]["']/m.test(text) ? extractProtoIR(text) : extractApiIR(text, options);
+    }
 
-  return invocation.input.toLowerCase().endsWith('.proto')
-    ? await extractProtoIRFromFile(invocation.input)
-    : await extractApiIRFromFile(invocation.input, options);
+    return invocation.input.toLowerCase().endsWith(".proto")
+        ? await extractProtoIRFromFile(invocation.input)
+        : await extractApiIRFromFile(invocation.input, options);
 }
 
 export async function runGenerate(argv: string[]): Promise<number> {
-  try {
-    const invocation = parse(argv);
-    const options: ExtractApiOptions = { format: invocation.format };
+    try {
+        const invocation = parse(argv);
+        const options: ExtractApiOptions = { format: invocation.format };
 
-    // The extension decides the front end: a `.proto` file is a gRPC service
-    // definition, anything else is an API document, and each extractor already
-    // infers its own dialect from the same name.
-    const ir = await extractInput(invocation, options);
+        // The extension decides the front end: a `.proto` file is a gRPC service
+        // definition, anything else is an API document, and each extractor already
+        // infers its own dialect from the same name.
+        const ir = await extractInput(invocation, options);
 
-    // Dropped keywords are a fact about the output, not a failure: the caller
-    // still gets the files, on stderr so stdout stays one JSON value.
-    for (const diagnostic of ir.diagnostics) {
-      console.warn(
-        `wiz generate: dropped '${diagnostic.keyword}' at ${diagnostic.pointer}: ${diagnostic.message}`
-      );
+        // Dropped keywords are a fact about the output, not a failure: the caller
+        // still gets the files, on stderr so stdout stays one JSON value.
+        for (const diagnostic of ir.diagnostics) {
+            console.warn(
+                `wiz generate: dropped '${diagnostic.keyword}' at ${diagnostic.pointer}: ${diagnostic.message}`,
+            );
+        }
+
+        const generator = await loadGenerator(invocation.generator);
+        const files = generate(
+            ir,
+            generator,
+            {
+                lenient: invocation.lenient,
+                validate: invocation.validate,
+                mediaTypes: invocation.mediaTypes,
+            },
+            consoleLogger,
+        );
+
+        if (invocation.outdir === undefined) {
+            // Keys are file names, values are contents, so the whole output is one
+            // JSON value — the same shape `wiz eject <dir>` prints.
+            process.stdout.write(`${JSON.stringify(files, null, 2)}\n`);
+            return 0;
+        }
+
+        await writeFiles(invocation.outdir, files);
+        return 0;
+    } catch (error) {
+        console.error(`wiz generate: ${(error as Error).message}`);
+        return 1;
     }
-
-    const generator = await loadGenerator(invocation.generator);
-    const files = generate(
-      ir,
-      generator,
-      {
-        lenient: invocation.lenient,
-        validate: invocation.validate,
-        mediaTypes: invocation.mediaTypes,
-      },
-      consoleLogger
-    );
-
-    if (invocation.outdir === undefined) {
-      // Keys are file names, values are contents, so the whole output is one
-      // JSON value — the same shape `wiz eject <dir>` prints.
-      process.stdout.write(`${JSON.stringify(files, null, 2)}\n`);
-      return 0;
-    }
-
-    await writeFiles(invocation.outdir, files);
-    return 0;
-  } catch (error) {
-    console.error(`wiz generate: ${(error as Error).message}`);
-    return 1;
-  }
 }

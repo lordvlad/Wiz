@@ -5,9 +5,28 @@ export default defineConfig({
   extends: [oxlint],
   rules: {
     ...oxlint.rules,
+    radix: "off",
+    "no-unused-vars": [
+      "error",
+      {
+        args: "all",
+        argsIgnorePattern: "^_",
+        varsIgnorePattern: "^_",
+        caughtErrors: "none",
+        ignoreRestSiblings: true,
+      },
+    ],
+    "typescript/no-unused-vars": [
+      "error",
+      {
+        args: "all",
+        argsIgnorePattern: "^_",
+        varsIgnorePattern: "^_",
+        caughtErrors: "none",
+        ignoreRestSiblings: true,
+      },
+    ],
     "no-console": "off",
-    "no-unused-vars": "off",
-    "typescript/no-unused-vars": "off",
     "no-duplicate-imports": "off",
     "no-lonely-if": "off",
   },
@@ -17,5 +36,6 @@ export default defineConfig({
     "dist/**",
     "wiz-virtual/**",
     "test/fixtures/**",
+    "src/index.ts",
   ],
 });

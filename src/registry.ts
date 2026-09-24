@@ -1,28 +1,28 @@
-import { generate, type GeneratedFiles } from './generators/generator.ts';
-import { virtualGenerator, type VirtualModuleOptions } from './generators/virtualGenerator.ts';
-import { normalizeServiceMethod } from './ir/service.ts';
-import { fnv1a, normalizeTypeIR, type TypeIR } from './types.ts';
+import { generate, type GeneratedFiles } from "./generators/generator.ts";
+import { virtualGenerator, type VirtualModuleOptions } from "./generators/virtualGenerator.ts";
+import { normalizeServiceMethod } from "./ir/service.ts";
+import { fnv1a, normalizeTypeIR, type TypeIR } from "./types.ts";
 
 export interface RegisteredType {
-  /**
-   * The virtual module's identity: the type key plus everything else that
-   * changes the emitted code. Callers name their import after it.
-   */
-  key: string;
-  ir: TypeIR;
-  /** The generated file map, mounted by the plugin under `wiz-virtual/<key>/`. */
-  files: GeneratedFiles;
-  /** Kept so a caller wanting a different subset can regenerate faithfully. */
-  options?: VirtualModuleOptions;
+    /**
+     * The virtual module's identity: the type key plus everything else that
+     * changes the emitted code. Callers name their import after it.
+     */
+    key: string;
+    ir: TypeIR;
+    /** The generated file map, mounted by the plugin under `wiz-virtual/<key>/`. */
+    files: GeneratedFiles;
+    /** Kept so a caller wanting a different subset can regenerate faithfully. */
+    options?: VirtualModuleOptions;
 }
 
 const TypeRegistry = new Map<string, RegisteredType>();
 
 function namedTypesKey(types: Array<{ name: string; ir: TypeIR }> | undefined): unknown {
-  // Names are part of a schema payload's identity: they become
-  // `components.schemas` keys, `$ref` targets and message names, so two
-  // payloads differing only in a nested name are two modules.
-  return types?.map((t) => [t.name, normalizeTypeIR(t.ir, true)]) ?? null;
+    // Names are part of a schema payload's identity: they become
+    // `components.schemas` keys, `$ref` targets and message names, so two
+    // payloads differing only in a nested name are two modules.
+    return types?.map((t) => [t.name, normalizeTypeIR(t.ir, true)]) ?? null;
 }
 
 /**
@@ -34,22 +34,22 @@ function namedTypesKey(types: Array<{ name: string; ir: TypeIR }> | undefined): 
  * and whichever transformed last silently redefined the other.
  */
 function payloadKey(options: VirtualModuleOptions): string {
-  return fnv1a(
-    JSON.stringify({
-      o: namedTypesKey(options.openApiTypes),
-      v: options.openApiVersion ?? null,
-      s: options.service?.methods.map(normalizeServiceMethod) ?? null,
-      p: namedTypesKey(options.protobufSchemaTypes),
-      a: namedTypesKey(options.avroSchemaTypes),
-      w: namedTypesKey(options.arrowSchemaTypes),
-      g: namedTypesKey(options.grpcTypes),
-      r: options.arrow ?? false,
-      z: options.zod ?? false,
-      j: namedTypesKey(options.jsonSchemasTypes),
-      // emitted (`generateVirtualModuleCode(..., { only })`), never at
-      // registration, so it cannot distinguish two registered modules.
-    })
-  );
+    return fnv1a(
+        JSON.stringify({
+            o: namedTypesKey(options.openApiTypes),
+            v: options.openApiVersion ?? null,
+            s: options.service?.methods.map(normalizeServiceMethod) ?? null,
+            p: namedTypesKey(options.protobufSchemaTypes),
+            a: namedTypesKey(options.avroSchemaTypes),
+            w: namedTypesKey(options.arrowSchemaTypes),
+            g: namedTypesKey(options.grpcTypes),
+            r: options.arrow ?? false,
+            z: options.zod ?? false,
+            j: namedTypesKey(options.jsonSchemasTypes),
+            // emitted (`generateVirtualModuleCode(..., { only })`), never at
+            // registration, so it cannot distinguish two registered modules.
+        }),
+    );
 }
 
 /**
@@ -58,37 +58,33 @@ function payloadKey(options: VirtualModuleOptions): string {
  * Content-addressed: an entry is only ever written once, because anything that
  * would change the generated code is already in the key.
  */
-export function registerType(
-  typeHash: string,
-  ir: TypeIR,
-  options?: VirtualModuleOptions
-): RegisteredType {
-  const key = options ? `${typeHash}_${payloadKey(options)}` : typeHash;
+export function registerType(typeHash: string, ir: TypeIR, options?: VirtualModuleOptions): RegisteredType {
+    const key = options ? `${typeHash}_${payloadKey(options)}` : typeHash;
 
-  const existing = TypeRegistry.get(key);
-  if (existing) {
-    return existing;
-  }
+    const existing = TypeRegistry.get(key);
+    if (existing) {
+        return existing;
+    }
 
-  const registered: RegisteredType = {
-    key,
-    ir,
-    files: generate(ir, virtualGenerator, options ?? {}),
-    options,
-  };
-  TypeRegistry.set(key, registered);
-  return registered;
+    const registered: RegisteredType = {
+        key,
+        ir,
+        files: generate(ir, virtualGenerator, options ?? {}),
+        options,
+    };
+    TypeRegistry.set(key, registered);
+    return registered;
 }
 
 export function getTypeModuleFiles(key: string): GeneratedFiles | undefined {
-  return TypeRegistry.get(key)?.files;
+    return TypeRegistry.get(key)?.files;
 }
 
 /** The whole entry, for a caller that needs to regenerate a subset. */
 export function getRegisteredType(key: string): RegisteredType | undefined {
-  return TypeRegistry.get(key);
+    return TypeRegistry.get(key);
 }
 
 export function clearTypeRegistry(): void {
-  TypeRegistry.clear();
+    TypeRegistry.clear();
 }

@@ -1,362 +1,348 @@
-import type { ApiIR } from '../ir/api.ts';
-import type { ServiceIR, ServiceMethodIR, HttpServiceMethodIR } from '../ir/service.ts';
-import { isHttpMethod } from '../ir/service.ts';
-import type { TypeIR } from '../ir/types.ts';
-import type { Generator, GeneratorContext, GeneratedFiles } from './generator.ts';
+import type { ApiIR } from "../ir/api.ts";
+import type { ServiceIR, ServiceMethodIR, HttpServiceMethodIR } from "../ir/service.ts";
+import { isHttpMethod } from "../ir/service.ts";
+import type { TypeIR } from "../ir/types.ts";
+import type { Generator, GeneratorContext, GeneratedFiles } from "./generator.ts";
 import {
-  tsClientGenerator,
-  methodNames,
-  declaredTypes,
-  operationTypeNames,
-  requestSlots,
-  type Slot,
-  type TsClientOptions,
-} from './tsClient.ts';
-import { docComment, typeIdentifiers } from './tsTypes.ts';
+    tsClientGenerator,
+    methodNames,
+    declaredTypes,
+    operationTypeNames,
+    requestSlots,
+    type Slot,
+    type TsClientOptions,
+} from "./tsClient.ts";
+import { docComment, typeIdentifiers } from "./tsTypes.ts";
 
 export interface ReactQueryOptions extends TsClientOptions {}
 
 interface QueryOp {
-  name: string;
-  capitalName: string;
-  pathTemplate: string;
-  slots: Slot[];
-  optionsTypeName: string;
-  resultTypeName: string;
-  doc?: string;
+    name: string;
+    capitalName: string;
+    pathTemplate: string;
+    slots: Slot[];
+    optionsTypeName: string;
+    resultTypeName: string;
+    doc?: string;
 }
 
 interface MutationOp {
-  name: string;
-  capitalName: string;
-  pathTemplate: string;
-  method: string;
-  slots: Slot[];
-  optionsTypeName: string;
-  resultTypeName: string;
-  doc?: string;
+    name: string;
+    capitalName: string;
+    pathTemplate: string;
+    method: string;
+    slots: Slot[];
+    optionsTypeName: string;
+    resultTypeName: string;
+    doc?: string;
 }
 
 function methodDoc(method: ServiceMethodIR): string {
-  const isHttp = isHttpMethod(method);
-  const summary = isHttp ? method.summary : undefined;
-  const description = isHttp ? method.description : undefined;
-  const deprecated = isHttp && method.deprecated ? { isDeprecated: true } : undefined;
-  return docComment(
-    {
-      description:
-        [summary, description].filter((line): line is string => Boolean(line)).join('\n\n') ||
-        undefined,
-      deprecated,
-    },
-    ''
-  );
+    const isHttp = isHttpMethod(method);
+    const summary = isHttp ? method.summary : undefined;
+    const description = isHttp ? method.description : undefined;
+    const deprecated = isHttp && method.deprecated ? { isDeprecated: true } : undefined;
+    return docComment(
+        {
+            description:
+                [summary, description].filter((line): line is string => Boolean(line)).join("\n\n") || undefined,
+            deprecated,
+        },
+        "",
+    );
 }
 
 function emitReactQueryFiles(
-  service: ServiceIR,
-  types: Map<string, TypeIR> | undefined,
-  context: GeneratorContext<ReactQueryOptions>
+    service: ServiceIR,
+    types: Map<string, TypeIR> | undefined,
+    context: GeneratorContext<ReactQueryOptions>,
 ): GeneratedFiles {
-  const names = methodNames(service);
-  // Recomputed from the same service and types `tsClient` emits `api.ts` from,
-  // so the alias names agree with that file by construction.
-  const identifiers = typeIdentifiers(declaredTypes(service, types).keys());
-  const aliasNames = operationTypeNames([...names.values()], identifiers);
-  const queryOps: QueryOp[] = [];
-  const mutationOps: MutationOp[] = [];
+    const names = methodNames(service);
+    // Recomputed from the same service and types `tsClient` emits `api.ts` from,
+    // so the alias names agree with that file by construction.
+    const identifiers = typeIdentifiers(declaredTypes(service, types).keys());
+    const aliasNames = operationTypeNames([...names.values()], identifiers);
+    const queryOps: QueryOp[] = [];
+    const mutationOps: MutationOp[] = [];
 
-  for (const method of service.methods) {
-    const name = names.get(method)!;
-    const capitalName = name.charAt(0).toUpperCase() + name.slice(1);
-    const aliases = aliasNames.get(name)!;
-    const doc = methodDoc(method);
+    for (const method of service.methods) {
+        const name = names.get(method)!;
+        const capitalName = name.charAt(0).toUpperCase() + name.slice(1);
+        const aliases = aliasNames.get(name)!;
+        const doc = methodDoc(method);
 
-    const isHttp = isHttpMethod(method);
-    if (isHttp) {
-      const http = method as HttpServiceMethodIR;
-      const isStreaming = http.responses.some(
-        (r) =>
-          r.streaming ||
-          r.body?.some((b) => b.mimetype.includes('event-stream') || b.mimetype.includes('ndjson'))
-      );
-      if (isStreaming) {
-        continue;
-      }
+        const isHttp = isHttpMethod(method);
+        if (isHttp) {
+            const http = method as HttpServiceMethodIR;
+            const isStreaming = http.responses.some(
+                (r) =>
+                    r.streaming ||
+                    r.body?.some((b) => b.mimetype.includes("event-stream") || b.mimetype.includes("ndjson")),
+            );
+            if (isStreaming) {
+                continue;
+            }
+        }
+        const httpMethod = isHttp ? method.address.method.toUpperCase() : "POST";
+        const pathTemplate = isHttp
+            ? method.address.path
+            : "service" in method.address &&
+                method.address.service &&
+                "method" in method.address &&
+                method.address.method
+              ? `${method.address.service}/${method.address.method}`
+              : "call";
+
+        const isQuery = isHttp && ["GET", "HEAD", "OPTIONS"].includes(httpMethod);
+
+        const slots = isHttp ? requestSlots(method as HttpServiceMethodIR, identifiers, context.options) : [];
+
+        if (isQuery) {
+            queryOps.push({
+                name,
+                capitalName,
+                pathTemplate,
+                slots,
+                optionsTypeName: aliases.options,
+                resultTypeName: aliases.result,
+                doc,
+            });
+        } else {
+            mutationOps.push({
+                name,
+                capitalName,
+                pathTemplate,
+                method: httpMethod,
+                slots,
+                optionsTypeName: aliases.options,
+                resultTypeName: aliases.result,
+                doc,
+            });
+        }
     }
-    const httpMethod = isHttp ? method.address.method.toUpperCase() : 'POST';
-    const pathTemplate = isHttp
-      ? method.address.path
-      : 'service' in method.address &&
-          method.address.service &&
-          'method' in method.address &&
-          method.address.method
-        ? `${method.address.service}/${method.address.method}`
-        : 'call';
 
-    const isQuery = isHttp && ['GET', 'HEAD', 'OPTIONS'].includes(httpMethod);
+    const banner = (what: string) =>
+        `// Generated by wiz from ${service.name ?? "an OpenAPI document"}.\n` +
+        `// ${what} Edit the document, not this file.\n`;
 
-    const slots = isHttp
-      ? requestSlots(method as HttpServiceMethodIR, identifiers, context.options)
-      : [];
+    // Exactly the alias names the file mentions, deduplicated and sorted, so the
+    // emitted import stays clean under `noUnusedLocals`.
+    const queryAliases = [...new Set(queryOps.flatMap((op) => [op.optionsTypeName, op.resultTypeName]))]
+        .sort()
+        .map((name) => `, type ${name}`)
+        .join("");
+    const mutationAliases = [...new Set(mutationOps.flatMap((op) => [op.optionsTypeName, op.resultTypeName]))]
+        .sort()
+        .map((name) => `, type ${name}`)
+        .join("");
 
-    if (isQuery) {
-      queryOps.push({
-        name,
-        capitalName,
-        pathTemplate,
-        slots,
-        optionsTypeName: aliases.options,
-        resultTypeName: aliases.result,
-        doc,
-      });
-    } else {
-      mutationOps.push({
-        name,
-        capitalName,
-        pathTemplate,
-        method: httpMethod,
-        slots,
-        optionsTypeName: aliases.options,
-        resultTypeName: aliases.result,
-        doc,
-      });
-    }
-  }
+    const allQueryCode = queryOps
+        .map((op) => `${op.slots.map((s) => s.type).join(" ")} ${op.resultTypeName}`)
+        .join(" ");
+    const modelQueryImports = [...identifiers.values()]
+        .filter((identifier) => new RegExp(`\\b${identifier}\\b`).test(allQueryCode))
+        .sort();
+    const modelQueryImportLine =
+        modelQueryImports.length > 0 ? `import type { ${modelQueryImports.join(", ")} } from "./model.ts";\n` : "";
 
-  const banner = (what: string) =>
-    `// Generated by wiz from ${service.name ?? 'an OpenAPI document'}.\n` +
-    `// ${what} Edit the document, not this file.\n`;
+    const allMutationCode = mutationOps
+        .map((op) => `${op.slots.map((s) => s.type).join(" ")} ${op.resultTypeName}`)
+        .join(" ");
+    const modelMutationImports = [...identifiers.values()]
+        .filter((identifier) => new RegExp(`\\b${identifier}\\b`).test(allMutationCode))
+        .sort();
+    const modelMutationImportLine =
+        modelMutationImports.length > 0
+            ? `import type { ${modelMutationImports.join(", ")} } from "./model.ts";\n`
+            : "";
 
-  // Exactly the alias names the file mentions, deduplicated and sorted, so the
-  // emitted import stays clean under `noUnusedLocals`.
-  const queryAliases = [
-    ...new Set(queryOps.flatMap((op) => [op.optionsTypeName, op.resultTypeName])),
-  ]
-    .sort()
-    .map((name) => `, type ${name}`)
-    .join('');
-  const mutationAliases = [
-    ...new Set(mutationOps.flatMap((op) => [op.optionsTypeName, op.resultTypeName])),
-  ]
-    .sort()
-    .map((name) => `, type ${name}`)
-    .join('');
+    const queryCode = [
+        banner("React Query options getters and hooks for query operations."),
+        'import { useQuery, type UseQueryOptions } from "@tanstack/react-query";',
+        ...(modelQueryImportLine ? [modelQueryImportLine.trim()] : []),
+        `import { defaultClient, type Client${queryAliases} } from "./api.ts";`,
+        'import { createMutations } from "./mutations.ts";',
+        "",
+        ...queryOps.flatMap((op) => {
+            const pathLit = JSON.stringify(op.pathTemplate);
+            const positionalParams: string[] = [];
+            const paramNames: string[] = [];
+            for (const slot of op.slots) {
+                const opt = slot.required ? "" : "?";
+                positionalParams.push(`${slot.name}${opt}: ${slot.type}`);
+                paramNames.push(slot.name);
+            }
+            const optParamDecl = positionalParams.length > 0 ? `${positionalParams.join(", ")}, ` : "";
+            const callArgs = paramNames.length > 0 ? `${paramNames.join(", ")}, { signal }` : "{ signal }";
+            const queryKeyParts = [pathLit, ...paramNames].join(", ");
+            const forwardArgs = paramNames.join(", ");
 
-  const allQueryCode = queryOps
-    .map((op) => `${op.slots.map((s) => s.type).join(' ')} ${op.resultTypeName}`)
-    .join(' ');
-  const modelQueryImports = [...identifiers.values()]
-    .filter((identifier) => new RegExp(`\\b${identifier}\\b`).test(allQueryCode))
-    .sort();
-  const modelQueryImportLine =
-    modelQueryImports.length > 0
-      ? `import type { ${modelQueryImports.join(', ')} } from "./model.ts";\n`
-      : '';
+            const optionsFnDoc = op.doc ? op.doc : `/** Query options getter for \`${op.name}\`. */\n`;
+            const hookDoc = `/** React Query hook for \`${op.name}\`. */\n`;
 
-  const allMutationCode = mutationOps
-    .map((op) => `${op.slots.map((s) => s.type).join(' ')} ${op.resultTypeName}`)
-    .join(' ');
-  const modelMutationImports = [...identifiers.values()]
-    .filter((identifier) => new RegExp(`\\b${identifier}\\b`).test(allMutationCode))
-    .sort();
-  const modelMutationImportLine =
-    modelMutationImports.length > 0
-      ? `import type { ${modelMutationImports.join(', ')} } from "./model.ts";\n`
-      : '';
+            return [
+                `${optionsFnDoc}export function get${op.capitalName}QueryOptions<`,
+                `  TData = ${op.resultTypeName},`,
+                "  TError = unknown",
+                ">(",
+                `  ${optParamDecl}queryOptions?: Omit<UseQueryOptions<${op.resultTypeName}, TError, TData>, "queryKey" | "queryFn">,`,
+                "  client: Client = defaultClient()",
+                ") {",
+                "  return {",
+                `    queryKey: [${queryKeyParts}] as const,`,
+                "    queryFn: ({ signal }: { signal?: AbortSignal }) =>",
+                `      client.${op.name}(${callArgs}),`,
+                "    ...queryOptions,",
+                "  };",
+                "}",
+                "",
+                `${hookDoc}export function use${op.capitalName}<`,
+                `  TData = ${op.resultTypeName},`,
+                "  TError = unknown",
+                ">(",
+                `  ${optParamDecl}queryOptions?: Omit<UseQueryOptions<${op.resultTypeName}, TError, TData>, "queryKey" | "queryFn">,`,
+                "  client: Client = defaultClient()",
+                ") {",
+                `  return useQuery(get${op.capitalName}QueryOptions(${forwardArgs ? `${forwardArgs}, ` : ""}queryOptions, client));`,
+                "}",
+                "",
+            ];
+        }),
+        "/** Factory binding all query options getters and query hooks to a custom client instance. */",
+        "export function createQueries(client: Client = defaultClient()) {",
+        "  return {",
+        ...queryOps.map((op) => {
+            const positionalParams: string[] = [];
+            const paramNames: string[] = [];
+            for (const slot of op.slots) {
+                const opt = slot.required ? "" : "?";
+                positionalParams.push(`${slot.name}${opt}: ${slot.type}`);
+                paramNames.push(slot.name);
+            }
+            const optParamDecl = positionalParams.length > 0 ? `${positionalParams.join(", ")}, ` : "";
+            const forwardArgs = paramNames.join(", ");
+            return [
+                `    get${op.capitalName}QueryOptions: <TData = ${op.resultTypeName}, TError = unknown>(`,
+                `      ${optParamDecl}queryOptions?: Omit<UseQueryOptions<${op.resultTypeName}, TError, TData>, "queryKey" | "queryFn">`,
+                `    ) => get${op.capitalName}QueryOptions<TData, TError>(${forwardArgs ? `${forwardArgs}, ` : ""}queryOptions, client),`,
+                `    use${op.capitalName}: <TData = ${op.resultTypeName}, TError = unknown>(`,
+                `      ${optParamDecl}queryOptions?: Omit<UseQueryOptions<${op.resultTypeName}, TError, TData>, "queryKey" | "queryFn">`,
+                `    ) => use${op.capitalName}<TData, TError>(${forwardArgs ? `${forwardArgs}, ` : ""}queryOptions, client),`,
+            ].join("\n");
+        }),
+        "  };",
+        "}",
+        "",
+        "/** Factory binding all query and mutation hooks to a custom client instance. */",
+        "export function createHooks(client: Client = defaultClient()) {",
+        "  return {",
+        "    ...createQueries(client),",
+        "    ...createMutations(client),",
+        "  };",
+        "}",
+        "",
+    ].join("\n");
 
-  const queryCode = [
-    banner('React Query options getters and hooks for query operations.'),
-    'import { useQuery, type UseQueryOptions } from "@tanstack/react-query";',
-    ...(modelQueryImportLine ? [modelQueryImportLine.trim()] : []),
-    `import { defaultClient, type Client${queryAliases} } from "./api.ts";`,
-    'import { createMutations } from "./mutations.ts";',
-    '',
-    ...queryOps.flatMap((op) => {
-      const pathLit = JSON.stringify(op.pathTemplate);
-      const positionalParams: string[] = [];
-      const paramNames: string[] = [];
-      for (const slot of op.slots) {
-        const opt = slot.required ? '' : '?';
-        positionalParams.push(`${slot.name}${opt}: ${slot.type}`);
-        paramNames.push(slot.name);
-      }
-      const optParamDecl = positionalParams.length > 0 ? `${positionalParams.join(', ')}, ` : '';
-      const callArgs =
-        paramNames.length > 0 ? `${paramNames.join(', ')}, { signal }` : '{ signal }';
-      const queryKeyParts = [pathLit, ...paramNames].join(', ');
-      const forwardArgs = paramNames.join(', ');
+    const mutationCode = [
+        banner("React Query options getters and hooks for mutation operations."),
+        'import { useMutation, type UseMutationOptions } from "@tanstack/react-query";',
+        ...(modelMutationImportLine ? [modelMutationImportLine.trim()] : []),
+        `import { defaultClient, type Client${mutationAliases} } from "./api.ts";`,
+        "",
+        ...mutationOps.flatMap((op) => {
+            const pathLit = JSON.stringify(op.pathTemplate);
+            const methodLit = JSON.stringify(op.method);
+            const optionsFnDoc = op.doc ? op.doc : `/** Mutation options getter for \`${op.name}\`. */\n`;
+            const hookDoc = `/** React Query hook for \`${op.name}\`. */\n`;
 
-      const optionsFnDoc = op.doc ? op.doc : `/** Query options getter for \`${op.name}\`. */\n`;
-      const hookDoc = `/** React Query hook for \`${op.name}\`. */\n`;
+            const paramNames: string[] = op.slots.map((s) => s.name);
+            const hasParams = paramNames.length > 0;
+            const mutationArgType = hasParams
+                ? paramNames.length === 1
+                    ? op.slots[0]!.type
+                    : `[${op.slots.map((s) => s.type).join(", ")}]`
+                : "void";
+            const mutationFnArg = hasParams
+                ? paramNames.length === 1
+                    ? `arg: ${op.slots[0]!.type}`
+                    : `[${paramNames.join(", ")}]: [${op.slots.map((s) => s.type).join(", ")}]`
+                : "";
+            const clientCallArgs = hasParams ? (paramNames.length === 1 ? "arg" : paramNames.join(", ")) : "";
 
-      return [
-        `${optionsFnDoc}export function get${op.capitalName}QueryOptions<`,
-        `  TData = ${op.resultTypeName},`,
-        '  TError = unknown',
-        '>(',
-        `  ${optParamDecl}queryOptions?: Omit<UseQueryOptions<${op.resultTypeName}, TError, TData>, "queryKey" | "queryFn">,`,
-        '  client: Client = defaultClient()',
-        ') {',
-        '  return {',
-        `    queryKey: [${queryKeyParts}] as const,`,
-        '    queryFn: ({ signal }: { signal?: AbortSignal }) =>',
-        `      client.${op.name}(${callArgs}),`,
-        '    ...queryOptions,',
-        '  };',
-        '}',
-        '',
-        `${hookDoc}export function use${op.capitalName}<`,
-        `  TData = ${op.resultTypeName},`,
-        '  TError = unknown',
-        '>(',
-        `  ${optParamDecl}queryOptions?: Omit<UseQueryOptions<${op.resultTypeName}, TError, TData>, "queryKey" | "queryFn">,`,
-        '  client: Client = defaultClient()',
-        ') {',
-        `  return useQuery(get${op.capitalName}QueryOptions(${forwardArgs ? `${forwardArgs}, ` : ''}queryOptions, client));`,
-        '}',
-        '',
-      ];
-    }),
-    '/** Factory binding all query options getters and query hooks to a custom client instance. */',
-    'export function createQueries(client: Client = defaultClient()) {',
-    '  return {',
-    ...queryOps.map((op) => {
-      const positionalParams: string[] = [];
-      const paramNames: string[] = [];
-      for (const slot of op.slots) {
-        const opt = slot.required ? '' : '?';
-        positionalParams.push(`${slot.name}${opt}: ${slot.type}`);
-        paramNames.push(slot.name);
-      }
-      const optParamDecl = positionalParams.length > 0 ? `${positionalParams.join(', ')}, ` : '';
-      const forwardArgs = paramNames.join(', ');
-      return [
-        `    get${op.capitalName}QueryOptions: <TData = ${op.resultTypeName}, TError = unknown>(`,
-        `      ${optParamDecl}queryOptions?: Omit<UseQueryOptions<${op.resultTypeName}, TError, TData>, "queryKey" | "queryFn">`,
-        `    ) => get${op.capitalName}QueryOptions<TData, TError>(${forwardArgs ? `${forwardArgs}, ` : ''}queryOptions, client),`,
-        `    use${op.capitalName}: <TData = ${op.resultTypeName}, TError = unknown>(`,
-        `      ${optParamDecl}queryOptions?: Omit<UseQueryOptions<${op.resultTypeName}, TError, TData>, "queryKey" | "queryFn">`,
-        `    ) => use${op.capitalName}<TData, TError>(${forwardArgs ? `${forwardArgs}, ` : ''}queryOptions, client),`,
-      ].join('\n');
-    }),
-    '  };',
-    '}',
-    '',
-    '/** Factory binding all query and mutation hooks to a custom client instance. */',
-    'export function createHooks(client: Client = defaultClient()) {',
-    '  return {',
-    '    ...createQueries(client),',
-    '    ...createMutations(client),',
-    '  };',
-    '}',
-    '',
-  ].join('\n');
+            return [
+                `${optionsFnDoc}export function get${op.capitalName}MutationOptions<`,
+                "  TError = unknown",
+                ">(",
+                `  mutationOptions?: Omit<UseMutationOptions<${op.resultTypeName}, TError, ${mutationArgType}>, "mutationFn">,`,
+                "  client: Client = defaultClient()",
+                ") {",
+                "  return {",
+                `    mutationKey: [${pathLit}, ${methodLit}] as const,`,
+                `    mutationFn: (${mutationFnArg}) =>`,
+                `      client.${op.name}(${clientCallArgs}),`,
+                "    ...mutationOptions,",
+                "  };",
+                "}",
+                "",
+                `${hookDoc}export function use${op.capitalName}<`,
+                "  TError = unknown",
+                ">(",
+                `  mutationOptions?: Omit<UseMutationOptions<${op.resultTypeName}, TError, ${mutationArgType}>, "mutationFn">,`,
+                "  client: Client = defaultClient()",
+                ") {",
+                `  return useMutation(get${op.capitalName}MutationOptions<TError>(mutationOptions, client));`,
+                "}",
+                "",
+            ];
+        }),
+        "/** Factory binding all mutation options getters and mutation hooks to a custom client instance. */",
+        "export function createMutations(client: Client = defaultClient()) {",
+        "  return {",
+        ...mutationOps.map((op) => {
+            const hasParams = op.slots.length > 0;
+            const mutationArgType = hasParams
+                ? op.slots.length === 1
+                    ? op.slots[0]!.type
+                    : `[${op.slots.map((s) => s.type).join(", ")}]`
+                : "void";
+            return [
+                `    get${op.capitalName}MutationOptions: <TError = unknown>(`,
+                `      mutationOptions?: Omit<UseMutationOptions<${op.resultTypeName}, TError, ${mutationArgType}>, "mutationFn">`,
+                `    ) => get${op.capitalName}MutationOptions<TError>(mutationOptions, client),`,
+                `    use${op.capitalName}: <TError = unknown>(`,
+                `      mutationOptions?: Omit<UseMutationOptions<${op.resultTypeName}, TError, ${mutationArgType}>, "mutationFn">`,
+                `    ) => use${op.capitalName}<TError>(mutationOptions, client),`,
+            ].join("\n");
+        }),
+        "  };",
+        "}",
+        "",
+    ].join("\n");
 
-  const mutationCode = [
-    banner('React Query options getters and hooks for mutation operations.'),
-    'import { useMutation, type UseMutationOptions } from "@tanstack/react-query";',
-    ...(modelMutationImportLine ? [modelMutationImportLine.trim()] : []),
-    `import { defaultClient, type Client${mutationAliases} } from "./api.ts";`,
-    '',
-    ...mutationOps.flatMap((op) => {
-      const pathLit = JSON.stringify(op.pathTemplate);
-      const methodLit = JSON.stringify(op.method);
-      const optionsFnDoc = op.doc ? op.doc : `/** Mutation options getter for \`${op.name}\`. */\n`;
-      const hookDoc = `/** React Query hook for \`${op.name}\`. */\n`;
-
-      const paramNames: string[] = op.slots.map((s) => s.name);
-      const hasParams = paramNames.length > 0;
-      const mutationArgType = hasParams
-        ? paramNames.length === 1
-          ? op.slots[0]!.type
-          : `[${op.slots.map((s) => s.type).join(', ')}]`
-        : 'void';
-      const mutationFnArg = hasParams
-        ? paramNames.length === 1
-          ? `arg: ${op.slots[0]!.type}`
-          : `[${paramNames.join(', ')}]: [${op.slots.map((s) => s.type).join(', ')}]`
-        : '';
-      const clientCallArgs = hasParams
-        ? paramNames.length === 1
-          ? 'arg'
-          : paramNames.join(', ')
-        : '';
-
-      return [
-        `${optionsFnDoc}export function get${op.capitalName}MutationOptions<`,
-        '  TError = unknown',
-        '>(',
-        `  mutationOptions?: Omit<UseMutationOptions<${op.resultTypeName}, TError, ${mutationArgType}>, "mutationFn">,`,
-        '  client: Client = defaultClient()',
-        ') {',
-        '  return {',
-        `    mutationKey: [${pathLit}, ${methodLit}] as const,`,
-        `    mutationFn: (${mutationFnArg}) =>`,
-        `      client.${op.name}(${clientCallArgs}),`,
-        '    ...mutationOptions,',
-        '  };',
-        '}',
-        '',
-        `${hookDoc}export function use${op.capitalName}<`,
-        '  TError = unknown',
-        '>(',
-        `  mutationOptions?: Omit<UseMutationOptions<${op.resultTypeName}, TError, ${mutationArgType}>, "mutationFn">,`,
-        '  client: Client = defaultClient()',
-        ') {',
-        `  return useMutation(get${op.capitalName}MutationOptions<TError>(mutationOptions, client));`,
-        '}',
-        '',
-      ];
-    }),
-    '/** Factory binding all mutation options getters and mutation hooks to a custom client instance. */',
-    'export function createMutations(client: Client = defaultClient()) {',
-    '  return {',
-    ...mutationOps.map((op) => {
-      const hasParams = op.slots.length > 0;
-      const mutationArgType = hasParams
-        ? op.slots.length === 1
-          ? op.slots[0]!.type
-          : `[${op.slots.map((s) => s.type).join(', ')}]`
-        : 'void';
-      return [
-        `    get${op.capitalName}MutationOptions: <TError = unknown>(`,
-        `      mutationOptions?: Omit<UseMutationOptions<${op.resultTypeName}, TError, ${mutationArgType}>, "mutationFn">`,
-        `    ) => get${op.capitalName}MutationOptions<TError>(mutationOptions, client),`,
-        `    use${op.capitalName}: <TError = unknown>(`,
-        `      mutationOptions?: Omit<UseMutationOptions<${op.resultTypeName}, TError, ${mutationArgType}>, "mutationFn">`,
-        `    ) => use${op.capitalName}<TError>(mutationOptions, client),`,
-      ].join('\n');
-    }),
-    '  };',
-    '}',
-    '',
-  ].join('\n');
-
-  return {
-    'queries.ts': queryCode,
-    'mutations.ts': mutationCode,
-  };
+    return {
+        "queries.ts": queryCode,
+        "mutations.ts": mutationCode,
+    };
 }
 
 export const reactQueryGenerator: Generator<ReactQueryOptions> = {
-  name: 'react-query-client',
+    name: "react-query-client",
 
-  api(ir: ApiIR, context) {
-    const baseFiles = tsClientGenerator.api!(ir, context);
-    const reactQueryFiles = emitReactQueryFiles(ir.service, ir.types, context);
-    return { ...baseFiles, ...reactQueryFiles };
-  },
+    api(ir: ApiIR, context) {
+        const baseFiles = tsClientGenerator.api!(ir, context);
+        const reactQueryFiles = emitReactQueryFiles(ir.service, ir.types, context);
+        return { ...baseFiles, ...reactQueryFiles };
+    },
 
-  service(ir: ServiceIR, context) {
-    const baseFiles = tsClientGenerator.service!(ir, context);
-    const reactQueryFiles = emitReactQueryFiles(ir, undefined, context);
-    return { ...baseFiles, ...reactQueryFiles };
-  },
+    service(ir: ServiceIR, context) {
+        const baseFiles = tsClientGenerator.service!(ir, context);
+        const reactQueryFiles = emitReactQueryFiles(ir, undefined, context);
+        return { ...baseFiles, ...reactQueryFiles };
+    },
 
-  type(ir: TypeIR, context) {
-    return tsClientGenerator.type ? tsClientGenerator.type(ir, context) : {};
-  },
+    type(ir: TypeIR, context) {
+        return tsClientGenerator.type ? tsClientGenerator.type(ir, context) : {};
+    },
 };
 
 export default reactQueryGenerator;

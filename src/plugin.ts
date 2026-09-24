@@ -1,67 +1,62 @@
-import type { BunPlugin } from 'bun';
-import * as ts from 'typescript';
-import { extractTypeIR } from './extractors/typescript.ts';
-import { generate, type GeneratedFiles } from './generators/generator.ts';
-import { irToJsonSchema } from './generators/schema.ts';
+import type { BunPlugin } from "bun";
+import * as ts from "typescript";
+import { extractTypeIR } from "./extractors/typescript.ts";
+import { generate, type GeneratedFiles } from "./generators/generator.ts";
+import { VIRTUAL_ENTRY, virtualGenerator, type VirtualModuleOptions } from "./generators/virtualGenerator.ts";
 import {
-  VIRTUAL_ENTRY,
-  virtualGenerator,
-  type VirtualModuleOptions,
-} from './generators/virtualGenerator.ts';
-import {
-  collectOperations,
-  COMPILER_OPTIONS,
-  harvestAsyncApiOperationsFromTypeArgs,
-  harvestDocument,
-  harvestGrpcOperationsFromTypeArgs,
-  harvestMcpOperationsFromTypeArgs,
-  harvestOpenApiOperationsFromTypeArgs,
-  harvestOpenRpcOperationsFromTypeArgs,
-  invalidateHarvest,
-  isServiceLikeType,
-  readOpenApiVersion,
-} from './harvest.ts';
-import { defaultLogger, type WizLogger } from './logger.ts';
-import { getRegisteredType, registerType } from './registry.ts';
-import { getTypeKey, type TypeIR } from './types.ts';
-import { setupVirtualModuleLifecycle } from './virtualPlugin.ts';
+    collectOperations,
+    COMPILER_OPTIONS,
+    harvestAsyncApiOperationsFromTypeArgs,
+    harvestDocument,
+    harvestGrpcOperationsFromTypeArgs,
+    harvestMcpOperationsFromTypeArgs,
+    harvestOpenApiOperationsFromTypeArgs,
+    harvestOpenRpcOperationsFromTypeArgs,
+    invalidateHarvest,
+    isServiceLikeType,
+    readOpenApiVersion,
+} from "./harvest.ts";
+import { defaultLogger, type WizLogger } from "./logger.ts";
+import { getRegisteredType, registerType } from "./registry.ts";
+import { getTypeKey, type TypeIR } from "./types.ts";
+import { setupVirtualModuleLifecycle } from "./virtualPlugin.ts";
 
 const HELPER_FUNCTIONS = new Set([
-  'openapiDocument',
-  'keysOf',
-  'requiredKeysOf',
-  'optionalKeysOf',
-  'deepKeysOf',
-  'jsonSchema',
-  'jsonSchemas',
-  'schema',
-  'validate',
-  'parseQuery',
-  'is',
-  'assert',
-  'openapiSchema',
-  'openRPCSchema',
-  'asyncapiSchema',
-  'mcpSchema',
-  'grpcSchema',
-  'encodeProto',
-  'decodeProto',
-  'protobufSchema',
-  'encodeAvro',
-  'decodeAvro',
-  'avroSchema',
-  'encodeArrow',
-  'decodeArrow',
-  'arrowSchema',
-  'zodSchema',
-  'encodeJson',
-  'decodeJson',
-  'encodeErlangText',
-  'decodeErlangText',
-  'encodeErlangBinary',
-  'decodeErlangBinary',
-  'encodeCbor',
-  'decodeCbor',
+    "openapiDocument",
+    "keysOf",
+    "requiredKeysOf",
+    "optionalKeysOf",
+    "deepKeysOf",
+    "jsonSchema",
+    "jsonSchemas",
+    "schema",
+    "validate",
+    "parseQuery",
+    "is",
+    "assert",
+    "openapiSchema",
+    "openRPCSchema",
+    "asyncapiSchema",
+    "mcpSchema",
+    "grpcSchema",
+    "encodeProto",
+    "decodeProto",
+    "protobufSchema",
+    "encodeAvro",
+    "decodeAvro",
+    "avroSchema",
+    "encodeArrow",
+    "decodeArrow",
+    "arrowSchema",
+    "zodSchema",
+    "encodeJson",
+    "decodeJson",
+    "encodeErlangText",
+    "decodeErlangText",
+    "encodeErlangBinary",
+    "decodeErlangBinary",
+    "encodeCbor",
+    "decodeCbor",
 ]);
 
 /**
@@ -81,50 +76,42 @@ let lastProgram: ts.Program | undefined;
 
 /** A plain value as an AST literal, so the document lands inline in the output. */
 function jsonToExpression(factory: ts.NodeFactory, value: unknown): ts.Expression {
-  if (value === null) {
-    return factory.createNull();
-  }
-  if (typeof value === 'string') {
-    return factory.createStringLiteral(value);
-  }
-  if (typeof value === 'boolean') {
-    return value ? factory.createTrue() : factory.createFalse();
-  }
-  if (typeof value === 'number') {
-    return value < 0
-      ? factory.createPrefixUnaryExpression(
-          ts.SyntaxKind.MinusToken,
-          factory.createNumericLiteral(-value)
-        )
-      : factory.createNumericLiteral(value);
-  }
-  if (Array.isArray(value)) {
-    return factory.createArrayLiteralExpression(
-      value.map((item) => jsonToExpression(factory, item))
-    );
-  }
-  if (typeof value === 'object') {
-    return factory.createObjectLiteralExpression(
-      Object.entries(value as Record<string, unknown>).map(([key, item]) =>
-        factory.createPropertyAssignment(
-          factory.createStringLiteral(key),
-          jsonToExpression(factory, item)
-        )
-      ),
-      true
-    );
-  }
-  return factory.createIdentifier('undefined');
+    if (value === null) {
+        return factory.createNull();
+    }
+    if (typeof value === "string") {
+        return factory.createStringLiteral(value);
+    }
+    if (typeof value === "boolean") {
+        return value ? factory.createTrue() : factory.createFalse();
+    }
+    if (typeof value === "number") {
+        return value < 0
+            ? factory.createPrefixUnaryExpression(ts.SyntaxKind.MinusToken, factory.createNumericLiteral(-value))
+            : factory.createNumericLiteral(value);
+    }
+    if (Array.isArray(value)) {
+        return factory.createArrayLiteralExpression(value.map((item) => jsonToExpression(factory, item)));
+    }
+    if (typeof value === "object") {
+        return factory.createObjectLiteralExpression(
+            Object.entries(value as Record<string, unknown>).map(([key, item]) =>
+                factory.createPropertyAssignment(factory.createStringLiteral(key), jsonToExpression(factory, item)),
+            ),
+            true,
+        );
+    }
+    return factory.createIdentifier("undefined");
 }
 
 export interface WizPluginOptions {
-  /**
-   * Where diagnostics go. Defaults to {@link defaultLogger}, which forwards
-   * `info`/`warn`/`error` to `console` and drops `trace`. Pass
-   * `consoleLogger` for verbose builds, `silentLogger` to mute the plugin, or
-   * any object with the four levels to route them somewhere else.
-   */
-  logger?: WizLogger;
+    /**
+     * Where diagnostics go. Defaults to {@link defaultLogger}, which forwards
+     * `info`/`warn`/`error` to `console` and drops `trace`. Pass
+     * `consoleLogger` for verbose builds, `silentLogger` to mute the plugin, or
+     * any object with the four levels to route them somewhere else.
+     */
+    logger?: WizLogger;
 }
 
 /**
@@ -135,93 +122,93 @@ export interface WizPluginOptions {
  * more pair of things that can drift apart.
  */
 export const VIRTUAL_EXPORTS: Record<string, string> = {
-  keys: '__wiz_keys',
-  requiredKeys: '__wiz_reqKeys',
-  optionalKeys: '__wiz_optKeys',
-  deepKeys: '__wiz_deepKeys',
-  jsonSchema_draft2020: '__wiz_jsonSchema',
-  jsonSchema_draft07: '__wiz_jsonSchema07',
-  jsonSchemas_draft2020: '__wiz_jsonSchemas',
-  jsonSchemas_draft07: '__wiz_jsonSchemas07',
-  schema_draft2020: '__wiz_schema',
-  schema_draft07: '__wiz_schema07',
-  validate: '__wiz_validate',
-  parseQuery: '__wiz_parseQuery',
-  is: '__wiz_is',
-  assert: '__wiz_assert',
-  openapiSchema: '__wiz_openapiSchema',
-  openRPCSchema: '__wiz_openRPCSchema',
-  asyncapiSchema: '__wiz_asyncapiSchema',
-  mcpSchema: '__wiz_mcpSchema',
-  grpcSchema: '__wiz_grpcSchema',
-  encodeProto: '__wiz_encodeProto',
-  decodeProto: '__wiz_decodeProto',
-  protobufSchema: '__wiz_protobufSchema',
-  encodeAvro: '__wiz_encodeAvro',
-  decodeAvro: '__wiz_decodeAvro',
-  avroSchema: '__wiz_avroSchema',
-  encodeArrow: '__wiz_encodeArrow',
-  decodeArrow: '__wiz_decodeArrow',
-  arrowSchema: '__wiz_arrowSchema',
-  zodSchema: '__wiz_zodSchema',
-  encodeJson: '__wiz_encodeJson',
-  decodeJson: '__wiz_decodeJson',
-  encodeErlangText: '__wiz_encodeErlangText',
-  decodeErlangText: '__wiz_decodeErlangText',
-  encodeErlangBinary: '__wiz_encodeErlangBinary',
-  decodeErlangBinary: '__wiz_decodeErlangBinary',
-  encodeCbor: '__wiz_encodeCbor',
-  decodeCbor: '__wiz_decodeCbor',
+    keys: "__wiz_keys",
+    requiredKeys: "__wiz_reqKeys",
+    optionalKeys: "__wiz_optKeys",
+    deepKeys: "__wiz_deepKeys",
+    jsonSchema_draft2020: "__wiz_jsonSchema",
+    jsonSchema_draft07: "__wiz_jsonSchema07",
+    jsonSchemas_draft2020: "__wiz_jsonSchemas",
+    jsonSchemas_draft07: "__wiz_jsonSchemas07",
+    schema_draft2020: "__wiz_schema",
+    schema_draft07: "__wiz_schema07",
+    validate: "__wiz_validate",
+    parseQuery: "__wiz_parseQuery",
+    is: "__wiz_is",
+    assert: "__wiz_assert",
+    openapiSchema: "__wiz_openapiSchema",
+    openRPCSchema: "__wiz_openRPCSchema",
+    asyncapiSchema: "__wiz_asyncapiSchema",
+    mcpSchema: "__wiz_mcpSchema",
+    grpcSchema: "__wiz_grpcSchema",
+    encodeProto: "__wiz_encodeProto",
+    decodeProto: "__wiz_decodeProto",
+    protobufSchema: "__wiz_protobufSchema",
+    encodeAvro: "__wiz_encodeAvro",
+    decodeAvro: "__wiz_decodeAvro",
+    avroSchema: "__wiz_avroSchema",
+    encodeArrow: "__wiz_encodeArrow",
+    decodeArrow: "__wiz_decodeArrow",
+    arrowSchema: "__wiz_arrowSchema",
+    zodSchema: "__wiz_zodSchema",
+    encodeJson: "__wiz_encodeJson",
+    decodeJson: "__wiz_decodeJson",
+    encodeErlangText: "__wiz_encodeErlangText",
+    decodeErlangText: "__wiz_decodeErlangText",
+    encodeErlangBinary: "__wiz_encodeErlangBinary",
+    decodeErlangBinary: "__wiz_decodeErlangBinary",
+    encodeCbor: "__wiz_encodeCbor",
+    decodeCbor: "__wiz_decodeCbor",
 };
 
 export function localAlias(exportName: string, hash: string): string {
-  return `${VIRTUAL_EXPORTS[exportName]}_${hash}`;
+    return `${VIRTUAL_EXPORTS[exportName]}_${hash}`;
 }
 /** One generated module, and the names the rewritten code takes from it. */
 export interface GeneratedModule {
-  /**
-   * The generator's file map, keyed by mount root - the directory prefix the
-   * rewritten import lives under. `index.js` is the entry whose exports the
-   * callsites bind; any other file is the generator's own to import from it.
-   */
-  files: GeneratedFiles;
-  /**
-   * Export names actually used, in the order they were requested. An inlining
-   * caller needs these: the module defines far more than any one file uses.
-   */
-  exports: string[];
-  hash: string;
+    /**
+     * The generator's file map, keyed by mount root - the directory prefix the
+     * rewritten import lives under. `index.js` is the entry whose exports the
+     * callsites bind; any other file is the generator's own to import from it.
+     */
+    files: GeneratedFiles;
+    /**
+     * Export names actually used, in the order they were requested. An inlining
+     * caller needs these: the module defines far more than any one file uses.
+     */
+    exports: string[];
+    hash: string;
 }
 
 /** What a transform produced, and the generated modules it now depends on. */
 export interface TransformResult {
-  /** The rewritten source. */
-  code: string;
-  /** Generated modules by mount root, the prefix `code`'s imports start with. */
-  modules: Map<string, GeneratedModule>;
-  /** False when the file had nothing for wiz to do. */
-  changed: boolean;
+    /** The rewritten source. */
+    code: string;
+    /** Generated modules by mount root, the prefix `code`'s imports start with. */
+    modules: Map<string, GeneratedModule>;
+    /** False when the file had nothing for wiz to do. */
+    changed: boolean;
 }
 
 export interface TransformOptions {
-  path: string;
-  contents: string;
-  logger?: WizLogger;
-  /**
-   * Refuse anything that cannot be answered from this file alone.
-   *
-   * `openapiDocument()` reads every service reachable from the module, so a
-   * single-file eject cannot honour it; better to say so than to emit a
-   * document silently missing most of the program.
-   */
-  isolated?: boolean;
-  /**
-   * Leave the generated modules out of the output's imports.
-   *
-   * The caller is then responsible for putting those definitions in scope,
-   * which is how a single-file eject produces one self-contained file.
-   */
-  inline?: boolean;
+    path: string;
+    contents: string;
+    logger?: WizLogger;
+    /**
+     * Refuse anything that cannot be answered from this file alone.
+     *
+     * `openapiDocument()` reads every service reachable from the module, so a
+     * single-file eject cannot honour it; better to say so than to emit a
+     * document silently missing most of the program.
+     */
+    isolated?: boolean;
+    /**
+     * Leave the generated modules out of the output's imports.
+     *
+     * The caller is then responsible for putting those definitions in scope,
+     * which is how a single-file eject produces one self-contained file.
+     */
+    inline?: boolean;
 }
 
 /**
@@ -231,811 +218,801 @@ export interface TransformOptions {
  * eject writes cannot diverge.
  */
 export function transformSource(options: TransformOptions): TransformResult {
-  const { path, contents, isolated = false, inline = false } = options;
-  const logger = options.logger ?? defaultLogger;
-  const unchanged = (code: string): TransformResult => ({
-    code,
-    modules: new Map(),
-    changed: false,
-  });
+    const { path, contents, isolated = false, inline = false } = options;
+    const logger = options.logger ?? defaultLogger;
+    const unchanged = (code: string): TransformResult => ({
+        code,
+        modules: new Map(),
+        changed: false,
+    });
 
-  // A second transform of one path means the build is running again over it, so
-  // the document harvested for it last time describes source that may already
-  // be gone. The entry is dropped before the transform can read it; what
-  // survives is reuse within a single transform, where several
-  // `openapiDocument()` callsites share one harvest.
-  invalidateHarvest(path);
+    // A second transform of one path means the build is running again over it, so
+    // the document harvested for it last time describes source that may already
+    // be gone. The entry is dropped before the transform can read it; what
+    // survives is reuse within a single transform, where several
+    // `openapiDocument()` callsites share one harvest.
+    invalidateHarvest(path);
 
-  if (
-    contents.includes('@wiz-ignore') ||
-    !Array.from(HELPER_FUNCTIONS).some((fn) => contents.includes(fn))
-  ) {
-    return unchanged(contents);
-  }
-  // Setup TS Compiler Program and Checker for full type checking
-  const host = ts.createCompilerHost(COMPILER_OPTIONS);
-  const originalReadFile = host.readFile.bind(host);
-  const originalGetSourceFile = host.getSourceFile.bind(host);
-
-  host.readFile = (fileName: string) => (fileName === path ? contents : originalReadFile(fileName));
-
-  // A program is built per transformed file; without this the whole of
-  // lib.d.ts is re-parsed every time, which dominates build time.
-  host.getSourceFile = (fileName, languageVersion, onError, shouldCreate) => {
-    if (!fileName.endsWith('.d.ts')) {
-      return originalGetSourceFile(fileName, languageVersion, onError, shouldCreate);
+    if (contents.includes("@wiz-ignore") || !Array.from(HELPER_FUNCTIONS).some((fn) => contents.includes(fn))) {
+        return unchanged(contents);
     }
-    if (!declarationFileCache.has(fileName)) {
-      declarationFileCache.set(
-        fileName,
-        originalGetSourceFile(fileName, languageVersion, onError, shouldCreate)
-      );
-    }
-    return declarationFileCache.get(fileName);
-  };
+    // Setup TS Compiler Program and Checker for full type checking
+    const host = ts.createCompilerHost(COMPILER_OPTIONS);
+    const originalReadFile = host.readFile.bind(host);
+    const originalGetSourceFile = host.getSourceFile.bind(host);
 
-  const program = ts.createProgram([path], COMPILER_OPTIONS, host, lastProgram);
-  lastProgram = program;
-  const checker = program.getTypeChecker();
-  const sourceFile = program.getSourceFile(path);
+    host.readFile = (fileName: string) => (fileName === path ? contents : originalReadFile(fileName));
 
-  if (!sourceFile) {
-    return unchanged(contents);
-  }
-
-  const virtualImports = new Map<string, Set<string>>(); // hash -> set of export names needed
-  let modified = false;
-
-  const transformer: ts.TransformerFactory<ts.SourceFile> = (context) => {
-    const visitor: ts.Visitor = (node: ts.Node): ts.Node => {
-      if (ts.isCallExpression(node)) {
-        const expression = node.expression;
-        let fnName: string | undefined;
-
-        if (ts.isIdentifier(expression)) {
-          fnName = expression.text;
-        } else if (ts.isPropertyAccessExpression(expression)) {
-          const targetObj = expression.expression;
-          if (ts.isIdentifier(targetObj) && targetObj.text === 'openapiSchema') {
-            fnName = expression.name.text;
-          }
+    // A program is built per transformed file; without this the whole of
+    // lib.d.ts is re-parsed every time, which dominates build time.
+    host.getSourceFile = (fileName, languageVersion, onError, shouldCreate) => {
+        if (!fileName.endsWith(".d.ts")) {
+            return originalGetSourceFile(fileName, languageVersion, onError, shouldCreate);
         }
-
-        // `openapiDocument()` is answered here, from the whole program,
-        // so no fragment registry survives into the bundle.
-        if (fnName === 'openapiDocument' && node.arguments.length <= 1) {
-          if (isolated) {
-            throw new Error(
-              `[wiz] ${path} calls openapiDocument(), which is built from every ` +
-                `document reachable from the module. That needs the whole ` +
-                `program, so eject it as a project rather than a single file.`
-            );
-          }
-          modified = true;
-          return jsonToExpression(context.factory, harvestDocument(path, logger));
+        if (!declarationFileCache.has(fileName)) {
+            declarationFileCache.set(fileName, originalGetSourceFile(fileName, languageVersion, onError, shouldCreate));
         }
-
-        if (fnName && HELPER_FUNCTIONS.has(fnName)) {
-          // Determine generic type argument T
-          const typeArgNode = node.typeArguments?.[0];
-          let tsType: ts.Type | undefined;
-
-          if (typeArgNode) {
-            tsType = checker.getTypeFromTypeNode(typeArgNode);
-          } else if (node.arguments.length > 0) {
-            // Fallback: infer from first argument if no generic provided (e.g., validate(arg))
-            tsType = checker.getTypeAtLocation(node.arguments[0]!);
-          }
-
-          if (tsType) {
-            const ir = extractTypeIR(tsType, checker);
-            const hash = getTypeKey(tsType, checker, ir);
-
-            /**
-             * Records an export the bare type provides.
-             *
-             * Registration is lazy: a callsite that only wants a payload
-             * module (`openapiSchema`, `protobufSchema`, …) must not also
-             * emit an empty one for the type it was derived from.
-             */
-            const wantExport = (name: string): void => {
-              registerType(hash, ir);
-              if (!virtualImports.has(hash)) {
-                virtualImports.set(hash, new Set());
-              }
-              virtualImports.get(hash)!.add(name);
-            };
-
-            /**
-             * `f<[A, B]>()` and `f<A>()` alike: the named types a schema
-             * payload carries, in declaration order.
-             */
-            const namedTypeArgs = (): Array<{ name: string; ir: TypeIR }> => {
-              const args = checker.isTupleType(tsType!)
-                ? checker.getTypeArguments(tsType as ts.TypeReference)
-                : [tsType!];
-              return args.map((elemType, index) => {
-                const elemIR = extractTypeIR(elemType, checker);
-                const symbol = elemType.aliasSymbol ?? elemType.symbol;
-                return {
-                  name:
-                    symbol && !symbol.name.startsWith('__')
-                      ? symbol.name
-                      : (elemIR.name ?? `Schema_${index + 1}`),
-                  ir: elemIR,
-                };
-              });
-            };
-
-            /**
-             * Registers a module whose content depends on a generator payload
-             * and returns its key. The key differs from the bare type hash,
-             * because the payload changes the emitted code.
-             */
-            const registerPayload = (exportName: string, payload: VirtualModuleOptions): string => {
-              const { key } = registerType(hash, ir, payload);
-              if (!virtualImports.has(key)) {
-                virtualImports.set(key, new Set());
-              }
-              virtualImports.get(key)!.add(exportName);
-              return key;
-            };
-
-            modified = true;
-
-            switch (fnName) {
-              case 'keysOf': {
-                wantExport('keys');
-                return context.factory.createIdentifier(`__wiz_keys_${hash}`);
-              }
-              case 'requiredKeysOf': {
-                wantExport('requiredKeys');
-                return context.factory.createIdentifier(`__wiz_reqKeys_${hash}`);
-              }
-              case 'optionalKeysOf': {
-                wantExport('optionalKeys');
-                return context.factory.createIdentifier(`__wiz_optKeys_${hash}`);
-              }
-              case 'deepKeysOf': {
-                wantExport('deepKeys');
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_deepKeys_${hash}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'zodSchema': {
-                // A payload, not a bare export: the module's content depends
-                // on wanting zod at all, so the key must too.
-                const key = registerPayload('zodSchema', { zod: true });
-                // The loader is written here, in the consumer's own file,
-                // because that is where `zod` resolves: a virtual module has
-                // no place on disk to resolve a package from. It stays a
-                // dynamic import, so zod loads on first use and never if the
-                // schema goes unused.
-                const loader = context.factory.createArrowFunction(
-                  undefined,
-                  undefined,
-                  [],
-                  undefined,
-                  context.factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
-                  context.factory.createCallExpression(
-                    context.factory.createToken(
-                      ts.SyntaxKind.ImportKeyword
-                    ) as unknown as ts.Expression,
-                    undefined,
-                    [context.factory.createStringLiteral('zod')]
-                  )
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_zodSchema_${key}`),
-                  undefined,
-                  [loader]
-                );
-              }
-              case 'jsonSchema':
-              case 'schema': {
-                // Check version parameter (type arg or value arg)
-                let isDraft07 = false;
-                const versionTypeArg = node.typeArguments?.[1];
-                if (versionTypeArg && ts.isLiteralTypeNode(versionTypeArg)) {
-                  if (
-                    versionTypeArg.literal.getText() === '"draft-07"' ||
-                    versionTypeArg.literal.getText() === "'draft-07'"
-                  ) {
-                    isDraft07 = true;
-                  }
-                } else if (node.arguments.length > 0 && ts.isStringLiteral(node.arguments[0]!)) {
-                  if (node.arguments[0]!.text === 'draft-07') {
-                    isDraft07 = true;
-                  }
-                }
-
-                if (isDraft07) {
-                  wantExport('jsonSchema_draft07');
-                  return context.factory.createIdentifier(`__wiz_jsonSchema07_${hash}`);
-                }
-                wantExport('jsonSchema_draft2020');
-                return context.factory.createIdentifier(`__wiz_jsonSchema_${hash}`);
-              }
-              case 'jsonSchemas': {
-                let isDraft07 = false;
-                const versionTypeArg = node.typeArguments?.[1];
-                if (versionTypeArg && ts.isLiteralTypeNode(versionTypeArg)) {
-                  if (
-                    versionTypeArg.literal.getText() === '"draft-07"' ||
-                    versionTypeArg.literal.getText() === "'draft-07'"
-                  ) {
-                    isDraft07 = true;
-                  }
-                } else if (node.arguments.length > 0 && ts.isStringLiteral(node.arguments[0]!)) {
-                  if (node.arguments[0]!.text === 'draft-07') {
-                    isDraft07 = true;
-                  }
-                }
-
-                const exportName = isDraft07 ? 'jsonSchemas_draft07' : 'jsonSchemas_draft2020';
-                const key = registerPayload(exportName, {
-                  jsonSchemasTypes: namedTypeArgs(),
-                });
-
-                if (isDraft07) {
-                  return context.factory.createIdentifier(`__wiz_jsonSchemas07_${key}`);
-                }
-                return context.factory.createIdentifier(`__wiz_jsonSchemas_${key}`);
-              }
-              case 'validate': {
-                wantExport('validate');
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_validate_${hash}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'parseQuery': {
-                wantExport('parseQuery');
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_parseQuery_${hash}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'is': {
-                wantExport('is');
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_is_${hash}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'assert': {
-                wantExport('assert');
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_assert_${hash}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'openapiSchema': {
-                const openApiVersion = readOpenApiVersion(node);
-
-                const openApiTypes: Array<{ name: string; ir: TypeIR }> = [];
-                let typeArgs: readonly ts.Type[] = [];
-                if (checker.isTupleType(tsType)) {
-                  typeArgs = checker.getTypeArguments(tsType as ts.TypeReference);
-                } else {
-                  typeArgs = [tsType];
-                }
-
-                for (const elemType of typeArgs) {
-                  // A service interface or a function signature describes
-                  // operations, not a payload: it has no component schema.
-                  if (isServiceLikeType(elemType, checker)) {
-                    continue;
-                  }
-                  const elemIR = extractTypeIR(elemType, checker);
-                  const sym = elemType.aliasSymbol ?? elemType.symbol;
-                  const name =
-                    sym && !sym.name.startsWith('__')
-                      ? sym.name
-                      : (elemIR.name ?? `Schema_${openApiTypes.length + 1}`);
-                  openApiTypes.push({ name, ir: elemIR });
-                }
-                const typeArgMethods = harvestOpenApiOperationsFromTypeArgs(
-                  typeArgs,
-                  checker,
-                  sourceFile,
-                  node,
-                  logger
-                );
-                const argMethods = collectOperations(node.arguments[1], checker, sourceFile);
-                const serviceMethods = [...typeArgMethods, ...argMethods];
-                const key = registerPayload('openapiSchema', {
-                  openApiTypes,
-                  openApiVersion,
-                  service: { kind: 'service', methods: serviceMethods },
-                });
-
-                // Operations are compile-time only: they are folded into
-                // the virtual module, so only the base document survives.
-                const baseArg = node.arguments[0]
-                  ? (ts.visitNode(node.arguments[0], visitor) as ts.Expression)
-                  : undefined;
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_openapiSchema_${key}`),
-                  undefined,
-                  baseArg ? [baseArg] : []
-                );
-              }
-              case 'asyncapiSchema': {
-                const asyncApiVersion = '3.0' as const;
-
-                const asyncApiTypes: Array<{ name: string; ir: TypeIR }> = [];
-                let typeArgs: readonly ts.Type[] = [];
-                if (checker.isTupleType(tsType)) {
-                  typeArgs = checker.getTypeArguments(tsType as ts.TypeReference);
-                } else if (tsType) {
-                  typeArgs = [tsType];
-                }
-
-                for (const elemType of typeArgs) {
-                  // A service interface describes channel operations, not a
-                  // message: its payloads come from the harvested methods.
-                  if (isServiceLikeType(elemType, checker)) {
-                    continue;
-                  }
-                  const elemIR = extractTypeIR(elemType, checker);
-                  const sym = elemType.aliasSymbol ?? elemType.symbol;
-                  const name =
-                    sym && !sym.name.startsWith('__')
-                      ? sym.name
-                      : (elemIR.name ?? `Schema_${asyncApiTypes.length + 1}`);
-                  asyncApiTypes.push({ name, ir: elemIR });
-                }
-
-                const serviceMethods = harvestAsyncApiOperationsFromTypeArgs(
-                  typeArgs,
-                  checker,
-                  sourceFile,
-                  node,
-                  logger
-                );
-                const key = registerPayload('asyncapiSchema', {
-                  asyncApiTypes,
-                  asyncApiVersion,
-                  service: { kind: 'service', methods: serviceMethods },
-                });
-
-                const baseArg = node.arguments[0]
-                  ? (ts.visitNode(node.arguments[0], visitor) as ts.Expression)
-                  : undefined;
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_asyncapiSchema_${key}`),
-                  undefined,
-                  baseArg ? [baseArg] : []
-                );
-              }
-              case 'openRPCSchema': {
-                const openRpcTypes: Array<{ name: string; ir: TypeIR }> = [];
-                let typeArgs: readonly ts.Type[] = [];
-                if (checker.isTupleType(tsType)) {
-                  typeArgs = checker.getTypeArguments(tsType as ts.TypeReference);
-                } else if (tsType) {
-                  typeArgs = [tsType];
-                }
-
-                for (const elemType of typeArgs) {
-                  // A service interface describes methods, not a payload: its
-                  // params and results come from the harvested signatures.
-                  if (isServiceLikeType(elemType, checker)) {
-                    continue;
-                  }
-                  const elemIR = extractTypeIR(elemType, checker);
-                  const sym = elemType.aliasSymbol ?? elemType.symbol;
-                  const name =
-                    sym && !sym.name.startsWith('__')
-                      ? sym.name
-                      : (elemIR.name ?? `Schema_${openRpcTypes.length + 1}`);
-                  openRpcTypes.push({ name, ir: elemIR });
-                }
-
-                const serviceMethods = harvestOpenRpcOperationsFromTypeArgs(
-                  typeArgs,
-                  checker,
-                  sourceFile,
-                  node,
-                  logger
-                );
-
-                const key = registerPayload('openRPCSchema', {
-                  openRpcTypes,
-                  service: { kind: 'service', methods: serviceMethods },
-                });
-
-                const baseArg = node.arguments[0]
-                  ? (ts.visitNode(node.arguments[0], visitor) as ts.Expression)
-                  : undefined;
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_openRPCSchema_${key}`),
-                  undefined,
-                  baseArg ? [baseArg] : []
-                );
-              }
-              case 'mcpSchema': {
-                const mcpTypes: Array<{ name: string; ir: TypeIR }> = [];
-                let typeArgs: readonly ts.Type[] = [];
-                if (checker.isTupleType(tsType)) {
-                  typeArgs = checker.getTypeArguments(tsType as ts.TypeReference);
-                } else if (tsType) {
-                  typeArgs = [tsType];
-                }
-
-                for (const elemType of typeArgs) {
-                  const elemIR = extractTypeIR(elemType, checker);
-                  const sym = elemType.aliasSymbol ?? elemType.symbol;
-                  const name =
-                    sym && !sym.name.startsWith('__')
-                      ? sym.name
-                      : (elemIR.name ?? `Tool_${mcpTypes.length + 1}`);
-                  mcpTypes.push({ name, ir: elemIR });
-                }
-
-                const serviceMethods = harvestMcpOperationsFromTypeArgs(
-                  typeArgs,
-                  checker,
-                  sourceFile,
-                  node,
-                  logger
-                );
-
-                const key = registerPayload('mcpSchema', {
-                  mcpTypes,
-                  service: { kind: 'service', methods: serviceMethods },
-                });
-
-                const baseArg =
-                  node.arguments[0] && !ts.isArrayLiteralExpression(node.arguments[0])
-                    ? (ts.visitNode(node.arguments[0], visitor) as ts.Expression)
-                    : undefined;
-
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_mcpSchema_${key}`),
-                  undefined,
-                  baseArg ? [baseArg] : []
-                );
-              }
-              case 'grpcSchema': {
-                const grpcTypes: Array<{ name: string; ir: TypeIR }> = [];
-                let typeArgs: readonly ts.Type[] = [];
-                if (checker.isTupleType(tsType)) {
-                  typeArgs = checker.getTypeArguments(tsType as ts.TypeReference);
-                } else if (tsType) {
-                  typeArgs = [tsType];
-                }
-
-                for (const elemType of typeArgs) {
-                  // A service interface describes rpcs, not a message: its
-                  // payloads come from the harvested method signatures.
-                  if (isServiceLikeType(elemType, checker)) {
-                    continue;
-                  }
-                  const elemIR = extractTypeIR(elemType, checker);
-                  const sym = elemType.aliasSymbol ?? elemType.symbol;
-                  const name =
-                    sym && !sym.name.startsWith('__')
-                      ? sym.name
-                      : (elemIR.name ?? `Message_${grpcTypes.length + 1}`);
-                  grpcTypes.push({ name, ir: elemIR });
-                }
-
-                const serviceMethods = harvestGrpcOperationsFromTypeArgs(
-                  typeArgs,
-                  checker,
-                  sourceFile,
-                  node,
-                  logger
-                );
-
-                const key = registerPayload('grpcSchema', {
-                  grpcTypes,
-                  service: { kind: 'service', methods: serviceMethods },
-                });
-
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_grpcSchema_${key}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'encodeProto': {
-                wantExport('encodeProto');
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_encodeProto_${hash}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'decodeProto': {
-                wantExport('decodeProto');
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_decodeProto_${hash}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'protobufSchema': {
-                const key = registerPayload('protobufSchema', {
-                  protobufSchemaTypes: namedTypeArgs(),
-                });
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_protobufSchema_${key}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'encodeAvro': {
-                wantExport('encodeAvro');
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_encodeAvro_${hash}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'decodeAvro': {
-                wantExport('decodeAvro');
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_decodeAvro_${hash}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'encodeJson': {
-                wantExport('encodeJson');
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_encodeJson_${hash}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'decodeJson': {
-                wantExport('decodeJson');
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_decodeJson_${hash}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'encodeErlangText': {
-                wantExport('encodeErlangText');
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_encodeErlangText_${hash}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'decodeErlangText': {
-                wantExport('decodeErlangText');
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_decodeErlangText_${hash}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'encodeErlangBinary': {
-                wantExport('encodeErlangBinary');
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_encodeErlangBinary_${hash}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'decodeErlangBinary': {
-                wantExport('decodeErlangBinary');
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_decodeErlangBinary_${hash}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'encodeCbor': {
-                wantExport('encodeCbor');
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_encodeCbor_${hash}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'decodeCbor': {
-                wantExport('decodeCbor');
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_decodeCbor_${hash}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'avroSchema': {
-                const key = registerPayload('avroSchema', {
-                  avroSchemaTypes: namedTypeArgs(),
-                });
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_avroSchema_${key}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'encodeArrow':
-              case 'decodeArrow': {
-                // Arrow codegen is opt-in, because building the schema needs
-                // apache-arrow; requesting it here is what turns it on.
-                const key = registerPayload(fnName, { arrow: true });
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_${fnName}_${key}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-              case 'arrowSchema': {
-                const key = registerPayload('arrowSchema', {
-                  arrowSchemaTypes: namedTypeArgs(),
-                });
-                const visitedArgs = node.arguments.map(
-                  (arg) => ts.visitNode(arg, visitor) as ts.Expression
-                );
-                return context.factory.createCallExpression(
-                  context.factory.createIdentifier(`__wiz_arrowSchema_${key}`),
-                  undefined,
-                  visitedArgs
-                );
-              }
-            }
-          }
-        }
-      }
-
-      return ts.visitEachChild(node, visitor, context);
+        return declarationFileCache.get(fileName);
     };
-    return (file) => ts.visitEachChild(file, visitor, context);
-  };
 
-  const result = ts.transform(sourceFile, [transformer]);
-  const transformedSourceFile = result.transformed[0]!;
+    const program = ts.createProgram([path], COMPILER_OPTIONS, host, lastProgram);
+    lastProgram = program;
+    const checker = program.getTypeChecker();
+    const sourceFile = program.getSourceFile(path);
 
-  if (!modified) {
+    if (!sourceFile) {
+        return unchanged(contents);
+    }
+
+    const virtualImports = new Map<string, Set<string>>(); // hash -> set of export names needed
+    let modified = false;
+
+    const transformer: ts.TransformerFactory<ts.SourceFile> = (context) => {
+        const visitor: ts.Visitor = (node: ts.Node): ts.Node => {
+            if (ts.isCallExpression(node)) {
+                const expression = node.expression;
+                let fnName: string | undefined;
+
+                if (ts.isIdentifier(expression)) {
+                    fnName = expression.text;
+                } else if (ts.isPropertyAccessExpression(expression)) {
+                    const targetObj = expression.expression;
+                    if (ts.isIdentifier(targetObj) && targetObj.text === "openapiSchema") {
+                        fnName = expression.name.text;
+                    }
+                }
+
+                // `openapiDocument()` is answered here, from the whole program,
+                // so no fragment registry survives into the bundle.
+                if (fnName === "openapiDocument" && node.arguments.length <= 1) {
+                    if (isolated) {
+                        throw new Error(
+                            `[wiz] ${path} calls openapiDocument(), which is built from every ` +
+                                `document reachable from the module. That needs the whole ` +
+                                `program, so eject it as a project rather than a single file.`,
+                        );
+                    }
+                    modified = true;
+                    return jsonToExpression(context.factory, harvestDocument(path, logger));
+                }
+
+                if (fnName && HELPER_FUNCTIONS.has(fnName)) {
+                    // Determine generic type argument T
+                    const typeArgNode = node.typeArguments?.[0];
+                    let tsType: ts.Type | undefined;
+
+                    if (typeArgNode) {
+                        tsType = checker.getTypeFromTypeNode(typeArgNode);
+                    } else if (node.arguments.length > 0) {
+                        // Fallback: infer from first argument if no generic provided (e.g., validate(arg))
+                        tsType = checker.getTypeAtLocation(node.arguments[0]!);
+                    }
+
+                    if (tsType) {
+                        const ir = extractTypeIR(tsType, checker);
+                        const hash = getTypeKey(tsType, checker, ir);
+
+                        /**
+                         * Records an export the bare type provides.
+                         *
+                         * Registration is lazy: a callsite that only wants a payload
+                         * module (`openapiSchema`, `protobufSchema`, …) must not also
+                         * emit an empty one for the type it was derived from.
+                         */
+                        const wantExport = (name: string): void => {
+                            registerType(hash, ir);
+                            if (!virtualImports.has(hash)) {
+                                virtualImports.set(hash, new Set());
+                            }
+                            virtualImports.get(hash)!.add(name);
+                        };
+
+                        /**
+                         * `f<[A, B]>()` and `f<A>()` alike: the named types a schema
+                         * payload carries, in declaration order.
+                         */
+                        const namedTypeArgs = (): Array<{ name: string; ir: TypeIR }> => {
+                            const args = checker.isTupleType(tsType!)
+                                ? checker.getTypeArguments(tsType as ts.TypeReference)
+                                : [tsType!];
+                            return args.map((elemType, index) => {
+                                const elemIR = extractTypeIR(elemType, checker);
+                                const symbol = elemType.aliasSymbol ?? elemType.symbol;
+                                return {
+                                    name:
+                                        symbol && !symbol.name.startsWith("__")
+                                            ? symbol.name
+                                            : (elemIR.name ?? `Schema_${index + 1}`),
+                                    ir: elemIR,
+                                };
+                            });
+                        };
+
+                        /**
+                         * Registers a module whose content depends on a generator payload
+                         * and returns its key. The key differs from the bare type hash,
+                         * because the payload changes the emitted code.
+                         */
+                        const registerPayload = (exportName: string, payload: VirtualModuleOptions): string => {
+                            const { key } = registerType(hash, ir, payload);
+                            if (!virtualImports.has(key)) {
+                                virtualImports.set(key, new Set());
+                            }
+                            virtualImports.get(key)!.add(exportName);
+                            return key;
+                        };
+
+                        modified = true;
+
+                        switch (fnName) {
+                            case "keysOf": {
+                                wantExport("keys");
+                                return context.factory.createIdentifier(`__wiz_keys_${hash}`);
+                            }
+                            case "requiredKeysOf": {
+                                wantExport("requiredKeys");
+                                return context.factory.createIdentifier(`__wiz_reqKeys_${hash}`);
+                            }
+                            case "optionalKeysOf": {
+                                wantExport("optionalKeys");
+                                return context.factory.createIdentifier(`__wiz_optKeys_${hash}`);
+                            }
+                            case "deepKeysOf": {
+                                wantExport("deepKeys");
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_deepKeys_${hash}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "zodSchema": {
+                                // A payload, not a bare export: the module's content depends
+                                // on wanting zod at all, so the key must too.
+                                const key = registerPayload("zodSchema", { zod: true });
+                                // The loader is written here, in the consumer's own file,
+                                // because that is where `zod` resolves: a virtual module has
+                                // no place on disk to resolve a package from. It stays a
+                                // dynamic import, so zod loads on first use and never if the
+                                // schema goes unused.
+                                const loader = context.factory.createArrowFunction(
+                                    undefined,
+                                    undefined,
+                                    [],
+                                    undefined,
+                                    context.factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+                                    context.factory.createCallExpression(
+                                        context.factory.createToken(
+                                            ts.SyntaxKind.ImportKeyword,
+                                        ) as unknown as ts.Expression,
+                                        undefined,
+                                        [context.factory.createStringLiteral("zod")],
+                                    ),
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_zodSchema_${key}`),
+                                    undefined,
+                                    [loader],
+                                );
+                            }
+                            case "jsonSchema":
+                            case "schema": {
+                                // Check version parameter (type arg or value arg)
+                                let isDraft07 = false;
+                                const versionTypeArg = node.typeArguments?.[1];
+                                if (versionTypeArg && ts.isLiteralTypeNode(versionTypeArg)) {
+                                    if (
+                                        versionTypeArg.literal.getText() === '"draft-07"' ||
+                                        versionTypeArg.literal.getText() === "'draft-07'"
+                                    ) {
+                                        isDraft07 = true;
+                                    }
+                                } else if (node.arguments.length > 0 && ts.isStringLiteral(node.arguments[0]!)) {
+                                    if (node.arguments[0]!.text === "draft-07") {
+                                        isDraft07 = true;
+                                    }
+                                }
+
+                                if (isDraft07) {
+                                    wantExport("jsonSchema_draft07");
+                                    return context.factory.createIdentifier(`__wiz_jsonSchema07_${hash}`);
+                                }
+                                wantExport("jsonSchema_draft2020");
+                                return context.factory.createIdentifier(`__wiz_jsonSchema_${hash}`);
+                            }
+                            case "jsonSchemas": {
+                                let isDraft07 = false;
+                                const versionTypeArg = node.typeArguments?.[1];
+                                if (versionTypeArg && ts.isLiteralTypeNode(versionTypeArg)) {
+                                    if (
+                                        versionTypeArg.literal.getText() === '"draft-07"' ||
+                                        versionTypeArg.literal.getText() === "'draft-07'"
+                                    ) {
+                                        isDraft07 = true;
+                                    }
+                                } else if (node.arguments.length > 0 && ts.isStringLiteral(node.arguments[0]!)) {
+                                    if (node.arguments[0]!.text === "draft-07") {
+                                        isDraft07 = true;
+                                    }
+                                }
+
+                                const exportName = isDraft07 ? "jsonSchemas_draft07" : "jsonSchemas_draft2020";
+                                const key = registerPayload(exportName, {
+                                    jsonSchemasTypes: namedTypeArgs(),
+                                });
+
+                                if (isDraft07) {
+                                    return context.factory.createIdentifier(`__wiz_jsonSchemas07_${key}`);
+                                }
+                                return context.factory.createIdentifier(`__wiz_jsonSchemas_${key}`);
+                            }
+                            case "validate": {
+                                wantExport("validate");
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_validate_${hash}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "parseQuery": {
+                                wantExport("parseQuery");
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_parseQuery_${hash}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "is": {
+                                wantExport("is");
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_is_${hash}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "assert": {
+                                wantExport("assert");
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_assert_${hash}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "openapiSchema": {
+                                const openApiVersion = readOpenApiVersion(node);
+
+                                const openApiTypes: Array<{ name: string; ir: TypeIR }> = [];
+                                let typeArgs: readonly ts.Type[] = [];
+                                if (checker.isTupleType(tsType)) {
+                                    typeArgs = checker.getTypeArguments(tsType as ts.TypeReference);
+                                } else {
+                                    typeArgs = [tsType];
+                                }
+
+                                for (const elemType of typeArgs) {
+                                    // A service interface or a function signature describes
+                                    // operations, not a payload: it has no component schema.
+                                    if (isServiceLikeType(elemType, checker)) {
+                                        continue;
+                                    }
+                                    const elemIR = extractTypeIR(elemType, checker);
+                                    const sym = elemType.aliasSymbol ?? elemType.symbol;
+                                    const name =
+                                        sym && !sym.name.startsWith("__")
+                                            ? sym.name
+                                            : (elemIR.name ?? `Schema_${openApiTypes.length + 1}`);
+                                    openApiTypes.push({ name, ir: elemIR });
+                                }
+                                const typeArgMethods = harvestOpenApiOperationsFromTypeArgs(
+                                    typeArgs,
+                                    checker,
+                                    sourceFile,
+                                    node,
+                                    logger,
+                                );
+                                const argMethods = collectOperations(node.arguments[1], checker, sourceFile);
+                                const serviceMethods = [...typeArgMethods, ...argMethods];
+                                const key = registerPayload("openapiSchema", {
+                                    openApiTypes,
+                                    openApiVersion,
+                                    service: { kind: "service", methods: serviceMethods },
+                                });
+
+                                // Operations are compile-time only: they are folded into
+                                // the virtual module, so only the base document survives.
+                                const baseArg = node.arguments[0]
+                                    ? (ts.visitNode(node.arguments[0], visitor) as ts.Expression)
+                                    : undefined;
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_openapiSchema_${key}`),
+                                    undefined,
+                                    baseArg ? [baseArg] : [],
+                                );
+                            }
+                            case "asyncapiSchema": {
+                                const asyncApiVersion = "3.0" as const;
+
+                                const asyncApiTypes: Array<{ name: string; ir: TypeIR }> = [];
+                                let typeArgs: readonly ts.Type[] = [];
+                                if (checker.isTupleType(tsType)) {
+                                    typeArgs = checker.getTypeArguments(tsType as ts.TypeReference);
+                                } else if (tsType) {
+                                    typeArgs = [tsType];
+                                }
+
+                                for (const elemType of typeArgs) {
+                                    // A service interface describes channel operations, not a
+                                    // message: its payloads come from the harvested methods.
+                                    if (isServiceLikeType(elemType, checker)) {
+                                        continue;
+                                    }
+                                    const elemIR = extractTypeIR(elemType, checker);
+                                    const sym = elemType.aliasSymbol ?? elemType.symbol;
+                                    const name =
+                                        sym && !sym.name.startsWith("__")
+                                            ? sym.name
+                                            : (elemIR.name ?? `Schema_${asyncApiTypes.length + 1}`);
+                                    asyncApiTypes.push({ name, ir: elemIR });
+                                }
+
+                                const serviceMethods = harvestAsyncApiOperationsFromTypeArgs(
+                                    typeArgs,
+                                    checker,
+                                    sourceFile,
+                                    node,
+                                    logger,
+                                );
+                                const key = registerPayload("asyncapiSchema", {
+                                    asyncApiTypes,
+                                    asyncApiVersion,
+                                    service: { kind: "service", methods: serviceMethods },
+                                });
+
+                                const baseArg = node.arguments[0]
+                                    ? (ts.visitNode(node.arguments[0], visitor) as ts.Expression)
+                                    : undefined;
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_asyncapiSchema_${key}`),
+                                    undefined,
+                                    baseArg ? [baseArg] : [],
+                                );
+                            }
+                            case "openRPCSchema": {
+                                const openRpcTypes: Array<{ name: string; ir: TypeIR }> = [];
+                                let typeArgs: readonly ts.Type[] = [];
+                                if (checker.isTupleType(tsType)) {
+                                    typeArgs = checker.getTypeArguments(tsType as ts.TypeReference);
+                                } else if (tsType) {
+                                    typeArgs = [tsType];
+                                }
+
+                                for (const elemType of typeArgs) {
+                                    // A service interface describes methods, not a payload: its
+                                    // params and results come from the harvested signatures.
+                                    if (isServiceLikeType(elemType, checker)) {
+                                        continue;
+                                    }
+                                    const elemIR = extractTypeIR(elemType, checker);
+                                    const sym = elemType.aliasSymbol ?? elemType.symbol;
+                                    const name =
+                                        sym && !sym.name.startsWith("__")
+                                            ? sym.name
+                                            : (elemIR.name ?? `Schema_${openRpcTypes.length + 1}`);
+                                    openRpcTypes.push({ name, ir: elemIR });
+                                }
+
+                                const serviceMethods = harvestOpenRpcOperationsFromTypeArgs(
+                                    typeArgs,
+                                    checker,
+                                    sourceFile,
+                                    node,
+                                    logger,
+                                );
+
+                                const key = registerPayload("openRPCSchema", {
+                                    openRpcTypes,
+                                    service: { kind: "service", methods: serviceMethods },
+                                });
+
+                                const baseArg = node.arguments[0]
+                                    ? (ts.visitNode(node.arguments[0], visitor) as ts.Expression)
+                                    : undefined;
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_openRPCSchema_${key}`),
+                                    undefined,
+                                    baseArg ? [baseArg] : [],
+                                );
+                            }
+                            case "mcpSchema": {
+                                const mcpTypes: Array<{ name: string; ir: TypeIR }> = [];
+                                let typeArgs: readonly ts.Type[] = [];
+                                if (checker.isTupleType(tsType)) {
+                                    typeArgs = checker.getTypeArguments(tsType as ts.TypeReference);
+                                } else if (tsType) {
+                                    typeArgs = [tsType];
+                                }
+
+                                for (const elemType of typeArgs) {
+                                    const elemIR = extractTypeIR(elemType, checker);
+                                    const sym = elemType.aliasSymbol ?? elemType.symbol;
+                                    const name =
+                                        sym && !sym.name.startsWith("__")
+                                            ? sym.name
+                                            : (elemIR.name ?? `Tool_${mcpTypes.length + 1}`);
+                                    mcpTypes.push({ name, ir: elemIR });
+                                }
+
+                                const serviceMethods = harvestMcpOperationsFromTypeArgs(
+                                    typeArgs,
+                                    checker,
+                                    sourceFile,
+                                    node,
+                                    logger,
+                                );
+
+                                const key = registerPayload("mcpSchema", {
+                                    mcpTypes,
+                                    service: { kind: "service", methods: serviceMethods },
+                                });
+
+                                const baseArg =
+                                    node.arguments[0] && !ts.isArrayLiteralExpression(node.arguments[0])
+                                        ? (ts.visitNode(node.arguments[0], visitor) as ts.Expression)
+                                        : undefined;
+
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_mcpSchema_${key}`),
+                                    undefined,
+                                    baseArg ? [baseArg] : [],
+                                );
+                            }
+                            case "grpcSchema": {
+                                const grpcTypes: Array<{ name: string; ir: TypeIR }> = [];
+                                let typeArgs: readonly ts.Type[] = [];
+                                if (checker.isTupleType(tsType)) {
+                                    typeArgs = checker.getTypeArguments(tsType as ts.TypeReference);
+                                } else if (tsType) {
+                                    typeArgs = [tsType];
+                                }
+
+                                for (const elemType of typeArgs) {
+                                    // A service interface describes rpcs, not a message: its
+                                    // payloads come from the harvested method signatures.
+                                    if (isServiceLikeType(elemType, checker)) {
+                                        continue;
+                                    }
+                                    const elemIR = extractTypeIR(elemType, checker);
+                                    const sym = elemType.aliasSymbol ?? elemType.symbol;
+                                    const name =
+                                        sym && !sym.name.startsWith("__")
+                                            ? sym.name
+                                            : (elemIR.name ?? `Message_${grpcTypes.length + 1}`);
+                                    grpcTypes.push({ name, ir: elemIR });
+                                }
+
+                                const serviceMethods = harvestGrpcOperationsFromTypeArgs(
+                                    typeArgs,
+                                    checker,
+                                    sourceFile,
+                                    node,
+                                    logger,
+                                );
+
+                                const key = registerPayload("grpcSchema", {
+                                    grpcTypes,
+                                    service: { kind: "service", methods: serviceMethods },
+                                });
+
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_grpcSchema_${key}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "encodeProto": {
+                                wantExport("encodeProto");
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_encodeProto_${hash}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "decodeProto": {
+                                wantExport("decodeProto");
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_decodeProto_${hash}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "protobufSchema": {
+                                const key = registerPayload("protobufSchema", {
+                                    protobufSchemaTypes: namedTypeArgs(),
+                                });
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_protobufSchema_${key}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "encodeAvro": {
+                                wantExport("encodeAvro");
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_encodeAvro_${hash}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "decodeAvro": {
+                                wantExport("decodeAvro");
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_decodeAvro_${hash}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "encodeJson": {
+                                wantExport("encodeJson");
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_encodeJson_${hash}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "decodeJson": {
+                                wantExport("decodeJson");
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_decodeJson_${hash}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "encodeErlangText": {
+                                wantExport("encodeErlangText");
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_encodeErlangText_${hash}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "decodeErlangText": {
+                                wantExport("decodeErlangText");
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_decodeErlangText_${hash}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "encodeErlangBinary": {
+                                wantExport("encodeErlangBinary");
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_encodeErlangBinary_${hash}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "decodeErlangBinary": {
+                                wantExport("decodeErlangBinary");
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_decodeErlangBinary_${hash}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "encodeCbor": {
+                                wantExport("encodeCbor");
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_encodeCbor_${hash}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "decodeCbor": {
+                                wantExport("decodeCbor");
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_decodeCbor_${hash}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "avroSchema": {
+                                const key = registerPayload("avroSchema", {
+                                    avroSchemaTypes: namedTypeArgs(),
+                                });
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_avroSchema_${key}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "encodeArrow":
+                            case "decodeArrow": {
+                                // Arrow codegen is opt-in, because building the schema needs
+                                // apache-arrow; requesting it here is what turns it on.
+                                const key = registerPayload(fnName, { arrow: true });
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_${fnName}_${key}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                            case "arrowSchema": {
+                                const key = registerPayload("arrowSchema", {
+                                    arrowSchemaTypes: namedTypeArgs(),
+                                });
+                                const visitedArgs = node.arguments.map(
+                                    (arg) => ts.visitNode(arg, visitor) as ts.Expression,
+                                );
+                                return context.factory.createCallExpression(
+                                    context.factory.createIdentifier(`__wiz_arrowSchema_${key}`),
+                                    undefined,
+                                    visitedArgs,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            return ts.visitEachChild(node, visitor, context);
+        };
+        return (file) => ts.visitEachChild(file, visitor, context);
+    };
+
+    const result = ts.transform(sourceFile, [transformer]);
+    const transformedSourceFile = result.transformed[0]!;
+
+    if (!modified) {
+        result.dispose();
+        return unchanged(contents);
+    }
+
+    // One table drives both the imports emitted here and the inlining `eject`
+    // does, so the two cannot disagree about what a generated name is called.
+    const importStatements: ts.Statement[] = [];
+    for (const [hash, exportsSet] of virtualImports.entries()) {
+        const specifiers = Object.keys(VIRTUAL_EXPORTS)
+            .filter((name) => exportsSet.has(name))
+            .map((name) => contextSpecifier(name, localAlias(name, hash)));
+
+        if (specifiers.length > 0) {
+            const importDecl = ts.factory.createImportDeclaration(
+                undefined,
+                ts.factory.createImportClause(false, undefined, ts.factory.createNamedImports(specifiers)),
+                ts.factory.createStringLiteral(`./wiz-virtual/${hash}/${VIRTUAL_ENTRY}`),
+            );
+            importStatements.push(importDecl);
+        }
+    }
+    const finalSourceFile = ts.factory.updateSourceFile(
+        transformedSourceFile,
+        // Inlining puts the definitions in scope another way, so importing them
+        // here as well would just shadow them.
+        inline ? [...transformedSourceFile.statements] : [...importStatements, ...transformedSourceFile.statements],
+    );
+
+    const printer = ts.createPrinter({ removeComments: false });
+    const transformedCode = printer.printFile(finalSourceFile);
     result.dispose();
-    return unchanged(contents);
-  }
 
-  // One table drives both the imports emitted here and the inlining `eject`
-  // does, so the two cannot disagree about what a generated name is called.
-  const importStatements: ts.Statement[] = [];
-  for (const [hash, exportsSet] of virtualImports.entries()) {
-    const specifiers = Object.keys(VIRTUAL_EXPORTS)
-      .filter((name) => exportsSet.has(name))
-      .map((name) => contextSpecifier(name, localAlias(name, hash)));
+    const modules = new Map<string, GeneratedModule>();
+    for (const [hash, exportsSet] of virtualImports) {
+        const entry = getRegisteredType(hash);
+        if (!entry) {
+            continue;
+        }
+        const exports = [...exportsSet];
 
-    if (specifiers.length > 0) {
-      const importDecl = ts.factory.createImportDeclaration(
-        undefined,
-        ts.factory.createImportClause(false, undefined, ts.factory.createNamedImports(specifiers)),
-        ts.factory.createStringLiteral(`./wiz-virtual/${hash}/${VIRTUAL_ENTRY}`)
-      );
-      importStatements.push(importDecl);
+        // A module handed to a bundler carries every generator, since other files
+        // share it by type key and the bundler drops the rest. Inlined code is read
+        // by a person, so it is regenerated with only what this file uses - through
+        // the same generator the registry ran, not a second emission path.
+        const files = inline ? generate(entry.ir, virtualGenerator, { ...entry.options, only: exports }) : entry.files;
+
+        modules.set(`./wiz-virtual/${hash}`, { files, exports, hash });
     }
-  }
-  const finalSourceFile = ts.factory.updateSourceFile(
-    transformedSourceFile,
-    // Inlining puts the definitions in scope another way, so importing them
-    // here as well would just shadow them.
-    inline
-      ? [...transformedSourceFile.statements]
-      : [...importStatements, ...transformedSourceFile.statements]
-  );
 
-  const printer = ts.createPrinter({ removeComments: false });
-  const transformedCode = printer.printFile(finalSourceFile);
-  result.dispose();
-
-  const modules = new Map<string, GeneratedModule>();
-  for (const [hash, exportsSet] of virtualImports) {
-    const entry = getRegisteredType(hash);
-    if (!entry) {
-      continue;
-    }
-    const exports = [...exportsSet];
-
-    // A module handed to a bundler carries every generator, since other files
-    // share it by type key and the bundler drops the rest. Inlined code is read
-    // by a person, so it is regenerated with only what this file uses - through
-    // the same generator the registry ran, not a second emission path.
-    const files = inline
-      ? generate(entry.ir, virtualGenerator, { ...entry.options, only: exports })
-      : entry.files;
-
-    modules.set(`./wiz-virtual/${hash}`, { files, exports, hash });
-  }
-
-  return { code: transformedCode, modules, changed: true };
+    return { code: transformedCode, modules, changed: true };
 }
 
 export function wizPlugin(options: WizPluginOptions = {}): BunPlugin {
-  const logger = options.logger ?? defaultLogger;
-  return {
-    name: 'wiz-plugin',
-    setup(build) {
-      setupVirtualModuleLifecycle(build, logger, ({ path, contents, logger }) =>
-        transformSource({ path, contents, logger })
-      );
-    },
-  };
+    const logger = options.logger ?? defaultLogger;
+    return {
+        name: "wiz-plugin",
+        setup(build) {
+            setupVirtualModuleLifecycle(build, logger, ({ path, contents, logger }) =>
+                transformSource({ path, contents, logger }),
+            );
+        },
+    };
 }
 
 function contextSpecifier(propertyName: string, name: string): ts.ImportSpecifier {
-  return ts.factory.createImportSpecifier(
-    false,
-    propertyName === name ? undefined : ts.factory.createIdentifier(propertyName),
-    ts.factory.createIdentifier(name)
-  );
+    return ts.factory.createImportSpecifier(
+        false,
+        propertyName === name ? undefined : ts.factory.createIdentifier(propertyName),
+        ts.factory.createIdentifier(name),
+    );
 }

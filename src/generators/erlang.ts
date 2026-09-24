@@ -1,10 +1,10 @@
-import type { TypeIR } from '../types.ts';
+import type { TypeIR } from "../types.ts";
 
 /**
  * Generates Virtual Module code for `encodeErlangText` and `decodeErlangText`.
  */
 export function generateErlangTextCode(_ir: TypeIR): string {
-  return `
+    return `
 var __wizTextEnc;
 var __wizTextDec;
 
@@ -335,7 +335,7 @@ export function decodeErlangText(raw) {
  * Generates Virtual Module code for `encodeErlangBinary` and `decodeErlangBinary`.
  */
 export function generateErlangBinaryCode(_ir: TypeIR): string {
-  return `
+    return `
 var __wizBinEnc;
 var __wizBinDec;
 

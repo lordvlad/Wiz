@@ -1,469 +1,435 @@
-import type { Constraint, ObjectTypeIR, PropertyIR, TypeIR } from '../types.ts';
-import {
-  INTEGER_FORMATS,
-  SAFE_INTEGER,
-  STRING_FORMAT_REGEX,
-  STRING_FORMATS,
-  walkTypeIR,
-} from '../types.ts';
+import type { Constraint, TypeIR } from "../types.ts";
+import { INTEGER_FORMATS, SAFE_INTEGER, STRING_FORMAT_REGEX, STRING_FORMATS, walkTypeIR } from "../types.ts";
 
 /** A JS boolean expression testing whether `varName` matches `ir`. */
 export function generateTypeCheckExpression(ir: TypeIR, varName: string): string {
-  switch (ir.kind) {
-    case 'primitive':
-      switch (ir.type) {
-        case 'string':
-          return `typeof ${varName} === "string"`;
-        case 'number':
-          return `typeof ${varName} === "number" && !Number.isNaN(${varName})`;
-        case 'boolean':
-          return `typeof ${varName} === "boolean"`;
-        case 'bigint':
-          return `typeof ${varName} === "bigint"`;
-        case 'null':
-          return `${varName} === null`;
-        case 'undefined':
-          return `${varName} === undefined`;
-        case 'symbol':
-          return `typeof ${varName} === "symbol"`;
-        case 'bytes':
-          return `${varName} instanceof Uint8Array || ${varName} instanceof ArrayBuffer`;
-        case 'date':
-          return `((${varName} instanceof Date || (typeof ${varName} === "object" && ${varName} !== null && typeof ${varName}.getTime === "function")) && !Number.isNaN(${varName}.getTime()))`;
-        case 'unknown':
-        case 'any':
-          return `true`;
-        case 'void':
-        case 'never':
-          return `${varName} === undefined`;
-      }
-      return `true`;
+    switch (ir.kind) {
+        case "primitive":
+            switch (ir.type) {
+                case "string":
+                    return `typeof ${varName} === "string"`;
+                case "number":
+                    return `typeof ${varName} === "number" && !Number.isNaN(${varName})`;
+                case "boolean":
+                    return `typeof ${varName} === "boolean"`;
+                case "bigint":
+                    return `typeof ${varName} === "bigint"`;
+                case "null":
+                    return `${varName} === null`;
+                case "undefined":
+                    return `${varName} === undefined`;
+                case "symbol":
+                    return `typeof ${varName} === "symbol"`;
+                case "bytes":
+                    return `${varName} instanceof Uint8Array || ${varName} instanceof ArrayBuffer`;
+                case "date":
+                    return `((${varName} instanceof Date || (typeof ${varName} === "object" && ${varName} !== null && typeof ${varName}.getTime === "function")) && !Number.isNaN(${varName}.getTime()))`;
+                case "unknown":
+                case "any":
+                    return `true`;
+                case "void":
+                case "never":
+                    return `${varName} === undefined`;
+            }
+            return `true`;
 
-    case 'literal':
-      if (typeof ir.value === 'bigint') {
-        return `${varName} === BigInt(${JSON.stringify(ir.value.toString())})`;
-      }
-      return `${varName} === ${JSON.stringify(ir.value)}`;
+        case "literal":
+            if (typeof ir.value === "bigint") {
+                return `${varName} === BigInt(${JSON.stringify(ir.value.toString())})`;
+            }
+            return `${varName} === ${JSON.stringify(ir.value)}`;
 
-    case 'enum': {
-      const allowed = ir.members.map((m) => m.value);
-      return `${JSON.stringify(allowed)}.includes(${varName})`;
+        case "enum": {
+            const allowed = ir.members.map((m) => m.value);
+            return `${JSON.stringify(allowed)}.includes(${varName})`;
+        }
+
+        case "object":
+            return `${varName} !== null && typeof ${varName} === "object" && !Array.isArray(${varName})`;
+
+        case "array":
+        case "tuple":
+            return `Array.isArray(${varName})`;
+
+        case "record":
+            return `${varName} !== null && typeof ${varName} === "object" && !Array.isArray(${varName})`;
+
+        case "union": {
+            const checks = ir.types.map((t) => generateTypeCheckExpression(t, varName));
+            return `(${checks.join(" || ")})`;
+        }
+
+        case "intersection": {
+            const checks = ir.types.map((t) => generateTypeCheckExpression(t, varName));
+            return `(${checks.join(" && ")})`;
+        }
+
+        case "ref":
+            return `true`;
     }
-
-    case 'object':
-      return `${varName} !== null && typeof ${varName} === "object" && !Array.isArray(${varName})`;
-
-    case 'array':
-    case 'tuple':
-      return `Array.isArray(${varName})`;
-
-    case 'record':
-      return `${varName} !== null && typeof ${varName} === "object" && !Array.isArray(${varName})`;
-
-    case 'union': {
-      const checks = ir.types.map((t) => generateTypeCheckExpression(t, varName));
-      return `(${checks.join(' || ')})`;
-    }
-
-    case 'intersection': {
-      const checks = ir.types.map((t) => generateTypeCheckExpression(t, varName));
-      return `(${checks.join(' && ')})`;
-    }
-
-    case 'ref':
-      return `true`;
-  }
 }
 
 function generateConstraintCheckStatements(
-  constraints: Constraint[] | undefined,
-  varName: string,
-  pathVar: string
+    constraints: Constraint[] | undefined,
+    varName: string,
+    pathVar: string,
 ): string[] {
-  if (!constraints || constraints.length === 0) {
-    return [];
-  }
-  const statements: string[] = [];
-
-  for (const c of constraints) {
-    const val = c.value;
-    const jsonVal = JSON.stringify(val);
-
-    switch (c.kind) {
-      case 'min':
-      case 'minimum':
-        statements.push(
-          `if (${varName} < ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected value >= " + ${jsonVal}, constraint: "minimum", expected: ">= " + ${jsonVal}, actual: ${varName} });`
-        );
-        break;
-      case 'max':
-      case 'maximum':
-        statements.push(
-          `if (${varName} > ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected value <= " + ${jsonVal}, constraint: "maximum", expected: "<= " + ${jsonVal}, actual: ${varName} });`
-        );
-        break;
-      case 'exclusiveMinimum':
-        statements.push(
-          `if (${varName} <= ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected value > " + ${jsonVal}, constraint: "exclusiveMinimum", expected: "> " + ${jsonVal}, actual: ${varName} });`
-        );
-        break;
-      case 'exclusiveMaximum':
-        statements.push(
-          `if (${varName} >= ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected value < " + ${jsonVal}, constraint: "exclusiveMaximum", expected: "< " + ${jsonVal}, actual: ${varName} });`
-        );
-        break;
-      case 'minLength':
-        statements.push(
-          `if (typeof ${varName} === "string" && __wizLength(${varName}) < ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected length >= " + ${jsonVal}, constraint: "minLength", expected: ">= " + ${jsonVal}, actual: __wizLength(${varName}) });`
-        );
-        break;
-      case 'maxLength':
-        statements.push(
-          `if (typeof ${varName} === "string" && __wizLength(${varName}) > ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected length <= " + ${jsonVal}, constraint: "maxLength", expected: "<= " + ${jsonVal}, actual: __wizLength(${varName}) });`
-        );
-        break;
-      case 'pattern':
-        statements.push(
-          `if (typeof ${varName} === "string" && !__wizPattern(${jsonVal}).test(${varName})) errors.push({ path: ${pathVar}, message: "Expected string matching pattern " + ${jsonVal}, constraint: "pattern", expected: ${jsonVal}, actual: ${varName} });`
-        );
-        break;
-      case 'format': {
-        const stringFormat = typeof val === 'string' ? STRING_FORMATS[val] : undefined;
-
-        if (stringFormat) {
-          // Through `__wizPattern` so the source is compiled once and shared
-          // with every other check that names it, rather than a fresh literal
-          // per field.
-          const source = JSON.stringify(stringFormat.pattern);
-          statements.push(
-            `if (typeof ${varName} === "string" && !__wizPattern(${source}).test(${varName})) errors.push({ path: ${pathVar}, message: "Invalid ${stringFormat.label} format", constraint: "format", expected: ${JSON.stringify(stringFormat.label)}, actual: ${varName} });`
-          );
-        } else if (val === STRING_FORMAT_REGEX) {
-          // The one format that is not a pattern: whether a string *is* a
-          // regex can only be answered by compiling it.
-          statements.push(
-            `if (typeof ${varName} === "string" && !__wizIsRegex(${varName})) errors.push({ path: ${pathVar}, message: "Invalid regex format", constraint: "format", expected: "regex", actual: ${varName} });`
-          );
-        } else if (typeof val === 'string' && INTEGER_FORMATS[val]) {
-          // A width that is declared and not checked is the worst of both: the
-          // codecs narrow the value to fit and the wrong number travels.
-          const { min, max } = INTEGER_FORMATS[val]!;
-          const expected = `${val} (${min}..${max})`;
-
-          // A number is checked against the range a number can state exactly;
-          // past that the value is already imprecise, whatever the width allows.
-          const numberMin = min < -SAFE_INTEGER ? -SAFE_INTEGER : min;
-          const numberMax = max > SAFE_INTEGER ? SAFE_INTEGER : max;
-
-          statements.push(
-            `if (typeof ${varName} === "number" && (!Number.isInteger(${varName}) || ${varName} < ${numberMin} || ${varName} > ${numberMax})) errors.push({ path: ${pathVar}, message: "Expected an integer in range for ${val}", constraint: "format", expected: ${JSON.stringify(expected)}, actual: ${varName} });`
-          );
-          statements.push(
-            `if (typeof ${varName} === "bigint" && (${varName} < ${min}n || ${varName} > ${max}n)) errors.push({ path: ${pathVar}, message: "Expected an integer in range for ${val}", constraint: "format", expected: ${JSON.stringify(expected)}, actual: ${varName} });`
-          );
-        }
-        break;
-      }
-      case 'minItems':
-        statements.push(
-          `if (Array.isArray(${varName}) && ${varName}.length < ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected array items count >= " + ${jsonVal}, constraint: "minItems", expected: ">= " + ${jsonVal}, actual: ${varName}.length });`
-        );
-        break;
-      case 'maxItems':
-        statements.push(
-          `if (Array.isArray(${varName}) && ${varName}.length > ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected array items count <= " + ${jsonVal}, constraint: "maxItems", expected: "<= " + ${jsonVal}, actual: ${varName}.length });`
-        );
-        break;
-      case 'multipleOf':
-        // Integer division rather than a remainder, matching JSON Schema and
-        // Ajv: `0.3 % 0.1` is not 0 in binary floating point, and a tolerance
-        // here would accept values the schema rejects.
-        statements.push(
-          `if (typeof ${varName} === "number" && !Number.isInteger(${varName} / ${jsonVal})) errors.push({ path: ${pathVar}, message: "Expected a multiple of " + ${jsonVal}, constraint: "multipleOf", expected: "multiple of " + ${jsonVal}, actual: ${varName} });`
-        );
-        break;
-      case 'uniqueItems':
-        // `@uniqueItems false` states no requirement, so it must not impose one.
-        if (val === false) {
-          break;
-        }
-        statements.push(
-          `if (Array.isArray(${varName}) && !__wizUnique(${varName})) errors.push({ path: ${pathVar}, message: "Array items must be unique", constraint: "uniqueItems", actual: ${varName} });`
-        );
-        break;
+    if (!constraints || constraints.length === 0) {
+        return [];
     }
-  }
+    const statements: string[] = [];
 
-  return statements;
+    for (const c of constraints) {
+        const val = c.value;
+        const jsonVal = JSON.stringify(val);
+
+        switch (c.kind) {
+            case "min":
+            case "minimum":
+                statements.push(
+                    `if (${varName} < ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected value >= " + ${jsonVal}, constraint: "minimum", expected: ">= " + ${jsonVal}, actual: ${varName} });`,
+                );
+                break;
+            case "max":
+            case "maximum":
+                statements.push(
+                    `if (${varName} > ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected value <= " + ${jsonVal}, constraint: "maximum", expected: "<= " + ${jsonVal}, actual: ${varName} });`,
+                );
+                break;
+            case "exclusiveMinimum":
+                statements.push(
+                    `if (${varName} <= ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected value > " + ${jsonVal}, constraint: "exclusiveMinimum", expected: "> " + ${jsonVal}, actual: ${varName} });`,
+                );
+                break;
+            case "exclusiveMaximum":
+                statements.push(
+                    `if (${varName} >= ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected value < " + ${jsonVal}, constraint: "exclusiveMaximum", expected: "< " + ${jsonVal}, actual: ${varName} });`,
+                );
+                break;
+            case "minLength":
+                statements.push(
+                    `if (typeof ${varName} === "string" && __wizLength(${varName}) < ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected length >= " + ${jsonVal}, constraint: "minLength", expected: ">= " + ${jsonVal}, actual: __wizLength(${varName}) });`,
+                );
+                break;
+            case "maxLength":
+                statements.push(
+                    `if (typeof ${varName} === "string" && __wizLength(${varName}) > ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected length <= " + ${jsonVal}, constraint: "maxLength", expected: "<= " + ${jsonVal}, actual: __wizLength(${varName}) });`,
+                );
+                break;
+            case "pattern":
+                statements.push(
+                    `if (typeof ${varName} === "string" && !__wizPattern(${jsonVal}).test(${varName})) errors.push({ path: ${pathVar}, message: "Expected string matching pattern " + ${jsonVal}, constraint: "pattern", expected: ${jsonVal}, actual: ${varName} });`,
+                );
+                break;
+            case "format": {
+                const stringFormat = typeof val === "string" ? STRING_FORMATS[val] : undefined;
+
+                if (stringFormat) {
+                    // Through `__wizPattern` so the source is compiled once and shared
+                    // with every other check that names it, rather than a fresh literal
+                    // per field.
+                    const source = JSON.stringify(stringFormat.pattern);
+                    statements.push(
+                        `if (typeof ${varName} === "string" && !__wizPattern(${source}).test(${varName})) errors.push({ path: ${pathVar}, message: "Invalid ${stringFormat.label} format", constraint: "format", expected: ${JSON.stringify(stringFormat.label)}, actual: ${varName} });`,
+                    );
+                } else if (val === STRING_FORMAT_REGEX) {
+                    // The one format that is not a pattern: whether a string *is* a
+                    // regex can only be answered by compiling it.
+                    statements.push(
+                        `if (typeof ${varName} === "string" && !__wizIsRegex(${varName})) errors.push({ path: ${pathVar}, message: "Invalid regex format", constraint: "format", expected: "regex", actual: ${varName} });`,
+                    );
+                } else if (typeof val === "string" && INTEGER_FORMATS[val]) {
+                    // A width that is declared and not checked is the worst of both: the
+                    // codecs narrow the value to fit and the wrong number travels.
+                    const { min, max } = INTEGER_FORMATS[val]!;
+                    const expected = `${val} (${min}..${max})`;
+
+                    // A number is checked against the range a number can state exactly;
+                    // past that the value is already imprecise, whatever the width allows.
+                    const numberMin = min < -SAFE_INTEGER ? -SAFE_INTEGER : min;
+                    const numberMax = max > SAFE_INTEGER ? SAFE_INTEGER : max;
+
+                    statements.push(
+                        `if (typeof ${varName} === "number" && (!Number.isInteger(${varName}) || ${varName} < ${numberMin} || ${varName} > ${numberMax})) errors.push({ path: ${pathVar}, message: "Expected an integer in range for ${val}", constraint: "format", expected: ${JSON.stringify(expected)}, actual: ${varName} });`,
+                    );
+                    statements.push(
+                        `if (typeof ${varName} === "bigint" && (${varName} < ${min}n || ${varName} > ${max}n)) errors.push({ path: ${pathVar}, message: "Expected an integer in range for ${val}", constraint: "format", expected: ${JSON.stringify(expected)}, actual: ${varName} });`,
+                    );
+                }
+                break;
+            }
+            case "minItems":
+                statements.push(
+                    `if (Array.isArray(${varName}) && ${varName}.length < ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected array items count >= " + ${jsonVal}, constraint: "minItems", expected: ">= " + ${jsonVal}, actual: ${varName}.length });`,
+                );
+                break;
+            case "maxItems":
+                statements.push(
+                    `if (Array.isArray(${varName}) && ${varName}.length > ${jsonVal}) errors.push({ path: ${pathVar}, message: "Expected array items count <= " + ${jsonVal}, constraint: "maxItems", expected: "<= " + ${jsonVal}, actual: ${varName}.length });`,
+                );
+                break;
+            case "multipleOf":
+                // Integer division rather than a remainder, matching JSON Schema and
+                // Ajv: `0.3 % 0.1` is not 0 in binary floating point, and a tolerance
+                // here would accept values the schema rejects.
+                statements.push(
+                    `if (typeof ${varName} === "number" && !Number.isInteger(${varName} / ${jsonVal})) errors.push({ path: ${pathVar}, message: "Expected a multiple of " + ${jsonVal}, constraint: "multipleOf", expected: "multiple of " + ${jsonVal}, actual: ${varName} });`,
+                );
+                break;
+            case "uniqueItems":
+                // `@uniqueItems false` states no requirement, so it must not impose one.
+                if (val === false) {
+                    break;
+                }
+                statements.push(
+                    `if (Array.isArray(${varName}) && !__wizUnique(${varName})) errors.push({ path: ${pathVar}, message: "Array items must be unique", constraint: "uniqueItems", actual: ${varName} });`,
+                );
+                break;
+        }
+    }
+
+    return statements;
 }
 
-export function generateValidationBlock(
-  ir: TypeIR,
-  varName: string,
-  pathVar: string,
-  depth = 0,
-  isTs = false
-): string {
-  const lines: string[] = [];
+export function generateValidationBlock(ir: TypeIR, varName: string, pathVar: string, depth = 0, isTs = false): string {
+    const lines: string[] = [];
 
-  switch (ir.kind) {
-    case 'primitive':
-    case 'literal':
-    case 'enum': {
-      const checkExpr = generateTypeCheckExpression(ir, varName);
-      lines.push(`if (!(${checkExpr})) {`);
-      lines.push(
-        `  errors.push({ path: ${pathVar}, message: "Expected ${ir.kind} matching specification", expected: ${JSON.stringify(ir.kind)}, actual: ${varName} });`
-      );
-      lines.push(`} else {`);
-      const constraintChecks = generateConstraintCheckStatements(ir.constraints, varName, pathVar);
-      for (const st of constraintChecks) {
-        lines.push(`  ${st}`);
-      }
-      lines.push(`}`);
-      break;
-    }
-
-    case 'object': {
-      lines.push(
-        `if (${varName} === null || typeof ${varName} !== "object" || Array.isArray(${varName})) {`
-      );
-      lines.push(
-        `  errors.push({ path: ${pathVar}, message: "Expected object", expected: "object", actual: ${varName} === null ? "null" : typeof ${varName} });`
-      );
-      lines.push(`} else {`);
-
-      // Pruning is a call-time choice, so the branch is emitted once and the
-      // flag decides. `additionalProperties` is respected: a schema that says
-      // extra fields are allowed (and what type they are) has not left them
-      // undeclared, so removing them would be discarding declared data.
-      const closed = ir.additionalProperties === undefined || ir.additionalProperties === false;
-      if (closed) {
-        const declared = ir.properties
-          .map((prop) => `k !== ${JSON.stringify(prop.name)}`)
-          .join(' && ');
-
-        lines.push(`  if (__prune) {`);
-        // A snapshot rather than `for...in`: deleting from the object being
-        // enumerated is what the snapshot exists to make well defined.
-        lines.push(`    for (const k of Object.keys(${varName})) {`);
-        const targetAccess = isTs ? `(${varName} as any)` : varName;
-        lines.push(
-          declared.length > 0
-            ? `      if (${declared}) delete ${targetAccess}[k];`
-            : `      delete ${targetAccess}[k];`
-        );
-        lines.push(`    }`);
-        lines.push(`  }`);
-      }
-
-      const propConstraintChecks = generateConstraintCheckStatements(
-        ir.constraints,
-        varName,
-        pathVar
-      );
-      for (const st of propConstraintChecks) {
-        lines.push(`  ${st}`);
-      }
-
-      for (const prop of ir.properties) {
-        const propVar = `v_${depth}_${prop.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
-        const propPathVar = `p_${depth}_${prop.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
-
-        lines.push(
-          `  const ${propPathVar} = ${pathVar} ? ${pathVar} + "." + ${JSON.stringify(prop.name)} : ${JSON.stringify(prop.name)};`
-        );
-        lines.push(`  const ${propVar} = ${varName}[${JSON.stringify(prop.name)}];`);
-
-        if (prop.optional) {
-          lines.push(`  if (${propVar} !== undefined) {`);
-          lines.push(
-            generateValidationBlock(prop.type, propVar, propPathVar, depth + 1, isTs)
-              .split('\n')
-              .map((l) => `    ${l}`)
-              .join('\n')
-          );
-          const propConstraints = generateConstraintCheckStatements(
-            prop.constraints,
-            propVar,
-            propPathVar
-          );
-          for (const st of propConstraints) {
-            lines.push(`    ${st}`);
-          }
-          lines.push(`  }`);
-        } else {
-          lines.push(`  if (${propVar} === undefined) {`);
-          lines.push(
-            `    errors.push({ path: ${propPathVar}, message: "Required property is missing", constraint: "required", expected: "defined", actual: undefined });`
-          );
-          lines.push(`  } else {`);
-          lines.push(
-            generateValidationBlock(prop.type, propVar, propPathVar, depth + 1, isTs)
-              .split('\n')
-              .map((l) => `    ${l}`)
-              .join('\n')
-          );
-          const propConstraints = generateConstraintCheckStatements(
-            prop.constraints,
-            propVar,
-            propPathVar
-          );
-          for (const st of propConstraints) {
-            lines.push(`    ${st}`);
-          }
-          lines.push(`  }`);
+    switch (ir.kind) {
+        case "primitive":
+        case "literal":
+        case "enum": {
+            const checkExpr = generateTypeCheckExpression(ir, varName);
+            lines.push(`if (!(${checkExpr})) {`);
+            lines.push(
+                `  errors.push({ path: ${pathVar}, message: "Expected ${ir.kind} matching specification", expected: ${JSON.stringify(ir.kind)}, actual: ${varName} });`,
+            );
+            lines.push(`} else {`);
+            const constraintChecks = generateConstraintCheckStatements(ir.constraints, varName, pathVar);
+            for (const st of constraintChecks) {
+                lines.push(`  ${st}`);
+            }
+            lines.push(`}`);
+            break;
         }
-      }
 
-      lines.push(`}`);
-      break;
-    }
+        case "object": {
+            lines.push(`if (${varName} === null || typeof ${varName} !== "object" || Array.isArray(${varName})) {`);
+            lines.push(
+                `  errors.push({ path: ${pathVar}, message: "Expected object", expected: "object", actual: ${varName} === null ? "null" : typeof ${varName} });`,
+            );
+            lines.push(`} else {`);
 
-    case 'array': {
-      lines.push(`if (!Array.isArray(${varName})) {`);
-      lines.push(
-        `  errors.push({ path: ${pathVar}, message: "Expected array", expected: "array", actual: typeof ${varName} });`
-      );
-      lines.push(`} else {`);
+            // Pruning is a call-time choice, so the branch is emitted once and the
+            // flag decides. `additionalProperties` is respected: a schema that says
+            // extra fields are allowed (and what type they are) has not left them
+            // undeclared, so removing them would be discarding declared data.
+            const closed = ir.additionalProperties === undefined || ir.additionalProperties === false;
+            if (closed) {
+                const declared = ir.properties.map((prop) => `k !== ${JSON.stringify(prop.name)}`).join(" && ");
 
-      const arrConstraints = generateConstraintCheckStatements(ir.constraints, varName, pathVar);
-      for (const st of arrConstraints) {
-        lines.push(`  ${st}`);
-      }
+                lines.push(`  if (__prune) {`);
+                // A snapshot rather than `for...in`: deleting from the object being
+                // enumerated is what the snapshot exists to make well defined.
+                lines.push(`    for (const k of Object.keys(${varName})) {`);
+                const targetAccess = isTs ? `(${varName} as any)` : varName;
+                lines.push(
+                    declared.length > 0
+                        ? `      if (${declared}) delete ${targetAccess}[k];`
+                        : `      delete ${targetAccess}[k];`,
+                );
+                lines.push(`    }`);
+                lines.push(`  }`);
+            }
 
-      const elemVar = `elem_${depth}`;
-      const idxVar = `i_${depth}`;
-      const elemPathVar = `elemPath_${depth}`;
+            const propConstraintChecks = generateConstraintCheckStatements(ir.constraints, varName, pathVar);
+            for (const st of propConstraintChecks) {
+                lines.push(`  ${st}`);
+            }
 
-      lines.push(`  for (let ${idxVar} = 0; ${idxVar} < ${varName}.length; ${idxVar}++) {`);
-      lines.push(`    const ${elemVar} = ${varName}[${idxVar}];`);
-      lines.push(
-        `    const ${elemPathVar} = (${pathVar} ? ${pathVar} : "") + "[" + ${idxVar} + "]";`
-      );
-      lines.push(
-        generateValidationBlock(ir.element, elemVar, elemPathVar, depth + 1, isTs)
-          .split('\n')
-          .map((l) => `    ${l}`)
-          .join('\n')
-      );
-      lines.push(`  }`);
-      lines.push(`}`);
-      break;
-    }
+            for (const prop of ir.properties) {
+                const propVar = `v_${depth}_${prop.name.replace(/[^a-zA-Z0-9]/g, "_")}`;
+                const propPathVar = `p_${depth}_${prop.name.replace(/[^a-zA-Z0-9]/g, "_")}`;
 
-    case 'tuple': {
-      lines.push(`if (!Array.isArray(${varName})) {`);
-      lines.push(
-        `  errors.push({ path: ${pathVar}, message: "Expected tuple array", expected: "array", actual: typeof ${varName} });`
-      );
-      lines.push(`} else {`);
+                lines.push(
+                    `  const ${propPathVar} = ${pathVar} ? ${pathVar} + "." + ${JSON.stringify(prop.name)} : ${JSON.stringify(prop.name)};`,
+                );
+                lines.push(`  const ${propVar} = ${varName}[${JSON.stringify(prop.name)}];`);
 
-      ir.elements.forEach((elem, idx) => {
-        const elemVar = `tuple_${depth}_${idx}`;
-        const elemPathVar = `tuplePath_${depth}_${idx}`;
-        lines.push(`  const ${elemPathVar} = (${pathVar} ? ${pathVar} : "") + "[" + ${idx} + "]";`);
-        lines.push(`  const ${elemVar} = ${varName}[${idx}];`);
+                if (prop.optional) {
+                    lines.push(`  if (${propVar} !== undefined) {`);
+                    lines.push(
+                        generateValidationBlock(prop.type, propVar, propPathVar, depth + 1, isTs)
+                            .split("\n")
+                            .map((l) => `    ${l}`)
+                            .join("\n"),
+                    );
+                    const propConstraints = generateConstraintCheckStatements(prop.constraints, propVar, propPathVar);
+                    for (const st of propConstraints) {
+                        lines.push(`    ${st}`);
+                    }
+                    lines.push(`  }`);
+                } else {
+                    lines.push(`  if (${propVar} === undefined) {`);
+                    lines.push(
+                        `    errors.push({ path: ${propPathVar}, message: "Required property is missing", constraint: "required", expected: "defined", actual: undefined });`,
+                    );
+                    lines.push(`  } else {`);
+                    lines.push(
+                        generateValidationBlock(prop.type, propVar, propPathVar, depth + 1, isTs)
+                            .split("\n")
+                            .map((l) => `    ${l}`)
+                            .join("\n"),
+                    );
+                    const propConstraints = generateConstraintCheckStatements(prop.constraints, propVar, propPathVar);
+                    for (const st of propConstraints) {
+                        lines.push(`    ${st}`);
+                    }
+                    lines.push(`  }`);
+                }
+            }
 
-        if (elem.optional) {
-          lines.push(`  if (${elemVar} !== undefined) {`);
-          lines.push(
-            generateValidationBlock(elem.type, elemVar, elemPathVar, depth + 1, isTs)
-              .split('\n')
-              .map((l) => `    ${l}`)
-              .join('\n')
-          );
-          lines.push(`  }`);
-        } else {
-          lines.push(`  if (${elemVar} === undefined) {`);
-          lines.push(
-            `    errors.push({ path: ${elemPathVar}, message: "Tuple element missing", expected: "defined", actual: undefined });`
-          );
-          lines.push(`  } else {`);
-          lines.push(
-            generateValidationBlock(elem.type, elemVar, elemPathVar, depth + 1, isTs)
-              .split('\n')
-              .map((l) => `    ${l}`)
-              .join('\n')
-          );
-          lines.push(`  }`);
+            lines.push(`}`);
+            break;
         }
-      });
 
-      lines.push(`}`);
-      break;
+        case "array": {
+            lines.push(`if (!Array.isArray(${varName})) {`);
+            lines.push(
+                `  errors.push({ path: ${pathVar}, message: "Expected array", expected: "array", actual: typeof ${varName} });`,
+            );
+            lines.push(`} else {`);
+
+            const arrConstraints = generateConstraintCheckStatements(ir.constraints, varName, pathVar);
+            for (const st of arrConstraints) {
+                lines.push(`  ${st}`);
+            }
+
+            const elemVar = `elem_${depth}`;
+            const idxVar = `i_${depth}`;
+            const elemPathVar = `elemPath_${depth}`;
+
+            lines.push(`  for (let ${idxVar} = 0; ${idxVar} < ${varName}.length; ${idxVar}++) {`);
+            lines.push(`    const ${elemVar} = ${varName}[${idxVar}];`);
+            lines.push(`    const ${elemPathVar} = (${pathVar} ? ${pathVar} : "") + "[" + ${idxVar} + "]";`);
+            lines.push(
+                generateValidationBlock(ir.element, elemVar, elemPathVar, depth + 1, isTs)
+                    .split("\n")
+                    .map((l) => `    ${l}`)
+                    .join("\n"),
+            );
+            lines.push(`  }`);
+            lines.push(`}`);
+            break;
+        }
+
+        case "tuple": {
+            lines.push(`if (!Array.isArray(${varName})) {`);
+            lines.push(
+                `  errors.push({ path: ${pathVar}, message: "Expected tuple array", expected: "array", actual: typeof ${varName} });`,
+            );
+            lines.push(`} else {`);
+
+            ir.elements.forEach((elem, idx) => {
+                const elemVar = `tuple_${depth}_${idx}`;
+                const elemPathVar = `tuplePath_${depth}_${idx}`;
+                lines.push(`  const ${elemPathVar} = (${pathVar} ? ${pathVar} : "") + "[" + ${idx} + "]";`);
+                lines.push(`  const ${elemVar} = ${varName}[${idx}];`);
+
+                if (elem.optional) {
+                    lines.push(`  if (${elemVar} !== undefined) {`);
+                    lines.push(
+                        generateValidationBlock(elem.type, elemVar, elemPathVar, depth + 1, isTs)
+                            .split("\n")
+                            .map((l) => `    ${l}`)
+                            .join("\n"),
+                    );
+                    lines.push(`  }`);
+                } else {
+                    lines.push(`  if (${elemVar} === undefined) {`);
+                    lines.push(
+                        `    errors.push({ path: ${elemPathVar}, message: "Tuple element missing", expected: "defined", actual: undefined });`,
+                    );
+                    lines.push(`  } else {`);
+                    lines.push(
+                        generateValidationBlock(elem.type, elemVar, elemPathVar, depth + 1, isTs)
+                            .split("\n")
+                            .map((l) => `    ${l}`)
+                            .join("\n"),
+                    );
+                    lines.push(`  }`);
+                }
+            });
+
+            lines.push(`}`);
+            break;
+        }
+
+        case "union": {
+            const _branchErrorsVar = `unionErrs_${depth}`;
+            const branchValidVar = `unionValid_${depth}`;
+
+            lines.push(`let ${branchValidVar} = false;`);
+            for (let i = 0; i < ir.types.length; i++) {
+                const subType = ir.types[i]!;
+                lines.push(`if (!${branchValidVar}) {`);
+                lines.push(`  const errors = [];`);
+                lines.push(
+                    generateValidationBlock(subType, varName, pathVar, depth + 1, isTs)
+                        .split("\n")
+                        .map((l) => `  ${l}`)
+                        .join("\n"),
+                );
+                lines.push(`  if (errors.length === 0) {`);
+                lines.push(`    ${branchValidVar} = true;`);
+                lines.push(`  }`);
+                lines.push(`}`);
+            }
+
+            lines.push(`if (!${branchValidVar}) {`);
+            lines.push(
+                `  errors.push({ path: ${pathVar}, message: "Value does not match any union variant", expected: "union variant", actual: ${varName} });`,
+            );
+            lines.push(`}`);
+            break;
+        }
+
+        case "intersection": {
+            for (const subType of ir.types) {
+                lines.push(generateValidationBlock(subType, varName, pathVar, depth + 1, isTs));
+            }
+            break;
+        }
+
+        case "record": {
+            lines.push(`if (${varName} === null || typeof ${varName} !== "object" || Array.isArray(${varName})) {`);
+            lines.push(
+                `  errors.push({ path: ${pathVar}, message: "Expected record object", expected: "object", actual: ${varName} === null ? "null" : typeof ${varName} });`,
+            );
+            lines.push(`} else {`);
+
+            const keyVar = `k_${depth}`;
+            const valVar = `v_${depth}`;
+            const entryPathVar = `entryPath_${depth}`;
+
+            lines.push(`  for (const [${keyVar}, ${valVar}] of Object.entries(${varName})) {`);
+            lines.push(`    const ${entryPathVar} = ${pathVar} ? ${pathVar} + "." + ${keyVar} : ${keyVar};`);
+            lines.push(
+                generateValidationBlock(ir.valueType, valVar, entryPathVar, depth + 1, isTs)
+                    .split("\n")
+                    .map((l) => `    ${l}`)
+                    .join("\n"),
+            );
+            lines.push(`  }`);
+            lines.push(`}`);
+            break;
+        }
+
+        case "ref": {
+            break;
+        }
     }
 
-    case 'union': {
-      const branchErrorsVar = `unionErrs_${depth}`;
-      const branchValidVar = `unionValid_${depth}`;
-
-      lines.push(`let ${branchValidVar} = false;`);
-      for (let i = 0; i < ir.types.length; i++) {
-        const subType = ir.types[i]!;
-        lines.push(`if (!${branchValidVar}) {`);
-        lines.push(`  const errors = [];`);
-        lines.push(
-          generateValidationBlock(subType, varName, pathVar, depth + 1, isTs)
-            .split('\n')
-            .map((l) => `  ${l}`)
-            .join('\n')
-        );
-        lines.push(`  if (errors.length === 0) {`);
-        lines.push(`    ${branchValidVar} = true;`);
-        lines.push(`  }`);
-        lines.push(`}`);
-      }
-
-      lines.push(`if (!${branchValidVar}) {`);
-      lines.push(
-        `  errors.push({ path: ${pathVar}, message: "Value does not match any union variant", expected: "union variant", actual: ${varName} });`
-      );
-      lines.push(`}`);
-      break;
-    }
-
-    case 'intersection': {
-      for (const subType of ir.types) {
-        lines.push(generateValidationBlock(subType, varName, pathVar, depth + 1, isTs));
-      }
-      break;
-    }
-
-    case 'record': {
-      lines.push(
-        `if (${varName} === null || typeof ${varName} !== "object" || Array.isArray(${varName})) {`
-      );
-      lines.push(
-        `  errors.push({ path: ${pathVar}, message: "Expected record object", expected: "object", actual: ${varName} === null ? "null" : typeof ${varName} });`
-      );
-      lines.push(`} else {`);
-
-      const keyVar = `k_${depth}`;
-      const valVar = `v_${depth}`;
-      const entryPathVar = `entryPath_${depth}`;
-
-      lines.push(`  for (const [${keyVar}, ${valVar}] of Object.entries(${varName})) {`);
-      lines.push(
-        `    const ${entryPathVar} = ${pathVar} ? ${pathVar} + "." + ${keyVar} : ${keyVar};`
-      );
-      lines.push(
-        generateValidationBlock(ir.valueType, valVar, entryPathVar, depth + 1, isTs)
-          .split('\n')
-          .map((l) => `    ${l}`)
-          .join('\n')
-      );
-      lines.push(`  }`);
-      lines.push(`}`);
-      break;
-    }
-
-    case 'ref': {
-      break;
-    }
-  }
-
-  return lines.join('\n');
+    return lines.join("\n");
 }
 
 /**
@@ -485,101 +451,99 @@ export function generateValidationBlock(
  * force casts into it, which is exactly the divergence being avoided.
  */
 const HELPER_SIGNATURES: Record<string, { parameters: Record<string, string>; returns: string }> = {
-  __wizLength: { parameters: { str: 'string' }, returns: 'number' },
-  // `__wizEqual` recurses, and `strict` will not infer a return type for a
-  // function referenced from its own return expression - so this is required,
-  // not decoration.
-  __wizEqual: { parameters: { a: 'any', b: 'any' }, returns: 'boolean' },
-  __wizUnique: { parameters: { items: 'any[]' }, returns: 'boolean' },
-  __wizPattern: { parameters: { src: 'string' }, returns: 'RegExp' },
-  __wizIsRegex: { parameters: { src: 'string' }, returns: 'boolean' },
+    __wizLength: { parameters: { str: "string" }, returns: "number" },
+    // `__wizEqual` recurses, and `strict` will not infer a return type for a
+    // function referenced from its own return expression - so this is required,
+    // not decoration.
+    __wizEqual: { parameters: { a: "any", b: "any" }, returns: "boolean" },
+    __wizUnique: { parameters: { items: "any[]" }, returns: "boolean" },
+    __wizPattern: { parameters: { src: "string" }, returns: "RegExp" },
+    __wizIsRegex: { parameters: { src: "string" }, returns: "boolean" },
 };
 
 /** `function __wizLength(str)`, or the same with types. */
 function helperDeclaration(name: string, annotate: boolean): string {
-  const { parameters, returns } = HELPER_SIGNATURES[name]!;
-  const list = Object.entries(parameters)
-    .map(([parameter, type]) => (annotate ? `${parameter}: ${type}` : parameter))
-    .join(', ');
+    const { parameters, returns } = HELPER_SIGNATURES[name]!;
+    const list = Object.entries(parameters)
+        .map(([parameter, type]) => (annotate ? `${parameter}: ${type}` : parameter))
+        .join(", ");
 
-  return `function ${name}(${list})${annotate ? `: ${returns}` : ''}`;
+    return `function ${name}(${list})${annotate ? `: ${returns}` : ""}`;
 }
 
 const HELPER_BODIES: Record<string, (annotate: boolean) => string> = {
-  length: (annotate) =>
-    [
-      `${helperDeclaration('__wizLength', annotate)} {`,
-      `  // JSON Schema counts characters, so an astral character such as an emoji`,
-      `  // is one, where String.length would call it two.`,
-      `  let length = 0;`,
-      `  let pos = 0;`,
-      `  while (pos < str.length) {`,
-      `    length++;`,
-      `    const value = str.charCodeAt(pos++);`,
-      `    if (value >= 0xd800 && value <= 0xdbff && pos < str.length) {`,
-      `      if ((str.charCodeAt(pos) & 0xfc00) === 0xdc00) pos++;`,
-      `    }`,
-      `  }`,
-      `  return length;`,
-      `}`,
-    ].join('\n'),
+    length: (annotate) =>
+        [
+            `${helperDeclaration("__wizLength", annotate)} {`,
+            `  // JSON Schema counts characters, so an astral character such as an emoji`,
+            `  // is one, where String.length would call it two.`,
+            `  let length = 0;`,
+            `  let pos = 0;`,
+            `  while (pos < str.length) {`,
+            `    length++;`,
+            `    const value = str.charCodeAt(pos++);`,
+            `    if (value >= 0xd800 && value <= 0xdbff && pos < str.length) {`,
+            `      if ((str.charCodeAt(pos) & 0xfc00) === 0xdc00) pos++;`,
+            `    }`,
+            `  }`,
+            `  return length;`,
+            `}`,
+        ].join("\n"),
 
-  unique: (annotate) =>
-    [
-      `${helperDeclaration('__wizEqual', annotate)} {`,
-      `  if (a === b) return true;`,
-      `  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;`,
-      `  if (Array.isArray(a) !== Array.isArray(b)) return false;`,
-      `  if (Array.isArray(a)) {`,
-      `    if (a.length !== b.length) return false;`,
-      `    return a.every((item, i) => __wizEqual(item, b[i]));`,
-      `  }`,
-      `  const keys = Object.keys(a);`,
-      `  if (keys.length !== Object.keys(b).length) return false;`,
-      `  // Key order carries no meaning in JSON, so it carries none here.`,
-      `  return keys.every((k) => Object.hasOwn(b, k) && __wizEqual(a[k], b[k]));`,
-      `}`,
-      ``,
-      `${helperDeclaration('__wizUnique', annotate)} {`,
-      `  for (let i = 1; i < items.length; i++) {`,
-      `    for (let j = 0; j < i; j++) {`,
-      `      if (__wizEqual(items[i], items[j])) return false;`,
-      `    }`,
-      `  }`,
-      `  return true;`,
-      `}`,
-    ].join('\n'),
+    unique: (annotate) =>
+        [
+            `${helperDeclaration("__wizEqual", annotate)} {`,
+            `  if (a === b) return true;`,
+            `  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;`,
+            `  if (Array.isArray(a) !== Array.isArray(b)) return false;`,
+            `  if (Array.isArray(a)) {`,
+            `    if (a.length !== b.length) return false;`,
+            `    return a.every((item, i) => __wizEqual(item, b[i]));`,
+            `  }`,
+            `  const keys = Object.keys(a);`,
+            `  if (keys.length !== Object.keys(b).length) return false;`,
+            `  // Key order carries no meaning in JSON, so it carries none here.`,
+            `  return keys.every((k) => Object.hasOwn(b, k) && __wizEqual(a[k], b[k]));`,
+            `}`,
+            ``,
+            `${helperDeclaration("__wizUnique", annotate)} {`,
+            `  for (let i = 1; i < items.length; i++) {`,
+            `    for (let j = 0; j < i; j++) {`,
+            `      if (__wizEqual(items[i], items[j])) return false;`,
+            `    }`,
+            `  }`,
+            `  return true;`,
+            `}`,
+        ].join("\n"),
 
-  pattern: (annotate) =>
-    [
-      annotate
-        ? `const __wizPatterns = new Map<string, RegExp>();`
-        : `const __wizPatterns = new Map();`,
-      `${helperDeclaration('__wizPattern', annotate)} {`,
-      `  // A pattern is a constant, so compiling it per call is pure waste; a Map`,
-      `  // rather than an object so a pattern of "__proto__" cannot reach one.`,
-      `  let re = __wizPatterns.get(src);`,
-      `  if (re === undefined) {`,
-      `    re = new RegExp(src);`,
-      `    __wizPatterns.set(src, re);`,
-      `  }`,
-      `  return re;`,
-      `}`,
-    ].join('\n'),
+    pattern: (annotate) =>
+        [
+            annotate ? `const __wizPatterns = new Map<string, RegExp>();` : `const __wizPatterns = new Map();`,
+            `${helperDeclaration("__wizPattern", annotate)} {`,
+            `  // A pattern is a constant, so compiling it per call is pure waste; a Map`,
+            `  // rather than an object so a pattern of "__proto__" cannot reach one.`,
+            `  let re = __wizPatterns.get(src);`,
+            `  if (re === undefined) {`,
+            `    re = new RegExp(src);`,
+            `    __wizPatterns.set(src, re);`,
+            `  }`,
+            `  return re;`,
+            `}`,
+        ].join("\n"),
 
-  isRegex: (annotate) =>
-    [
-      `${helperDeclaration('__wizIsRegex', annotate)} {`,
-      `  // "Is a regular expression" is not a pattern: the only way to answer`,
-      `  // it is to compile the string and see whether that throws.`,
-      `  try {`,
-      `    new RegExp(src);`,
-      `    return true;`,
-      `  } catch {`,
-      `    return false;`,
-      `  }`,
-      `}`,
-    ].join('\n'),
+    isRegex: (annotate) =>
+        [
+            `${helperDeclaration("__wizIsRegex", annotate)} {`,
+            `  // "Is a regular expression" is not a pattern: the only way to answer`,
+            `  // it is to compile the string and see whether that throws.`,
+            `  try {`,
+            `    new RegExp(src);`,
+            `    return true;`,
+            `  } catch {`,
+            `    return false;`,
+            `  }`,
+            `}`,
+        ].join("\n"),
 };
 
 /**
@@ -591,92 +555,92 @@ const HELPER_BODIES: Record<string, (annotate: boolean) => string> = {
  * consumer's `strict`.
  */
 export function helpersFor(ir: TypeIR, annotate = false): string[] {
-  const needed = new Set<string>();
+    const needed = new Set<string>();
 
-  const scan = (constraints: Constraint[] | undefined): void => {
-    for (const c of constraints ?? []) {
-      if (c.kind === 'minLength' || c.kind === 'maxLength') {
-        needed.add('length');
-      }
-      if (c.kind === 'uniqueItems' && c.value !== false) {
-        needed.add('unique');
-      }
-      if (c.kind === 'pattern') {
-        needed.add('pattern');
-      }
-      if (c.kind === 'format' && typeof c.value === 'string') {
-        // An enforced string format is checked through the same cached-regex
-        // helper a `@pattern` uses; `regex` is the exception that compiles.
-        if (STRING_FORMATS[c.value]) {
-          needed.add('pattern');
+    const scan = (constraints: Constraint[] | undefined): void => {
+        for (const c of constraints ?? []) {
+            if (c.kind === "minLength" || c.kind === "maxLength") {
+                needed.add("length");
+            }
+            if (c.kind === "uniqueItems" && c.value !== false) {
+                needed.add("unique");
+            }
+            if (c.kind === "pattern") {
+                needed.add("pattern");
+            }
+            if (c.kind === "format" && typeof c.value === "string") {
+                // An enforced string format is checked through the same cached-regex
+                // helper a `@pattern` uses; `regex` is the exception that compiles.
+                if (STRING_FORMATS[c.value]) {
+                    needed.add("pattern");
+                }
+                if (c.value === STRING_FORMAT_REGEX) {
+                    needed.add("isRegex");
+                }
+            }
         }
-        if (c.value === STRING_FORMAT_REGEX) {
-          needed.add('isRegex');
+    };
+
+    walkTypeIR(ir, (node) => {
+        scan(node.constraints);
+        if (node.kind === "object") {
+            for (const property of node.properties) {
+                scan(property.constraints);
+            }
         }
-      }
-    }
-  };
+    });
 
-  walkTypeIR(ir, (node) => {
-    scan(node.constraints);
-    if (node.kind === 'object') {
-      for (const property of node.properties) {
-        scan(property.constraints);
-      }
-    }
-  });
-
-  return [...needed].map((key) => HELPER_BODIES[key]!(annotate));
+    return [...needed].map((key) => HELPER_BODIES[key]!(annotate));
 }
 
 export function generateValidatorCode(ir: TypeIR): string {
-  const validationBody = generateValidationBlock(ir, 'arg', 'path', 0);
+    const validationBody = generateValidationBlock(ir, "arg", "path", 0);
 
-  return [
-    ...helpersFor(ir),
-    ``,
-    `/**`,
-    ` * Collects every way \`arg\` fails to match the type.`,
-    ` *`,
-    ` * \`options.prune\` removes properties the type does not declare, in place,`,
-    ` * the way Ajv's \`removeAdditional\` does - the object you pass is the object`,
-    ` * that gets pruned. Levels whose schema allows additional properties are`,
-    ` * left alone: those fields are declared, just not by name.`,
-    ` */`,
-    `export function validate(arg, options = {}) {`,
-    `  // A string second argument was the path before there were options, and`,
-    `  // costs one comparison to keep working.`,
-    `  const path = typeof options === "string" ? options : options.path ?? "";`,
-    `  const __prune = typeof options === "object" && options !== null && options.prune === true;`,
-    `  const errors = [];`,
-    validationBody
-      .split('\n')
-      .map((line) => `  ${line}`)
-      .join('\n'),
-    `  return errors;`,
-    `}`,
-    ``,
-    `export function is(arg) {`,
-    `  return validate(arg).length === 0;`,
-    `}`,
-    ``,
-    `/**`,
-    ` * Narrows \`arg\` to \`T\` when structural validation passes.`,
-    ` * Throws an error containing \`errors: ValidationError[]\` on failure.`,
-    ` */`,
-    `export function assert(arg, options = {}) {`,
-    `  const errors = validate(arg, options);`,
-    `  if (errors.length > 0) {`,
-    `    const msg =`,
-    `      "Assertion failed: " +`,
-    `      errors`,
-    `        .map((e) => (e.path ? e.path + ": " + e.message : e.message))`,
-    `        .join("; ");`,
-    `    const err = new Error(msg);`,
-    `    err.name = "AssertError";`,
-    `    err.errors = errors;`,
-    `    throw err;`,
-    `  }`,
-    `}`,
-  ].join('\n');
+    return [
+        ...helpersFor(ir),
+        ``,
+        `/**`,
+        ` * Collects every way \`arg\` fails to match the type.`,
+        ` *`,
+        ` * \`options.prune\` removes properties the type does not declare, in place,`,
+        ` * the way Ajv's \`removeAdditional\` does - the object you pass is the object`,
+        ` * that gets pruned. Levels whose schema allows additional properties are`,
+        ` * left alone: those fields are declared, just not by name.`,
+        ` */`,
+        `export function validate(arg, options = {}) {`,
+        `  // A string second argument was the path before there were options, and`,
+        `  // costs one comparison to keep working.`,
+        `  const path = typeof options === "string" ? options : options.path ?? "";`,
+        `  const __prune = typeof options === "object" && options !== null && options.prune === true;`,
+        `  const errors = [];`,
+        validationBody
+            .split("\n")
+            .map((line) => `  ${line}`)
+            .join("\n"),
+        `  return errors;`,
+        `}`,
+        ``,
+        `export function is(arg) {`,
+        `  return validate(arg).length === 0;`,
+        `}`,
+        ``,
+        `/**`,
+        ` * Narrows \`arg\` to \`T\` when structural validation passes.`,
+        ` * Throws an error containing \`errors: ValidationError[]\` on failure.`,
+        ` */`,
+        `export function assert(arg, options = {}) {`,
+        `  const errors = validate(arg, options);`,
+        `  if (errors.length > 0) {`,
+        `    const msg =`,
+        `      "Assertion failed: " +`,
+        `      errors`,
+        `        .map((e) => (e.path ? e.path + ": " + e.message : e.message))`,
+        `        .join("; ");`,
+        `    const err = new Error(msg);`,
+        `    err.name = "AssertError";`,
+        `    err.errors = errors;`,
+        `    throw err;`,
+        `  }`,
+        `}`,
+    ].join("\n");
 }

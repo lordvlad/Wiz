@@ -1,31 +1,27 @@
-import type { ValidateOptions, ValidationError } from './types.ts';
+import type { ValidateOptions, ValidationError } from "./types.ts";
+export { openRPCHandler, type OpenRpcHandlerOptions, type OpenRpcHandler } from "./server/openrpc.ts";
 export {
-  openRPCHandler,
-  type OpenRpcHandlerOptions,
-  type OpenRpcHandler,
-} from './server/openrpc.ts';
-export {
-  openRpcClient,
-  httpTransport,
-  webSocketTransport,
-  tcpTransport,
-  type OpenRpcCall,
-  type OpenRpcResult,
-  type OpenRpcTransport,
-  type OpenRpcClientOptions,
-  type HttpTransportOptions,
-  type WebSocketTransportOptions,
-  type TcpTransportOptions,
-} from './transports/openrpc.ts';
-export { QueryValidationError } from './generators/query.ts';
+    openRpcClient,
+    httpTransport,
+    webSocketTransport,
+    tcpTransport,
+    type OpenRpcCall,
+    type OpenRpcResult,
+    type OpenRpcTransport,
+    type OpenRpcClientOptions,
+    type HttpTransportOptions,
+    type WebSocketTransportOptions,
+    type TcpTransportOptions,
+} from "./transports/openrpc.ts";
+export { QueryValidationError } from "./generators/query.ts";
 
 export class PluginInactiveError extends Error {
-  constructor(fnName: string) {
-    super(
-      `[wiz] Function '${fnName}' called without active Bun plugin. Please enable 'wizPlugin()' in your Bun runtime or build configuration.`
-    );
-    this.name = 'PluginInactiveError';
-  }
+    constructor(fnName: string) {
+        super(
+            `[wiz] Function '${fnName}' called without active Bun plugin. Please enable 'wizPlugin()' in your Bun runtime or build configuration.`,
+        );
+        this.name = "PluginInactiveError";
+    }
 }
 
 /**
@@ -47,21 +43,21 @@ export class PluginInactiveError extends Error {
 export type NumberedUnion<T extends Record<number, unknown>> = T[keyof T];
 
 export function keysOf<T>(): (keyof T)[] {
-  throw new PluginInactiveError('keysOf');
+    throw new PluginInactiveError("keysOf");
 }
 
 export function requiredKeysOf<T>(): (keyof T)[] {
-  throw new PluginInactiveError('requiredKeysOf');
+    throw new PluginInactiveError("requiredKeysOf");
 }
 
 export function optionalKeysOf<T>(): (keyof T)[] {
-  throw new PluginInactiveError('optionalKeysOf');
+    throw new PluginInactiveError("optionalKeysOf");
 }
 
 /** Options for {@link deepKeysOf}. */
 export interface DeepKeysOptions {
-  /** How far to walk into nested objects. Clamped to 1–10; defaults to 5. */
-  maxDepth?: number;
+    /** How far to walk into nested objects. Clamped to 1–10; defaults to 5. */
+    maxDepth?: number;
 }
 
 /**
@@ -71,20 +67,20 @@ export interface DeepKeysOptions {
  * the path that reaches it rather than its members.
  */
 export function deepKeysOf<T>(_options?: DeepKeysOptions): string[] {
-  throw new PluginInactiveError('deepKeysOf');
+    throw new PluginInactiveError("deepKeysOf");
 }
 
-export function jsonSchema<T, V extends 'draft-2020-12' | 'draft-07' = 'draft-2020-12'>(
-  _version?: V
+export function jsonSchema<T, V extends "draft-2020-12" | "draft-07" = "draft-2020-12">(
+    _version?: V,
 ): Record<string, unknown> {
-  throw new PluginInactiveError('jsonSchema');
+    throw new PluginInactiveError("jsonSchema");
 }
 
 export function jsonSchemas<
-  TTypes extends unknown[] = unknown[],
-  V extends 'draft-2020-12' | 'draft-07' = 'draft-2020-12',
+    TTypes extends unknown[] = unknown[],
+    V extends "draft-2020-12" | "draft-07" = "draft-2020-12",
 >(_version?: V): Record<string, unknown> {
-  throw new PluginInactiveError('jsonSchemas');
+    throw new PluginInactiveError("jsonSchemas");
 }
 
 /**
@@ -94,7 +90,7 @@ export function jsonSchemas<
  * place - see {@link ValidateOptions}.
  */
 export function validate<T>(_arg: unknown, _options?: ValidateOptions): ValidationError[] {
-  throw new PluginInactiveError('validate');
+    throw new PluginInactiveError("validate");
 }
 
 /**
@@ -103,7 +99,7 @@ export function validate<T>(_arg: unknown, _options?: ValidateOptions): Validati
  * The same check `validate` runs, without building the error list.
  */
 export function is<T>(_arg: unknown): _arg is T {
-  throw new PluginInactiveError('is');
+    throw new PluginInactiveError("is");
 }
 
 /**
@@ -113,7 +109,7 @@ export function is<T>(_arg: unknown): _arg is T {
  * `errors`, so a caller can report all of them rather than the first.
  */
 export function assert<T>(_arg: unknown, _options?: ValidateOptions): asserts _arg is T {
-  throw new PluginInactiveError('assert');
+    throw new PluginInactiveError("assert");
 }
 /**
  * Parses a query string, `URLSearchParams`, or raw object into `T`.
@@ -122,88 +118,88 @@ export function assert<T>(_arg: unknown, _options?: ValidateOptions): asserts _a
  * Throws {@link QueryValidationError} if validation fails.
  */
 export function parseQuery<T>(_input: unknown, _options?: ValidateOptions): T {
-  throw new PluginInactiveError('parseQuery');
+    throw new PluginInactiveError("parseQuery");
 }
-export type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete' | 'head' | 'options' | 'trace';
+export type HttpMethod = "get" | "post" | "put" | "patch" | "delete" | "head" | "options" | "trace";
 
 /**
  * Compile-time descriptor produced by `openapiSchema.<method>()`.
  * Instances never exist at runtime: the plugin folds them into the document.
  */
 export interface OpenApiOperation {
-  method: HttpMethod;
-  path: string;
+    method: HttpMethod;
+    path: string;
 }
 
 export interface OperationBuilder {
-  <TPathParams, TQueryParams, TResponse, TRequestBody>(
-    path: string,
-    options?: Record<string, unknown>
-  ): OpenApiOperation;
+    <TPathParams, TQueryParams, TResponse, TRequestBody>(
+        path: string,
+        options?: Record<string, unknown>,
+    ): OpenApiOperation;
 }
 
-export type OpenApiVersion = '3.0' | '3.1' | 3.0 | 3.1;
+export type OpenApiVersion = "3.0" | "3.1" | 3.0 | 3.1;
 
 export interface OpenApiSchemaBuilder {
-  <TTypes extends unknown[], V extends OpenApiVersion = '3.1'>(
-    baseSchema?: Record<string, unknown>,
-    operations?: OpenApiOperation[]
-  ): Record<string, unknown>;
-  get: OperationBuilder;
-  post: OperationBuilder;
-  put: OperationBuilder;
-  patch: OperationBuilder;
-  delete: OperationBuilder;
-  head: OperationBuilder;
-  options: OperationBuilder;
-  trace: OperationBuilder;
+    <TTypes extends unknown[], V extends OpenApiVersion = "3.1">(
+        baseSchema?: Record<string, unknown>,
+        operations?: OpenApiOperation[],
+    ): Record<string, unknown>;
+    get: OperationBuilder;
+    post: OperationBuilder;
+    put: OperationBuilder;
+    patch: OperationBuilder;
+    delete: OperationBuilder;
+    head: OperationBuilder;
+    options: OperationBuilder;
+    trace: OperationBuilder;
 }
 
 function operationStub(method: HttpMethod): OperationBuilder {
-  return () => {
-    throw new PluginInactiveError(`openapiSchema.${method}`);
-  };
+    return () => {
+        throw new PluginInactiveError(`openapiSchema.${method}`);
+    };
 }
 
 export const openapiSchema: OpenApiSchemaBuilder = Object.assign(
-  (): Record<string, unknown> => {
-    throw new PluginInactiveError('openapiSchema');
-  },
-  {
-    get: operationStub('get'),
-    post: operationStub('post'),
-    put: operationStub('put'),
-    patch: operationStub('patch'),
-    delete: operationStub('delete'),
-    head: operationStub('head'),
-    options: operationStub('options'),
-    trace: operationStub('trace'),
-  }
+    (): Record<string, unknown> => {
+        throw new PluginInactiveError("openapiSchema");
+    },
+    {
+        get: operationStub("get"),
+        post: operationStub("post"),
+        put: operationStub("put"),
+        patch: operationStub("patch"),
+        delete: operationStub("delete"),
+        head: operationStub("head"),
+        options: operationStub("options"),
+        trace: operationStub("trace"),
+    },
 );
 export function openRPCSchema<TTypes extends unknown[] = unknown[]>(
-  _baseSchema?: Record<string, unknown>,
-  _options?: Record<string, unknown>
+    _baseSchema?: Record<string, unknown>,
+    _options?: Record<string, unknown>,
 ): Record<string, unknown> {
-  throw new PluginInactiveError('openRPCSchema');
+    throw new PluginInactiveError("openRPCSchema");
 }
 /**
  * AsyncAPI document generator stub.
  */
 export function asyncapiSchema<TTypes extends unknown[] = unknown[]>(
-  _baseSchema?: Record<string, unknown>,
-  _options?: Record<string, unknown>
+    _baseSchema?: Record<string, unknown>,
+    _options?: Record<string, unknown>,
 ): Record<string, unknown> {
-  throw new PluginInactiveError('asyncapiSchema');
+    throw new PluginInactiveError("asyncapiSchema");
 }
 
 /**
  * MCP document generator stub.
  */
 export function mcpSchema<TTypes extends unknown[] = unknown[]>(
-  _baseSchema?: Record<string, unknown>,
-  _options?: Record<string, unknown>
+    _baseSchema?: Record<string, unknown>,
+    _options?: Record<string, unknown>,
 ): Record<string, unknown> {
-  throw new PluginInactiveError('mcpSchema');
+    throw new PluginInactiveError("mcpSchema");
 }
 
 /**
@@ -216,35 +212,33 @@ export function mcpSchema<TTypes extends unknown[] = unknown[]>(
  * side effects.
  */
 export function openapiDocument<TTypes extends unknown[] = unknown[]>(
-  _baseSchema?: Record<string, unknown>
+    _baseSchema?: Record<string, unknown>,
 ): Record<string, unknown> {
-  throw new PluginInactiveError('openapiDocument');
+    throw new PluginInactiveError("openapiDocument");
 }
 export function encodeProto<T>(_val: T, _buf: Uint8Array, _offset = 0): number {
-  throw new PluginInactiveError('encodeProto');
+    throw new PluginInactiveError("encodeProto");
 }
 
 export function decodeProto<T>(_buf: Uint8Array, _offset = 0): T {
-  throw new PluginInactiveError('decodeProto');
+    throw new PluginInactiveError("decodeProto");
 }
 export function protobufSchema<TTypes extends unknown[]>(_options?: { indent?: string }): string {
-  throw new PluginInactiveError('protobufSchema');
+    throw new PluginInactiveError("protobufSchema");
 }
-export function grpcSchema<TTypes extends unknown[] = unknown[]>(_options?: {
-  indent?: string;
-}): string {
-  throw new PluginInactiveError('grpcSchema');
+export function grpcSchema<TTypes extends unknown[] = unknown[]>(_options?: { indent?: string }): string {
+    throw new PluginInactiveError("grpcSchema");
 }
 export function encodeAvro<T>(_val: T, _buf: Uint8Array, _offset = 0): number {
-  throw new PluginInactiveError('encodeAvro');
+    throw new PluginInactiveError("encodeAvro");
 }
 
 export function decodeAvro<T>(_buf: Uint8Array, _offset = 0): T {
-  throw new PluginInactiveError('decodeAvro');
+    throw new PluginInactiveError("decodeAvro");
 }
 
 export function avroSchema<TTypes extends unknown[]>(_options?: { indent?: string }): string {
-  throw new PluginInactiveError('avroSchema');
+    throw new PluginInactiveError("avroSchema");
 }
 
 /**
@@ -255,70 +249,70 @@ export function avroSchema<TTypes extends unknown[]>(_options?: { indent?: strin
  * and a record batch.
  */
 export function encodeArrow<T>(_rows: T[], _buf: Uint8Array, _offset = 0): number {
-  throw new PluginInactiveError('encodeArrow');
+    throw new PluginInactiveError("encodeArrow");
 }
 
 export function decodeArrow<T>(_buf: Uint8Array, _offset = 0): T[] {
-  throw new PluginInactiveError('decodeArrow');
+    throw new PluginInactiveError("decodeArrow");
 }
 
 export function arrowSchema<TTypes extends unknown[]>(_options?: { indent?: string }): string {
-  throw new PluginInactiveError('arrowSchema');
+    throw new PluginInactiveError("arrowSchema");
 }
 
 /**
  * Encodes an object to a JSON string with spec-aligned handling for bigint and date fields.
  */
 export function encodeJson<T>(_val: T, _indent?: string | number): string {
-  throw new PluginInactiveError('encodeJson');
+    throw new PluginInactiveError("encodeJson");
 }
 
 /**
  * Decodes a JSON string to an object with spec-aligned handling for bigint and date fields.
  */
 export function decodeJson<T>(_raw: string): T {
-  throw new PluginInactiveError('decodeJson');
+    throw new PluginInactiveError("decodeJson");
 }
 /**
  * Encodes a term into Erlang Text format.
  */
 export function encodeErlangText<T>(_val: T, _indent?: string | number): string {
-  throw new PluginInactiveError('encodeErlangText');
+    throw new PluginInactiveError("encodeErlangText");
 }
 
 /**
  * Decodes an Erlang Text format string into a term.
  */
 export function decodeErlangText<T>(_raw: string): T {
-  throw new PluginInactiveError('decodeErlangText');
+    throw new PluginInactiveError("decodeErlangText");
 }
 
 /**
  * Encodes a term into Erlang ETF (External Term Format 131) binary.
  */
 export function encodeErlangBinary<T>(_val: T): Uint8Array {
-  throw new PluginInactiveError('encodeErlangBinary');
+    throw new PluginInactiveError("encodeErlangBinary");
 }
 
 /**
  * Decodes an Erlang ETF (External Term Format 131) binary into a term.
  */
 export function decodeErlangBinary<T>(_raw: Uint8Array): T {
-  throw new PluginInactiveError('decodeErlangBinary');
+    throw new PluginInactiveError("decodeErlangBinary");
 }
 
 /**
  * Encodes a value into CBOR (RFC 8949) binary.
  */
 export function encodeCbor<T>(_val: T): Uint8Array {
-  throw new PluginInactiveError('encodeCbor');
+    throw new PluginInactiveError("encodeCbor");
 }
 
 /**
  * Decodes CBOR (RFC 8949) binary into a value.
  */
 export function decodeCbor<T>(_raw: Uint8Array): T {
-  throw new PluginInactiveError('decodeCbor');
+    throw new PluginInactiveError("decodeCbor");
 }
 
 /**
@@ -331,8 +325,8 @@ export function decodeCbor<T>(_raw: Uint8Array): T {
  * else zod offers is reachable by widening this type at the callsite.
  */
 export interface ZodSchemaLike<T> {
-  parse(data: unknown): T;
-  safeParse(data: unknown): { success: true; data: T } | { success: false; error: unknown };
+    parse(data: unknown): T;
+    safeParse(data: unknown): { success: true; data: T } | { success: false; error: unknown };
 }
 
 /**
@@ -344,13 +338,13 @@ export interface ZodSchemaLike<T> {
  * schema never loads zod - and never needs it installed.
  */
 export function zodSchema<T>(): Promise<ZodSchemaLike<T>> {
-  throw new PluginInactiveError('zodSchema');
+    throw new PluginInactiveError("zodSchema");
 }
 
 // `wizPlugin` is deliberately NOT re-exported here: it pulls in the TypeScript
 // compiler, and importing the runtime must never drag that into an app bundle.
 // Build tooling imports it from "wiz/plugin". The logger contract is dependency
 // free, so it stays available to both sides.
-export { consoleLogger, defaultLogger, silentLogger, type WizLogger } from './logger.ts';
-export * from './types.ts';
-export { reactQueryGenerator, type ReactQueryOptions } from './generators/reactQuery.ts';
+export { consoleLogger, defaultLogger, silentLogger, type WizLogger } from "./logger.ts";
+export * from "./types.ts";
+export { reactQueryGenerator, type ReactQueryOptions } from "./generators/reactQuery.ts";
