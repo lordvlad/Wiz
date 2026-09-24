@@ -1,11 +1,11 @@
-import { createRequire } from "node:module";
+import { createRequire } from 'node:module';
 import {
   declaredFormat,
   flattenObjectProperties,
   walkTypeIR,
   type Annotated,
   type TypeIR,
-} from "../types.ts";
+} from '../types.ts';
 
 /**
  * Apache Arrow support.
@@ -29,31 +29,31 @@ import {
 
 /** Arrow's fixed-width numeric types, as `@format` selects them. */
 const FORMAT_TO_ARROW: Record<string, string> = {
-  int32: "Int32",
-  int64: "Int64",
-  uint32: "Uint32",
-  uint64: "Uint64",
-  sint32: "Int32",
-  sint64: "Int64",
-  fixed32: "Uint32",
-  sfixed32: "Int32",
-  fixed64: "Uint64",
-  sfixed64: "Int64",
-  float: "Float32",
-  double: "Float64",
-  byte: "Binary",
-  binary: "Binary",
+  int32: 'Int32',
+  int64: 'Int64',
+  uint32: 'Uint32',
+  uint64: 'Uint64',
+  sint32: 'Int32',
+  sint64: 'Int64',
+  fixed32: 'Uint32',
+  sfixed32: 'Int32',
+  fixed64: 'Uint64',
+  sfixed64: 'Int64',
+  float: 'Float32',
+  double: 'Float64',
+  byte: 'Binary',
+  binary: 'Binary',
   // Arrow has native columns at these widths, so nothing has to widen.
-  int8: "Int8",
-  int16: "Int16",
-  uint8: "Uint8",
-  uint16: "Uint16",
+  int8: 'Int8',
+  int16: 'Int16',
+  uint8: 'Uint8',
+  uint16: 'Uint16',
   // 64-bit on the wire, but carried by a `number`, which is what the format
   // states: an integer a double holds exactly.
-  "double-int": "Int64",
-  unixtime: "Int64",
-  "sf-integer": "Int64",
-  "sf-decimal": "Float64",
+  'double-int': 'Int64',
+  unixtime: 'Int64',
+  'sf-integer': 'Int64',
+  'sf-decimal': 'Float64',
 };
 
 /**
@@ -63,15 +63,7 @@ const FORMAT_TO_ARROW: Record<string, string> = {
  * fixed-width types have two, the variable-length ones add an offsets buffer.
  */
 export interface ArrowLeaf {
-  kind:
-    | "int"
-    | "uint"
-    | "float"
-    | "bool"
-    | "utf8"
-    | "binary"
-    | "timestamp"
-    | "date";
+  kind: 'int' | 'uint' | 'float' | 'bool' | 'utf8' | 'binary' | 'timestamp' | 'date';
   /** Bit width for numeric and boolean layouts. */
   width: 8 | 16 | 32 | 64 | 1;
   /**
@@ -82,7 +74,7 @@ export interface ArrowLeaf {
    * Getting this wrong changes the type on the way back, which is a silent
    * round-trip failure rather than a wrong value.
    */
-  js?: "number" | "bigint";
+  js?: 'number' | 'bigint';
   /** Arrow type name, for the schema builder. */
   arrow: string;
 }
@@ -93,36 +85,39 @@ export interface ArrowField {
   /** Present for a leaf; absent when `children` describes a nested layout. */
   leaf?: ArrowLeaf;
   /** `list`, `struct` or `map` when the field nests. */
-  nested?: "list" | "struct" | "map";
+  nested?: 'list' | 'struct' | 'map';
   children: ArrowField[];
 }
 
 const LEAVES: Record<string, ArrowLeaf> = {
-  Int32: { kind: "int", width: 32, arrow: "Int32" },
-  Int64: { kind: "int", width: 64, arrow: "Int64" },
-  Uint32: { kind: "uint", width: 32, arrow: "Uint32" },
-  Uint64: { kind: "uint", width: 64, arrow: "Uint64" },
-  Float32: { kind: "float", width: 32, arrow: "Float32" },
-  Float64: { kind: "float", width: 64, arrow: "Float64" },
-  Bool: { kind: "bool", width: 1, arrow: "Bool" },
-  Utf8: { kind: "utf8", width: 32, arrow: "Utf8" },
-  Binary: { kind: "binary", width: 32, arrow: "Binary" },
-  TimestampMillisecond: { kind: "timestamp", width: 64, arrow: "TimestampMillisecond" },
-  Int8: { kind: "int", width: 8, arrow: "Int8" },
-  Int16: { kind: "int", width: 16, arrow: "Int16" },
-  Uint8: { kind: "uint", width: 8, arrow: "Uint8" },
-  Uint16: { kind: "uint", width: 16, arrow: "Uint16" },
+  Int32: { kind: 'int', width: 32, arrow: 'Int32' },
+  Int64: { kind: 'int', width: 64, arrow: 'Int64' },
+  Uint32: { kind: 'uint', width: 32, arrow: 'Uint32' },
+  Uint64: { kind: 'uint', width: 64, arrow: 'Uint64' },
+  Float32: { kind: 'float', width: 32, arrow: 'Float32' },
+  Float64: { kind: 'float', width: 64, arrow: 'Float64' },
+  Bool: { kind: 'bool', width: 1, arrow: 'Bool' },
+  Utf8: { kind: 'utf8', width: 32, arrow: 'Utf8' },
+  Binary: { kind: 'binary', width: 32, arrow: 'Binary' },
+  TimestampMillisecond: { kind: 'timestamp', width: 64, arrow: 'TimestampMillisecond' },
+  Int8: { kind: 'int', width: 8, arrow: 'Int8' },
+  Int16: { kind: 'int', width: 16, arrow: 'Int16' },
+  Uint8: { kind: 'uint', width: 8, arrow: 'Uint8' },
+  Uint16: { kind: 'uint', width: 16, arrow: 'Uint16' },
 };
 
 /** `T | undefined` reaching us is what makes an Arrow field nullable. */
 function unwrapNullable(ir: TypeIR): { nullable: boolean; inner: TypeIR } {
-  if (ir.kind !== "union") return { nullable: false, inner: ir };
+  if (ir.kind !== 'union') {
+    return { nullable: false, inner: ir };
+  }
   const absent = (t: TypeIR) =>
-    t.kind === "primitive" &&
-    (t.type === "undefined" || t.type === "null" || t.type === "void");
+    t.kind === 'primitive' && (t.type === 'undefined' || t.type === 'null' || t.type === 'void');
 
   const meaningful = ir.types.filter((t) => !absent(t));
-  if (meaningful.length === ir.types.length) return { nullable: false, inner: ir };
+  if (meaningful.length === ir.types.length) {
+    return { nullable: false, inner: ir };
+  }
   return {
     nullable: true,
     inner: meaningful.length === 1 ? meaningful[0]! : { ...ir, types: meaningful },
@@ -131,52 +126,62 @@ function unwrapNullable(ir: TypeIR): { nullable: boolean; inner: TypeIR } {
 
 /** A union of same-typed literals is that primitive, exactly as elsewhere. */
 function collapseLiteralUnion(ir: TypeIR): TypeIR | undefined {
-  if (ir.kind !== "union") return undefined;
-  const types = new Set<string>();
-  for (const member of ir.types) {
-    if (member.kind !== "literal") return undefined;
-    types.add(typeof member.value === "bigint" ? "bigint" : typeof member.value);
-  }
-  if (types.size !== 1) return undefined;
-  const only = [...types][0];
-  if (only !== "string" && only !== "number" && only !== "bigint" && only !== "boolean") {
+  if (ir.kind !== 'union') {
     return undefined;
   }
-  return { id: `${ir.id}_collapsed`, kind: "primitive", type: only };
+  const types = new Set<string>();
+  for (const member of ir.types) {
+    if (member.kind !== 'literal') {
+      return undefined;
+    }
+    types.add(typeof member.value === 'bigint' ? 'bigint' : typeof member.value);
+  }
+  if (types.size !== 1) {
+    return undefined;
+  }
+  const only = [...types][0];
+  if (only !== 'string' && only !== 'number' && only !== 'bigint' && only !== 'boolean') {
+    return undefined;
+  }
+  return { id: `${ir.id}_collapsed`, kind: 'primitive', type: only };
 }
 
 function leafFor(ir: TypeIR, carrier?: Annotated): ArrowLeaf | undefined {
-  if (ir.kind === "enum") return LEAVES.Utf8;
-  if (ir.kind === "literal") {
-    const type = typeof ir.value === "bigint" ? "bigint" : typeof ir.value;
-    return leafFor({ id: `${ir.id}_p`, kind: "primitive", type: type as never }, carrier);
+  if (ir.kind === 'enum') {
+    return LEAVES.Utf8;
   }
-  if (ir.kind !== "primitive") return undefined;
+  if (ir.kind === 'literal') {
+    const type = typeof ir.value === 'bigint' ? 'bigint' : typeof ir.value;
+    return leafFor({ id: `${ir.id}_p`, kind: 'primitive', type: type as never }, carrier);
+  }
+  if (ir.kind !== 'primitive') {
+    return undefined;
+  }
 
   const declared = declaredFormat(carrier, ir);
   const named = declared ? FORMAT_TO_ARROW[declared] : undefined;
 
   switch (ir.type) {
-    case "string":
-    case "symbol":
+    case 'string':
+    case 'symbol':
       // `@format binary` says the string carries opaque bytes.
-      return named === "Binary" ? LEAVES.Binary : LEAVES.Utf8;
-    case "boolean":
+      return named === 'Binary' ? LEAVES.Binary : LEAVES.Utf8;
+    case 'boolean':
       return LEAVES.Bool;
-    case "bytes":
+    case 'bytes':
       return LEAVES.Binary;
-    case "date":
+    case 'date':
       return LEAVES.TimestampMillisecond;
-    case "bigint": {
+    case 'bigint': {
       // 64-bit by definition, though `@format int32` may still narrow it.
-      const leaf = LEAVES[named ?? "Int64"] ?? LEAVES.Int64!;
-      return { ...leaf, js: "bigint" };
+      const leaf = LEAVES[named ?? 'Int64'] ?? LEAVES.Int64!;
+      return { ...leaf, js: 'bigint' };
     }
-    case "number": {
+    case 'number': {
       // A JS number is a double; `@format` is what narrows it. The carrier
       // stays a number even at 64 bits, which is what `double-int` means.
-      const leaf = LEAVES[named ?? "Float64"] ?? LEAVES.Float64!;
-      return { ...leaf, js: "number" };
+      const leaf = LEAVES[named ?? 'Float64'] ?? LEAVES.Float64!;
+      return { ...leaf, js: 'number' };
     }
     default:
       return undefined;
@@ -188,78 +193,78 @@ function arrowBlocker(ir: TypeIR, name: string, carrier?: Annotated): string | u
   const { inner } = unwrapNullable(ir);
   const collapsed = collapseLiteralUnion(inner) ?? inner;
 
-  if (leafFor(collapsed, carrier)) return undefined;
-  if (collapsed.kind === "array") {
+  if (leafFor(collapsed, carrier)) {
+    return undefined;
+  }
+  if (collapsed.kind === 'array') {
     return arrowBlocker(collapsed.element, `${name} item`, carrier);
   }
-  if (collapsed.kind === "record") {
+  if (collapsed.kind === 'record') {
     return arrowBlocker(collapsed.valueType, `${name} value`, carrier);
   }
-  if (collapsed.kind === "object" || collapsed.kind === "intersection") {
+  if (collapsed.kind === 'object' || collapsed.kind === 'intersection') {
     for (const property of flattenObjectProperties(collapsed)) {
       const blocker = arrowBlocker(property.type, `${name}.${property.name}`, property);
-      if (blocker) return blocker;
+      if (blocker) {
+        return blocker;
+      }
     }
     return undefined;
   }
-  if (collapsed.kind === "union") {
+  if (collapsed.kind === 'union') {
     return `[wiz] '${name}' is a union, which Arrow represents as a union column; wiz does not emit those yet. Wrap the variants in their own type, or narrow the field.`;
   }
   return `[wiz] '${name}' has no Arrow column type (${collapsed.kind}${
-    collapsed.kind === "primitive" ? ` ${collapsed.type}` : ""
+    collapsed.kind === 'primitive' ? ` ${collapsed.type}` : ''
   }).`;
 }
 
-function fieldFor(
-  name: string,
-  ir: TypeIR,
-  optional: boolean,
-  carrier?: Annotated
-): ArrowField {
+function fieldFor(name: string, ir: TypeIR, optional: boolean, carrier?: Annotated): ArrowField {
   const { nullable, inner } = unwrapNullable(ir);
   const target = collapseLiteralUnion(inner) ?? inner;
   const isNullable = optional || nullable;
 
   const leaf = leafFor(target, carrier);
-  if (leaf) return { name, nullable: isNullable, leaf, children: [] };
+  if (leaf) {
+    return { name, nullable: isNullable, leaf, children: [] };
+  }
 
-  if (target.kind === "array") {
+  if (target.kind === 'array') {
     return {
       name,
       nullable: isNullable,
-      nested: "list",
+      nested: 'list',
       // Arrow names a list's child `item` by convention.
-      children: [fieldFor("item", target.element, false, carrier)],
+      children: [fieldFor('item', target.element, false, carrier)],
     };
   }
 
-  if (target.kind === "record") {
+  if (target.kind === 'record') {
     // Arrow models a map as a list of a non-nullable `entries` struct. The
     // field tree has to carry that level, because buffers are counted per
     // field and skipping it would shift every buffer after it.
     return {
       name,
       nullable: isNullable,
-      nested: "map",
+      nested: 'map',
       children: [
         {
-          name: "entries",
+          name: 'entries',
           nullable: false,
-          nested: "struct",
+          nested: 'struct',
           children: [
-            fieldFor("key", target.keyType, false),
-            fieldFor("value", target.valueType, true, carrier),
+            fieldFor('key', target.keyType, false),
+            fieldFor('value', target.valueType, true, carrier),
           ],
         },
       ],
     };
   }
 
-
   return {
     name,
     nullable: isNullable,
-    nested: "struct",
+    nested: 'struct',
     children: flattenObjectProperties(target).map((property) =>
       fieldFor(property.name, property.type, Boolean(property.optional), property)
     ),
@@ -283,7 +288,9 @@ export function arrowTypeBlocker(ir: TypeIR, name: string): string | undefined {
   }
   for (const property of properties) {
     const blocker = arrowBlocker(property.type, `${name}.${property.name}`, property);
-    if (blocker) return blocker;
+    if (blocker) {
+      return blocker;
+    }
   }
   return undefined;
 }
@@ -296,7 +303,7 @@ interface ArrowModule {
   Schema: new (fields: unknown[]) => unknown;
   Field: new (name: string, type: unknown, nullable: boolean) => unknown;
   Table: new (schema: unknown) => unknown;
-  tableToIPC: (table: unknown, variant: "stream" | "file") => Uint8Array;
+  tableToIPC: (table: unknown, variant: 'stream' | 'file') => Uint8Array;
   List: new (child: unknown) => unknown;
   Struct: new (children: unknown[]) => unknown;
   Map_: new (child: unknown, keysSorted?: boolean) => unknown;
@@ -312,15 +319,17 @@ let arrowModule: ArrowModule | undefined;
  * would make every generator async for one optional back end.
  */
 function loadArrow(): ArrowModule {
-  if (arrowModule) return arrowModule;
+  if (arrowModule) {
+    return arrowModule;
+  }
   try {
     const require = createRequire(import.meta.url);
-    arrowModule = require("apache-arrow") as ArrowModule;
+    arrowModule = require('apache-arrow') as ArrowModule;
     return arrowModule;
   } catch {
     throw new Error(
       "[wiz] Arrow support needs 'apache-arrow' at build time: run 'bun add -d apache-arrow'. " +
-        "It builds the schema during the transform and never reaches your bundle."
+        'It builds the schema during the transform and never reaches your bundle.'
     );
   }
 }
@@ -333,8 +342,10 @@ function arrowTypeOf(field: ArrowField, A: ArrowModule): unknown {
   const children = field.children.map(
     (child) => new A.Field(child.name, arrowTypeOf(child, A), child.nullable)
   );
-  if (field.nested === "list") return new A.List(children[0]);
-  if (field.nested === "map") {
+  if (field.nested === 'list') {
+    return new A.List(children[0]);
+  }
+  if (field.nested === 'map') {
     // The entries struct is a real level in the field tree now, so it is
     // already the single child.
     return new A.Map_(children[0], false);
@@ -351,7 +362,7 @@ export function arrowSchemaMessage(fields: ArrowField[]): Uint8Array {
   const schema = new A.Schema(
     fields.map((field) => new A.Field(field.name, arrowTypeOf(field, A), field.nullable))
   );
-  const stream = A.tableToIPC(new A.Table(schema), "stream");
+  const stream = A.tableToIPC(new A.Table(schema), 'stream');
 
   // An empty table is the schema message followed by the end-of-stream marker,
   // and only the message belongs to us.
@@ -366,9 +377,7 @@ export function arrowSchemaJson(fields: ArrowField[]): unknown {
     name: field.name,
     type: field.leaf ? field.leaf.arrow : field.nested,
     nullable: field.nullable,
-    ...(field.children.length > 0
-      ? { children: field.children.map(describe) }
-      : {}),
+    ...(field.children.length > 0 ? { children: field.children.map(describe) } : {}),
   });
   return { fields: fields.map(describe) };
 }
@@ -378,9 +387,13 @@ export function flattenArrowFields(fields: ArrowField[]): ArrowField[] {
   const out: ArrowField[] = [];
   const walk = (field: ArrowField): void => {
     out.push(field);
-    for (const child of field.children) walk(child);
+    for (const child of field.children) {
+      walk(child);
+    }
   };
-  for (const field of fields) walk(field);
+  for (const field of fields) {
+    walk(field);
+  }
   return out;
 }
 
@@ -399,7 +412,9 @@ function fbFieldOffset(view: DataView, table: number, field: number): number {
   const vtable = table - view.getInt32(table, true);
   const vtableSize = view.getUint16(vtable, true);
   const index = 4 + field * 2;
-  if (index >= vtableSize) return 0;
+  if (index >= vtableSize) {
+    return 0;
+  }
   return view.getUint16(vtable + index, true);
 }
 
@@ -432,7 +447,7 @@ export function readBatchTemplate(message: Uint8Array): BatchTemplate {
   const bodyLengthOffset = fbFieldOffset(view, root, 3);
   const headerOffset = fbFieldOffset(view, root, 2);
   if (bodyLengthOffset === 0 || headerOffset === 0) {
-    throw new Error("[wiz] arrow template has no bodyLength or header");
+    throw new Error('[wiz] arrow template has no bodyLength or header');
   }
   const headerPtr = root + headerOffset;
   const batch = headerPtr + view.getUint32(headerPtr, true);
@@ -441,7 +456,7 @@ export function readBatchTemplate(message: Uint8Array): BatchTemplate {
   const nodesOffset = fbFieldOffset(view, batch, 1);
   const buffersOffset = fbFieldOffset(view, batch, 2);
   if (rowCountOffset === 0 || nodesOffset === 0 || buffersOffset === 0) {
-    throw new Error("[wiz] arrow template has no length, nodes or buffers");
+    throw new Error('[wiz] arrow template has no length, nodes or buffers');
   }
 
   const vectorAt = (fieldPtr: number) => {
@@ -467,20 +482,20 @@ function sampleColumn(field: ArrowField, A: ArrowModule): unknown {
   const make = A.vectorFromArray as (values: unknown[], type: unknown) => unknown;
   const type = arrowTypeOf(field, A);
   switch (field.leaf?.kind) {
-    case "utf8":
-      return make(["x"], type);
-    case "binary":
+    case 'utf8':
+      return make(['x'], type);
+    case 'binary':
       return make([new Uint8Array([1])], type);
-    case "bool":
+    case 'bool':
       return make([true], type);
-    case "timestamp":
+    case 'timestamp':
       return make([new Date(1)], type);
-    case "int":
-    case "uint":
+    case 'int':
+    case 'uint':
       // A 64-bit arrow column takes a bigint sample even when the property is
       // a number, because that is what the builder for that type accepts.
       return make([field.leaf.width === 64 ? 1n : 1], type);
-    case "float":
+    case 'float':
       return make([1], type);
     default:
       throw new Error(
@@ -499,10 +514,8 @@ function sampleColumn(field: ArrowField, A: ArrowModule): unknown {
  */
 export function arrowBatchTemplate(fields: ArrowField[]): BatchTemplate {
   const A = loadArrow();
-  const columns = Object.fromEntries(
-    fields.map((field) => [field.name, sampleColumn(field, A)])
-  );
-  const stream = A.tableToIPC(new A.Table(columns as never), "stream");
+  const columns = Object.fromEntries(fields.map((field) => [field.name, sampleColumn(field, A)]));
+  const stream = A.tableToIPC(new A.Table(columns as never), 'stream');
   const view = new DataView(stream.buffer, stream.byteOffset, stream.byteLength);
 
   const schemaLength = view.getUint32(4, true);
@@ -510,7 +523,6 @@ export function arrowBatchTemplate(fields: ArrowField[]): BatchTemplate {
   const batchLength = view.getUint32(batchAt + 4, true);
   return readBatchTemplate(stream.slice(batchAt, batchAt + 8 + batchLength));
 }
-
 
 // ---------------------------------------------------------------------------
 // Codec
@@ -520,31 +532,31 @@ const BYTES = JSON.stringify;
 
 /** A byte array as source, compact enough not to dominate the module. */
 function byteLiteral(bytes: Uint8Array): string {
-  return `new Uint8Array([${[...bytes].join(",")}])`;
+  return `new Uint8Array([${[...bytes].join(',')}])`;
 }
 
 /** Writes one column's values, given `n` rows and a `get(i)` accessor. */
 function emitValues(leaf: ArrowLeaf, access: string): string[] {
   switch (leaf.kind) {
-    case "bool":
+    case 'bool':
       return [
         `      len = Math.ceil(n / 8);`,
         `      buf.fill(0, o, o + len);`,
         `      for (let i = 0; i < n; i++) if (${access}) buf[o + (i >> 3)] |= 1 << (i & 7);`,
       ];
-    case "int":
-    case "uint":
-    case "timestamp": {
+    case 'int':
+    case 'uint':
+    case 'timestamp': {
       if (leaf.width === 64) {
-        const setter = leaf.kind === "uint" ? "setBigUint64" : "setBigInt64";
+        const setter = leaf.kind === 'uint' ? 'setBigUint64' : 'setBigInt64';
         const coerce =
-          leaf.kind === "timestamp"
+          leaf.kind === 'timestamp'
             ? `BigInt(v instanceof Date ? v.getTime() : Number(v ?? 0))`
             : `typeof v === "bigint" ? v : BigInt(Math.trunc(Number(v ?? 0)))`;
         return [
           `      len = n * 8;`,
           `      for (let i = 0; i < n; i++) {`,
-          `        const v = ${access.replace("!= null", "")};`,
+          `        const v = ${access.replace('!= null', '')};`,
           `        view.${setter}(o + i * 8, v === undefined || v === null ? 0n : (${coerce}), true);`,
           `      }`,
         ];
@@ -553,34 +565,34 @@ function emitValues(leaf: ArrowLeaf, access: string): string[] {
       // n * 1 or n * 2 bytes rather than widened to four.
       const bytes = leaf.width === 8 ? 1 : leaf.width === 16 ? 2 : 4;
       const setter =
-        leaf.kind === "uint"
+        leaf.kind === 'uint'
           ? bytes === 1
-            ? "setUint8"
+            ? 'setUint8'
             : bytes === 2
-              ? "setUint16"
-              : "setUint32"
+              ? 'setUint16'
+              : 'setUint32'
           : bytes === 1
-            ? "setInt8"
+            ? 'setInt8'
             : bytes === 2
-              ? "setInt16"
-              : "setInt32";
+              ? 'setInt16'
+              : 'setInt32';
       // The value is already known to fit: the validator enforces the declared
       // range, so this is a store, not a truncation.
-      const args = bytes === 1 ? "" : ", true";
+      const args = bytes === 1 ? '' : ', true';
       return [
         `      len = n * ${bytes};`,
         `      for (let i = 0; i < n; i++) {`,
-        `        const v = ${access.replace("!= null", "")};`,
+        `        const v = ${access.replace('!= null', '')};`,
         `        view.${setter}(o + i * ${bytes}, Number(v ?? 0)${args});`,
         `      }`,
       ];
     }
-    case "float":
+    case 'float':
       return [
         `      len = n * ${leaf.width === 32 ? 4 : 8};`,
         `      for (let i = 0; i < n; i++) {`,
-        `        const v = ${access.replace("!= null", "")};`,
-        `        view.${leaf.width === 32 ? "setFloat32" : "setFloat64"}(o + i * ${leaf.width === 32 ? 4 : 8}, Number(v ?? 0), true);`,
+        `        const v = ${access.replace('!= null', '')};`,
+        `        view.${leaf.width === 32 ? 'setFloat32' : 'setFloat64'}(o + i * ${leaf.width === 32 ? 4 : 8}, Number(v ?? 0), true);`,
         `      }`,
       ];
     default:
@@ -596,7 +608,7 @@ function emitValues(leaf: ArrowLeaf, access: string): string[] {
  * and a single record batch.
  */
 export function generateArrowCode(ir: TypeIR): string {
-  const typeName = ir.name ?? "Target";
+  const typeName = ir.name ?? 'Target';
   const blocker = arrowTypeBlocker(ir, typeName);
   if (blocker) {
     return [
@@ -607,7 +619,7 @@ export function generateArrowCode(ir: TypeIR): string {
       `export function decodeArrow(buf, offset = 0) {`,
       `  throw new Error(${BYTES(blocker)});`,
       `}`,
-    ].join("\n");
+    ].join('\n');
   }
 
   const fields = arrowFields(ir);
@@ -626,7 +638,7 @@ export function generateArrowCode(ir: TypeIR): string {
       `export function decodeArrow(buf, offset = 0) {`,
       `  throw new Error(${BYTES(message)});`,
       `}`,
-    ].join("\n");
+    ].join('\n');
   }
 
   const encode: string[] = [];
@@ -641,7 +653,7 @@ export function generateArrowCode(ir: TypeIR): string {
     const leaf = field.leaf!;
     const prop = BYTES(field.name);
     const value = `rows[i][${prop}]`;
-    const variable = leaf.kind === "utf8" || leaf.kind === "binary";
+    const variable = leaf.kind === 'utf8' || leaf.kind === 'binary';
 
     encode.push(
       `    // ${field.name}: ${leaf.arrow}`,
@@ -669,7 +681,7 @@ export function generateArrowCode(ir: TypeIR): string {
 
     if (variable) {
       const encodeItem =
-        leaf.kind === "utf8"
+        leaf.kind === 'utf8'
           ? `textEncoder.encode(String(v))`
           : `v instanceof Uint8Array ? v : new Uint8Array(v ?? [])`;
       encode.push(
@@ -779,7 +791,7 @@ export function generateArrowCode(ir: TypeIR): string {
     ...decode,
     `  return rows;`,
     `}`,
-  ].join("\n");
+  ].join('\n');
 }
 
 /**
@@ -840,12 +852,12 @@ const ARROW_READER = [
   `  }`,
   `  throw new Error("[wiz] Arrow stream has no record batch");`,
   `}`,
-].join("\n");
+].join('\n');
 
 function emitDecodeColumn(field: ArrowField, slot: number): string[] {
   const leaf = field.leaf!;
   const prop = BYTES(field.name);
-  const variable = leaf.kind === "utf8" || leaf.kind === "binary";
+  const variable = leaf.kind === 'utf8' || leaf.kind === 'binary';
   // Buffers arrive in field order: validity, then values, with offsets between
   // them for the variable-width layouts.
   // Slots hold (offset, length) pairs, so slot k lives at bufs[k * 2].
@@ -863,7 +875,7 @@ function emitDecodeColumn(field: ArrowField, slot: number): string[] {
 
   if (variable) {
     const decodeItem =
-      leaf.kind === "utf8"
+      leaf.kind === 'utf8'
         ? `textDecoder.decode(buf.subarray(valuesAt + from, valuesAt + to))`
         : `buf.slice(valuesAt + from, valuesAt + to)`;
     lines.push(
@@ -883,28 +895,40 @@ function emitDecodeColumn(field: ArrowField, slot: number): string[] {
       // which `@format double-int` and `unixtime` both are: returning the wrong
       // JS type round-trips the value and loses the type.
       const wide = (getter: string) =>
-        leaf.js === "number"
+        leaf.js === 'number'
           ? `Number(view.${getter}(${at} + i * 8, true))`
           : `view.${getter}(${at} + i * 8, true)`;
 
       switch (leaf.kind) {
-        case "bool":
+        case 'bool':
           return `(buf[${at} + (i >> 3)] & (1 << (i & 7))) !== 0`;
-        case "timestamp":
+        case 'timestamp':
           return `new Date(Number(view.getBigInt64(${at} + i * 8, true)))`;
-        case "float":
+        case 'float':
           return leaf.width === 32
             ? `view.getFloat32(${at} + i * 4, true)`
             : `view.getFloat64(${at} + i * 8, true)`;
-        case "uint":
-          if (leaf.width === 64) return wide("getBigUint64");
-          if (leaf.width === 8) return `view.getUint8(${at} + i)`;
-          if (leaf.width === 16) return `view.getUint16(${at} + i * 2, true)`;
+        case 'uint':
+          if (leaf.width === 64) {
+            return wide('getBigUint64');
+          }
+          if (leaf.width === 8) {
+            return `view.getUint8(${at} + i)`;
+          }
+          if (leaf.width === 16) {
+            return `view.getUint16(${at} + i * 2, true)`;
+          }
           return `view.getUint32(${at} + i * 4, true)`;
         default:
-          if (leaf.width === 64) return wide("getBigInt64");
-          if (leaf.width === 8) return `view.getInt8(${at} + i)`;
-          if (leaf.width === 16) return `view.getInt16(${at} + i * 2, true)`;
+          if (leaf.width === 64) {
+            return wide('getBigInt64');
+          }
+          if (leaf.width === 8) {
+            return `view.getInt8(${at} + i)`;
+          }
+          if (leaf.width === 16) {
+            return `view.getInt16(${at} + i * 2, true)`;
+          }
           return `view.getInt32(${at} + i * 4, true)`;
       }
     })();
@@ -921,12 +945,12 @@ function emitDecodeColumn(field: ArrowField, slot: number): string[] {
 }
 
 /** A readable description of the columns, for `arrowSchema<[T]>()`. */
-export function generateArrowSchemaCode(
-  types: Array<{ name: string; ir: TypeIR }>
-): string {
+export function generateArrowSchemaCode(types: Array<{ name: string; ir: TypeIR }>): string {
   const documents = types.map(({ name, ir }) => {
     const blocker = arrowTypeBlocker(ir, name);
-    if (blocker) throw new Error(blocker);
+    if (blocker) {
+      throw new Error(blocker);
+    }
     return { name, ...(arrowSchemaJson(arrowFields(ir)) as object) };
   });
   const value = documents.length === 1 ? documents[0] : documents;
@@ -936,5 +960,5 @@ export function generateArrowSchemaCode(
     `  const indent = options.indent ?? "  ";`,
     `  return JSON.stringify(${BYTES(value)}, null, indent);`,
     `}`,
-  ].join("\n");
+  ].join('\n');
 }

@@ -1,11 +1,7 @@
-import * as ts from "typescript";
-import { mergeDocuments, type OpenApiDocument } from "./document.ts";
-import {
-  extractJSDocInfo,
-  extractTypeIR,
-  type JSDocInfo,
-} from "./extractors/typescript.ts";
-import { generateOpenApiSchemaCode } from "./generators/openapi.ts";
+import * as ts from 'typescript';
+import { mergeDocuments, type OpenApiDocument } from './document.ts';
+import { extractJSDocInfo, extractTypeIR, type JSDocInfo } from './extractors/typescript.ts';
+import { generateOpenApiSchemaCode } from './generators/openapi.ts';
 import {
   type AsyncApiServiceMethodIR,
   type GrpcServiceMethodIR,
@@ -18,14 +14,10 @@ import {
   type OpenRpcServiceMethodIR,
   type ParameterIR,
   type ServiceMethodIR,
-} from "./ir/service.ts";
-import { silentLogger, type WizLogger } from "./logger.ts";
-import { flattenObjectProperties, isUserNamedType, type TypeIR } from "./types.ts";
-
-import {
-  getSourceFileInternalSymbol,
-  getSignatureSymbol,
-} from "./tsInternal.ts";
+} from './ir/service.ts';
+import { silentLogger, type WizLogger } from './logger.ts';
+import { getSourceFileInternalSymbol, getSignatureSymbol } from './tsInternal.ts';
+import { flattenObjectProperties, isUserNamedType, type TypeIR } from './types.ts';
 /**
  * Reading declarations out of source: the operations a spec macro's type
  * arguments describe, and the merged document `openapiDocument()` is replaced
@@ -36,24 +28,14 @@ import {
  * and does the rewriting itself.
  */
 
-const HTTP_METHODS = new Set([
-  "get",
-  "post",
-  "put",
-  "patch",
-  "delete",
-  "head",
-  "options",
-  "trace",
-]);
+const HTTP_METHODS = new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace']);
 
-const JSON_MIME = "application/json";
-
+const JSON_MIME = 'application/json';
 
 function toSnakeCase(str: string): string {
   return str
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
     .toLowerCase();
 }
 
@@ -67,7 +49,7 @@ export const COMPILER_OPTIONS: ts.CompilerOptions = {
 
 /** `/users/:id` (Express style) -> `/users/{id}` (OpenAPI style). */
 function toOpenApiPath(path: string): string {
-  return path.replace(/:([A-Za-z0-9_$]+)/g, "{$1}");
+  return path.replace(/:([A-Za-z0-9_$]+)/g, '{$1}');
 }
 
 /**
@@ -75,20 +57,23 @@ function toOpenApiPath(path: string): string {
  * The IR carries parameters individually so a component name has somewhere to
  * live; this is the only place TypeScript slot objects are taken apart.
  */
-function slotParameters(
-  ir: TypeIR | undefined,
-  location: ParameterIR["in"]
-): ParameterIR[] {
-  if (!ir) return [];
+function slotParameters(ir: TypeIR | undefined, location: ParameterIR['in']): ParameterIR[] {
+  if (!ir) {
+    return [];
+  }
   return flattenObjectProperties(ir).map((property) => {
     const parameter: ParameterIR = {
       name: property.name,
       in: location,
-      required: location === "path" ? true : !property.optional,
+      required: location === 'path' ? true : !property.optional,
       type: property.type,
     };
-    if (property.description) parameter.description = property.description;
-    if (property.deprecated) parameter.deprecated = true;
+    if (property.description) {
+      parameter.description = property.description;
+    }
+    if (property.deprecated) {
+      parameter.deprecated = true;
+    }
     return parameter;
   });
 }
@@ -102,10 +87,10 @@ function httpMethodIR(
   overrides?: string
 ): HttpServiceMethodIR {
   return {
-    kind: "serviceMethod",
-    protocol: "http",
+    kind: 'serviceMethod',
+    protocol: 'http',
     address: {
-      protocol: "http",
+      protocol: 'http',
       method: method.toUpperCase() as HttpMethodName,
       path: toOpenApiPath(path),
     },
@@ -116,18 +101,18 @@ function httpMethodIR(
 }
 
 function isAbsent(ir: TypeIR | undefined): boolean {
-  if (!ir) return true;
+  if (!ir) {
+    return true;
+  }
   return (
-    ir.kind === "primitive" &&
-    (ir.type === "never" || ir.type === "void" || ir.type === "undefined")
+    ir.kind === 'primitive' &&
+    (ir.type === 'never' || ir.type === 'void' || ir.type === 'undefined')
   );
 }
 
 /** `file:line:col` for a node, so a warning points at real source. */
 function locationOf(node: ts.Node, sourceFile: ts.SourceFile): string {
-  const { line, character } = sourceFile.getLineAndCharacterOfPosition(
-    node.getStart(sourceFile)
-  );
+  const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
   return `${sourceFile.fileName}:${line + 1}:${character + 1}`;
 }
 
@@ -158,38 +143,42 @@ export function collectOperations(
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile
 ): HttpServiceMethodIR[] {
-  if (!arg || !ts.isArrayLiteralExpression(arg)) return [];
+  if (!arg || !ts.isArrayLiteralExpression(arg)) {
+    return [];
+  }
 
   const methods: HttpServiceMethodIR[] = [];
   for (const element of arg.elements) {
-    if (!ts.isCallExpression(element)) continue;
-    if (!ts.isPropertyAccessExpression(element.expression)) continue;
+    if (!ts.isCallExpression(element)) {
+      continue;
+    }
+    if (!ts.isPropertyAccessExpression(element.expression)) {
+      continue;
+    }
 
     const httpMethod = element.expression.name.text.toLowerCase();
-    if (!HTTP_METHODS.has(httpMethod)) continue;
+    if (!HTTP_METHODS.has(httpMethod)) {
+      continue;
+    }
 
     const pathArg = element.arguments[0];
-    if (!pathArg || !ts.isStringLiteralLike(pathArg)) continue;
+    if (!pathArg || !ts.isStringLiteralLike(pathArg)) {
+      continue;
+    }
 
     const optionsArg = element.arguments[1];
-    const [pathParams, queryParams, response, requestBody] = (
-      element.typeArguments ?? []
-    ).map((typeNode) =>
-      extractTypeIR(checker.getTypeFromTypeNode(typeNode), checker)
+    const [pathParams, queryParams, response, requestBody] = (element.typeArguments ?? []).map(
+      (typeNode) => extractTypeIR(checker.getTypeFromTypeNode(typeNode), checker)
     );
 
-    const request: HttpRequestIR = { protocol: "http" };
+    const request: HttpRequestIR = { protocol: 'http' };
     const parameters = [
-      ...slotParameters(
-        pathParams && !isAbsent(pathParams) ? pathParams : undefined,
-        "path"
-      ),
-      ...slotParameters(
-        queryParams && !isAbsent(queryParams) ? queryParams : undefined,
-        "query"
-      ),
+      ...slotParameters(pathParams && !isAbsent(pathParams) ? pathParams : undefined, 'path'),
+      ...slotParameters(queryParams && !isAbsent(queryParams) ? queryParams : undefined, 'query'),
     ];
-    if (parameters.length > 0) request.parameters = parameters;
+    if (parameters.length > 0) {
+      request.parameters = parameters;
+    }
     if (requestBody && !isAbsent(requestBody)) {
       request.body = [{ mimetype: JSON_MIME, content: requestBody }];
     }
@@ -198,12 +187,12 @@ export function collectOperations(
       response && !isAbsent(response)
         ? [
             {
-              protocol: "http",
+              protocol: 'http',
               status: 200,
               body: [{ mimetype: JSON_MIME, content: response }],
             },
           ]
-        : [{ protocol: "http", status: 204 }];
+        : [{ protocol: 'http', status: 204 }];
 
     methods.push(
       httpMethodIR(
@@ -219,13 +208,15 @@ export function collectOperations(
 }
 
 /** Reads `"3.0"` / `3.0` from the second type argument; defaults to 3.1. */
-export function readOpenApiVersion(call: ts.CallExpression): "3.0" | "3.1" {
+export function readOpenApiVersion(call: ts.CallExpression): '3.0' | '3.1' {
   const versionNode = call.typeArguments?.[1];
   if (versionNode && ts.isLiteralTypeNode(versionNode)) {
-    const text = versionNode.literal.getText().replace(/['"]/g, "");
-    if (text === "3.0" || text === "3") return "3.0";
+    const text = versionNode.literal.getText().replace(/['"]/g, '');
+    if (text === '3.0' || text === '3') {
+      return '3.0';
+    }
   }
-  return "3.1";
+  return '3.1';
 }
 
 /**
@@ -233,21 +224,27 @@ export function readOpenApiVersion(call: ts.CallExpression): "3.0" | "3.1" {
  * has to be declared anyway, so it beats a type parameter that would collide
  * with inference of the routes map.
  */
-function readVersionFromBase(base: ts.Expression | undefined): "3.0" | "3.1" {
-  if (!base || !ts.isObjectLiteralExpression(base)) return "3.1";
+function readVersionFromBase(base: ts.Expression | undefined): '3.0' | '3.1' {
+  if (!base || !ts.isObjectLiteralExpression(base)) {
+    return '3.1';
+  }
   for (const property of base.properties) {
-    if (!ts.isPropertyAssignment(property)) continue;
+    if (!ts.isPropertyAssignment(property)) {
+      continue;
+    }
     const key = ts.isIdentifier(property.name)
       ? property.name.text
       : ts.isStringLiteralLike(property.name)
         ? property.name.text
         : undefined;
-    if (key !== "openapi") continue;
+    if (key !== 'openapi') {
+      continue;
+    }
     if (ts.isStringLiteralLike(property.initializer)) {
-      return property.initializer.text.startsWith("3.0") ? "3.0" : "3.1";
+      return property.initializer.text.startsWith('3.0') ? '3.0' : '3.1';
     }
   }
-  return "3.1";
+  return '3.1';
 }
 
 /**
@@ -258,27 +255,43 @@ function readVersionFromBase(base: ts.Expression | undefined): "3.0" | "3.1" {
  * and is left out rather than guessed at.
  */
 function staticValue(node: ts.Expression | undefined): unknown {
-  if (!node) return undefined;
+  if (!node) {
+    return undefined;
+  }
 
-  if (ts.isParenthesizedExpression(node)) return staticValue(node.expression);
+  if (ts.isParenthesizedExpression(node)) {
+    return staticValue(node.expression);
+  }
   if (ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) {
     return staticValue(node.expression);
   }
-  if (ts.isStringLiteralLike(node)) return node.text;
-  if (ts.isNumericLiteral(node)) return Number(node.text);
-  if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
-  if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
-  if (node.kind === ts.SyntaxKind.NullKeyword) return null;
+  if (ts.isStringLiteralLike(node)) {
+    return node.text;
+  }
+  if (ts.isNumericLiteral(node)) {
+    return Number(node.text);
+  }
+  if (node.kind === ts.SyntaxKind.TrueKeyword) {
+    return true;
+  }
+  if (node.kind === ts.SyntaxKind.FalseKeyword) {
+    return false;
+  }
+  if (node.kind === ts.SyntaxKind.NullKeyword) {
+    return null;
+  }
   if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.MinusToken) {
     const inner = staticValue(node.operand);
-    return typeof inner === "number" ? -inner : undefined;
+    return typeof inner === 'number' ? -inner : undefined;
   }
 
   if (ts.isArrayLiteralExpression(node)) {
     const items: unknown[] = [];
     for (const element of node.elements) {
       const value = staticValue(element);
-      if (value === undefined) return undefined;
+      if (value === undefined) {
+        return undefined;
+      }
       items.push(value);
     }
     return items;
@@ -287,15 +300,21 @@ function staticValue(node: ts.Expression | undefined): unknown {
   if (ts.isObjectLiteralExpression(node)) {
     const object: Record<string, unknown> = {};
     for (const property of node.properties) {
-      if (!ts.isPropertyAssignment(property)) return undefined;
+      if (!ts.isPropertyAssignment(property)) {
+        return undefined;
+      }
       const key = ts.isIdentifier(property.name)
         ? property.name.text
         : ts.isStringLiteralLike(property.name)
           ? property.name.text
           : undefined;
-      if (key === undefined) return undefined;
+      if (key === undefined) {
+        return undefined;
+      }
       const value = staticValue(property.initializer);
-      if (value === undefined) return undefined;
+      if (value === undefined) {
+        return undefined;
+      }
       object[key] = value;
     }
     return object;
@@ -312,13 +331,8 @@ function staticValue(node: ts.Expression | undefined): unknown {
  * codebase keeps finding. The input is our own generated source, not the
  * user's.
  */
-function runGeneratedDocument(
-  code: string,
-  base: Record<string, unknown>
-): OpenApiDocument {
-  const factory = new Function(
-    `${code.replace(/^export /gm, "")}\nreturn openapiSchema;`
-  );
+function runGeneratedDocument(code: string, base: Record<string, unknown>): OpenApiDocument {
+  const factory = new Function(`${code.replace(/^export /gm, '')}\nreturn openapiSchema;`);
   return factory()(base) as OpenApiDocument;
 }
 
@@ -347,12 +361,11 @@ export function invalidateHarvest(entryPath: string): void {
   harvestCache.delete(entryPath);
 }
 
-export function harvestDocument(
-  entryPath: string,
-  logger: WizLogger
-): OpenApiDocument {
+export function harvestDocument(entryPath: string, logger: WizLogger): OpenApiDocument {
   const cached = harvestCache.get(entryPath);
-  if (cached) return cached;
+  if (cached) {
+    return cached;
+  }
 
   // Rooting the program at the entry makes TypeScript resolve the imports for
   // us, so `getSourceFiles()` is exactly the transitive closure.
@@ -361,8 +374,12 @@ export function harvestDocument(
   const fragments: OpenApiDocument[] = [];
 
   for (const sourceFile of program.getSourceFiles()) {
-    if (sourceFile.isDeclarationFile) continue;
-    if (sourceFile.fileName.includes("node_modules")) continue;
+    if (sourceFile.isDeclarationFile) {
+      continue;
+    }
+    if (sourceFile.fileName.includes('node_modules')) {
+      continue;
+    }
 
     const visit = (node: ts.Node): void => {
       if (ts.isCallExpression(node)) {
@@ -372,7 +389,7 @@ export function harvestDocument(
           : ts.isPropertyAccessExpression(callee)
             ? callee.name.text
             : undefined;
-        if (fnName === "openapiSchema" || fnName === "openapiDocument") {
+        if (fnName === 'openapiSchema' || fnName === 'openapiDocument') {
           const typeNode = node.typeArguments?.[0];
           if (typeNode) {
             const tsType = checker.getTypeFromTypeNode(typeNode);
@@ -382,27 +399,35 @@ export function harvestDocument(
             } else {
               elemTypes = [tsType];
             }
-            const methods = harvestOpenApiOperationsFromTypeArgs(elemTypes, checker, sourceFile, node, silentLogger);
+            const methods = harvestOpenApiOperationsFromTypeArgs(
+              elemTypes,
+              checker,
+              sourceFile,
+              node,
+              silentLogger
+            );
             if (methods.length > 0) {
               const base = node.arguments[0];
               const baseValue = base ? staticValue(base) : {};
               const openApiTypes: Array<{ name: string; ir: TypeIR }> = [];
               for (const elemType of elemTypes) {
-                if (isServiceLikeType(elemType, checker)) continue;
+                if (isServiceLikeType(elemType, checker)) {
+                  continue;
+                }
                 const elemIR = extractTypeIR(elemType, checker);
                 const sym = elemType.aliasSymbol ?? elemType.symbol;
-                const name = sym && !sym.name.startsWith("__") ? sym.name : (elemIR.name ?? `Schema_${openApiTypes.length + 1}`);
+                const name =
+                  sym && !sym.name.startsWith('__')
+                    ? sym.name
+                    : (elemIR.name ?? `Schema_${openApiTypes.length + 1}`);
                 openApiTypes.push({ name, ir: elemIR });
               }
               const code = generateOpenApiSchemaCode(openApiTypes, readVersionFromBase(base), {
-                kind: "service",
+                kind: 'service',
                 methods,
               });
               fragments.push(
-                runGeneratedDocument(
-                  code,
-                  (baseValue as Record<string, unknown>) ?? {}
-                )
+                runGeneratedDocument(code, (baseValue as Record<string, unknown>) ?? {})
               );
             }
           }
@@ -426,14 +451,18 @@ export function harvestDocument(
   return document;
 }
 
-function parseAudience(val: unknown): Array<"user" | "assistant"> | undefined {
+function parseAudience(val: unknown): Array<'user' | 'assistant'> | undefined {
   if (Array.isArray(val)) {
-    const list = val.filter((v) => v === "user" || v === "assistant") as Array<"user" | "assistant">;
+    const list = val.filter((v) => v === 'user' || v === 'assistant') as Array<
+      'user' | 'assistant'
+    >;
     return list.length > 0 ? list : undefined;
   }
-  if (typeof val === "string") {
+  if (typeof val === 'string') {
     const parts = val.split(/[,\s]+/).map((s) => s.trim().toLowerCase());
-    const list = parts.filter((v) => v === "user" || v === "assistant") as Array<"user" | "assistant">;
+    const list = parts.filter((v) => v === 'user' || v === 'assistant') as Array<
+      'user' | 'assistant'
+    >;
     return list.length > 0 ? list : undefined;
   }
   return undefined;
@@ -448,7 +477,6 @@ export interface ObjectTypeMethod {
   signatures: readonly ts.Signature[];
 }
 
-
 export function extractMethodsFromObjectType(
   type: ts.Type,
   checker: ts.TypeChecker
@@ -456,7 +484,9 @@ export function extractMethodsFromObjectType(
   const props = checker.getPropertiesOfType(type);
   const methods: ObjectTypeMethod[] = [];
   for (const prop of props) {
-    if (prop.name.startsWith("__")) continue;
+    if (prop.name.startsWith('__')) {
+      continue;
+    }
     const decl = prop.valueDeclaration ?? prop.declarations?.[0];
     const propType = decl
       ? checker.getTypeOfSymbolAtLocation(prop, decl)
@@ -480,18 +510,21 @@ export function extractMethodsFromObjectType(
  * signature or an interface/class whose members are all callable. Those never
  * belong in `components.schemas`.
  */
-export function isServiceLikeType(
-  type: ts.Type,
-  checker: ts.TypeChecker
-): boolean {
-  if (type.getCallSignatures().length > 0) return true;
+export function isServiceLikeType(type: ts.Type, checker: ts.TypeChecker): boolean {
+  if (type.getCallSignatures().length > 0) {
+    return true;
+  }
   return extractMethodsFromObjectType(type, checker).length > 0;
 }
 
 function unwrapOptionalTypeIR(ir: TypeIR): TypeIR {
-  if (ir.kind === "union") {
+  if (ir.kind === 'union') {
     const nonNullables = ir.types.filter(
-      (t) => !(t.kind === "primitive" && (t.type === "undefined" || t.type === "null" || t.type === "void" || t.type === "never"))
+      (t) =>
+        !(
+          t.kind === 'primitive' &&
+          (t.type === 'undefined' || t.type === 'null' || t.type === 'void' || t.type === 'never')
+        )
     );
     if (nonNullables.length === 1) {
       return nonNullables[0]!;
@@ -515,15 +548,19 @@ function resolveTypeByName(
   sourceFile?: ts.SourceFile,
   sig?: ts.Signature
 ): TypeIR | undefined {
-  if (!typeName || typeName === "never" || typeName === "void" || typeName === "undefined") {
+  if (!typeName || typeName === 'never' || typeName === 'void' || typeName === 'undefined') {
     return undefined;
   }
 
   // The tag's own scope first: the service interface's file is where the name
   // was written, and the callsite's file may not import it at all.
   const scopes: ts.Node[] = [];
-  if (sig?.declaration) scopes.push(sig.declaration as ts.Node);
-  if (sourceFile) scopes.push(sourceFile);
+  if (sig?.declaration) {
+    scopes.push(sig.declaration as ts.Node);
+  }
+  if (sourceFile) {
+    scopes.push(sourceFile);
+  }
 
   // `Alias` as well as `Type`: an imported model is an alias symbol, and a
   // service normally imports its model rather than declaring it alongside.
@@ -534,16 +571,22 @@ function resolveTypeByName(
     sym = checker
       .getSymbolsInScope(scope, meaning)
       .find((candidate) => candidate.name === typeName);
-    if (sym) break;
+    if (sym) {
+      break;
+    }
   }
   if (!sym && sourceFile) {
     sym = getSourceFileInternalSymbol(sourceFile, typeName);
   }
-  if (!sym) return undefined;
+  if (!sym) {
+    return undefined;
+  }
 
   if (sym.flags & ts.SymbolFlags.Alias) {
     const aliased = checker.getAliasedSymbol(sym);
-    if (aliased && aliased !== sym) sym = aliased;
+    if (aliased && aliased !== sym) {
+      sym = aliased;
+    }
   }
 
   const symDecl = sym.declarations?.[0] ?? sym.valueDeclaration;
@@ -571,7 +614,9 @@ function resolveTypeByName(
   }
 
   const res = extractTypeIR(type, checker);
-  if (!res.name && isUserNamedType(typeName)) res.name = typeName;
+  if (!res.name && isUserNamedType(typeName)) {
+    res.name = typeName;
+  }
   return res;
 }
 
@@ -594,20 +639,30 @@ export function harvestOpenApiOperationsFromTypeArgs(
       const sig = signatures[0]!;
       const sym = elemType.aliasSymbol ?? elemType.symbol ?? getSignatureSymbol(sig, checker);
       const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
-      const method = parseOpenApiMethodFromSignature(sig, sym, jsDoc, checker, undefined, undefined, undefined, sourceFile);
-      if (method) methods.push(method);
-      else if (logger) {
-        warnUndocumentable(logger, noHttpTagMessage(sym?.name ?? "signature"), node, sourceFile);
+      const method = parseOpenApiMethodFromSignature(
+        sig,
+        sym,
+        jsDoc,
+        checker,
+        undefined,
+        undefined,
+        undefined,
+        sourceFile
+      );
+      if (method) {
+        methods.push(method);
+      } else if (logger) {
+        warnUndocumentable(logger, noHttpTagMessage(sym?.name ?? 'signature'), node, sourceFile);
       }
     } else {
       const objectMethods = extractMethodsFromObjectType(elemType, checker);
       const sym = elemType.aliasSymbol ?? elemType.symbol;
-      const typeName = sym && !sym.name.startsWith("__") ? sym.name : "Service";
+      const typeName = sym && !sym.name.startsWith('__') ? sym.name : 'Service';
       const jsDocType = sym ? extractJSDocInfo(sym, checker) : undefined;
-      const pkgOverride = jsDocType?.meta?.["package"]?.[0] ?? jsDocType?.meta?.["Package"]?.[0];
-      const svcOverride = jsDocType?.meta?.["service"]?.[0] ?? jsDocType?.meta?.["Service"]?.[0];
-      const pkg = typeof pkgOverride === "string" ? pkgOverride : undefined;
-      const svc = typeof svcOverride === "string" ? svcOverride : typeName;
+      const pkgOverride = jsDocType?.meta?.['package']?.[0] ?? jsDocType?.meta?.['Package']?.[0];
+      const svcOverride = jsDocType?.meta?.['service']?.[0] ?? jsDocType?.meta?.['Service']?.[0];
+      const pkg = typeof pkgOverride === 'string' ? pkgOverride : undefined;
+      const svc = typeof svcOverride === 'string' ? svcOverride : typeName;
 
       if (objectMethods.length === 0) {
         // A plain payload type is a legitimate `openapiSchema` argument: it
@@ -629,7 +684,16 @@ export function harvestOpenApiOperationsFromTypeArgs(
         const sig = m.signatures[0]!;
         const mSym = m.symbol;
         const jsDoc = extractJSDocInfo(mSym, checker);
-        const method = parseOpenApiMethodFromSignature(sig, mSym, jsDoc, checker, pkg, svc, m.name, sourceFile);
+        const method = parseOpenApiMethodFromSignature(
+          sig,
+          mSym,
+          jsDoc,
+          checker,
+          pkg,
+          svc,
+          m.name,
+          sourceFile
+        );
         if (method) {
           methods.push(method);
           documented++;
@@ -643,7 +707,6 @@ export function harvestOpenApiOperationsFromTypeArgs(
   return methods;
 }
 
-
 function parseOpenApiMethodFromSignature(
   sig: ts.Signature,
   sym: ts.Symbol | undefined,
@@ -654,22 +717,25 @@ function parseOpenApiMethodFromSignature(
   methodNameOverride?: string,
   sourceFile?: ts.SourceFile
 ): HttpServiceMethodIR | undefined {
-  const rawName = jsDoc?.meta?.["name"]?.[0] ?? jsDoc?.meta?.["Name"]?.[0];
-  const name = typeof rawName === "string" && rawName ? rawName : (methodNameOverride ?? sym?.name ?? "method");
-  const pkgMeta = jsDoc?.meta?.["package"]?.[0] ?? jsDoc?.meta?.["Package"]?.[0];
-  const svcMeta = jsDoc?.meta?.["service"]?.[0] ?? jsDoc?.meta?.["Service"]?.[0];
-  const pkg = typeof pkgMeta === "string" ? pkgMeta : defaultPkg;
-  const svc = typeof svcMeta === "string" ? svcMeta : defaultSvc;
+  const rawName = jsDoc?.meta?.['name']?.[0] ?? jsDoc?.meta?.['Name']?.[0];
+  const name =
+    typeof rawName === 'string' && rawName
+      ? rawName
+      : (methodNameOverride ?? sym?.name ?? 'method');
+  const pkgMeta = jsDoc?.meta?.['package']?.[0] ?? jsDoc?.meta?.['Package']?.[0];
+  const svcMeta = jsDoc?.meta?.['service']?.[0] ?? jsDoc?.meta?.['Service']?.[0];
+  const pkg = typeof pkgMeta === 'string' ? pkgMeta : defaultPkg;
+  const svc = typeof svcMeta === 'string' ? svcMeta : defaultSvc;
 
   const verbTags: Array<[string, HttpMethodName]> = [
-    ["get", "GET"],
-    ["post", "POST"],
-    ["put", "PUT"],
-    ["delete", "DELETE"],
-    ["patch", "PATCH"],
-    ["head", "HEAD"],
-    ["options", "OPTIONS"],
-    ["trace", "TRACE"],
+    ['get', 'GET'],
+    ['post', 'POST'],
+    ['put', 'PUT'],
+    ['delete', 'DELETE'],
+    ['patch', 'PATCH'],
+    ['head', 'HEAD'],
+    ['options', 'OPTIONS'],
+    ['trace', 'TRACE'],
   ];
 
   // An operation is what the documentation says it is. Nothing is guessed from
@@ -684,111 +750,122 @@ function parseOpenApiMethodFromSignature(
       if (val) {
         httpVerb = verb;
         // A bare `@get` stores `true`; only a string is a path.
-        if (typeof val[0] === "string" && val[0].length > 0) rawPath = val[0];
+        if (typeof val[0] === 'string' && val[0].length > 0) {
+          rawPath = val[0];
+        }
         break;
       }
     }
 
-    const httpTag = meta["http"] ?? meta["HTTP"];
-    if (httpTag && typeof httpTag[0] === "string") {
+    const httpTag = meta['http'] ?? meta['HTTP'];
+    if (httpTag && typeof httpTag[0] === 'string') {
       const parts = httpTag[0].trim().split(/\s+/);
       const verbWord = parts[0];
       if (!httpVerb && verbWord && HTTP_METHODS.has(verbWord.toLowerCase())) {
         httpVerb = verbWord.toUpperCase() as HttpMethodName;
       }
-      if (!rawPath && parts[1]) rawPath = parts[1];
+      if (!rawPath && parts[1]) {
+        rawPath = parts[1];
+      }
     }
 
     if (!httpVerb) {
-      const methodTag = meta["method"] ?? meta["Method"];
+      const methodTag = meta['method'] ?? meta['Method'];
       const methodWord = methodTag?.[0];
       // An unrecognised `@method` value is absent, not an error: the tag is
       // generic enough that other tooling may already be using it.
-      if (typeof methodWord === "string" && HTTP_METHODS.has(methodWord.trim().toLowerCase())) {
+      if (typeof methodWord === 'string' && HTTP_METHODS.has(methodWord.trim().toLowerCase())) {
         httpVerb = methodWord.trim().toUpperCase() as HttpMethodName;
       }
     }
 
     if (!rawPath) {
-      const pathTag = meta["path"] ?? meta["Path"];
-      if (typeof pathTag?.[0] === "string" && pathTag[0].length > 0) rawPath = pathTag[0];
+      const pathTag = meta['path'] ?? meta['Path'];
+      if (typeof pathTag?.[0] === 'string' && pathTag[0].length > 0) {
+        rawPath = pathTag[0];
+      }
     }
   }
 
-  if (!httpVerb || !rawPath) return undefined;
+  if (!httpVerb || !rawPath) {
+    return undefined;
+  }
 
   const normalized = toOpenApiPath(rawPath);
-  const openApiPath = normalized.startsWith("/") ? normalized : `/${normalized}`;
+  const openApiPath = normalized.startsWith('/') ? normalized : `/${normalized}`;
 
-  const jsDocSummary = jsDoc?.meta?.["summary"]?.[0] ?? jsDoc?.meta?.["Summary"]?.[0];
-  const summary = typeof jsDocSummary === "string" ? jsDocSummary : undefined;
-  const request: HttpRequestIR = { protocol: "http" };
+  const jsDocSummary = jsDoc?.meta?.['summary']?.[0] ?? jsDoc?.meta?.['Summary']?.[0];
+  const summary = typeof jsDocSummary === 'string' ? jsDocSummary : undefined;
+  const request: HttpRequestIR = { protocol: 'http' };
   const parameters: ParameterIR[] = [];
 
   for (const p of sig.getParameters()) {
     const pDecl = p.valueDeclaration ?? p.declarations?.[0];
-    const pType = pDecl
-      ? checker.getTypeOfSymbolAtLocation(p, pDecl)
-      : checker.getTypeOfSymbol(p);
+    const pType = pDecl ? checker.getTypeOfSymbolAtLocation(p, pDecl) : checker.getTypeOfSymbol(p);
     const rawPIR = extractTypeIR(pType, checker);
     const pIR = unwrapOptionalTypeIR(rawPIR);
     const isOpt = (p.flags & ts.SymbolFlags.Optional) !== 0;
     const pJsDoc = extractJSDocInfo(p, checker);
     const pName = p.name;
-    if (pName !== "query" && pName !== "body" && pName !== "path" && pIR.kind === "object") {
+    if (pName !== 'query' && pName !== 'body' && pName !== 'path' && pIR.kind === 'object') {
       const subProps = pIR.properties;
-      const hasKnownSlots = subProps.some((sp) =>
-        (sp.name === "path" || sp.name === "query" || sp.name === "header" || sp.name === "cookie" || sp.name === "body") &&
-        (sp.type.kind === "object" || sp.type.kind === "ref" || sp.type.kind === "intersection")
+      const hasKnownSlots = subProps.some(
+        (sp) =>
+          (sp.name === 'path' ||
+            sp.name === 'query' ||
+            sp.name === 'header' ||
+            sp.name === 'cookie' ||
+            sp.name === 'body') &&
+          (sp.type.kind === 'object' || sp.type.kind === 'ref' || sp.type.kind === 'intersection')
       );
 
       if (hasKnownSlots) {
         for (const sp of subProps) {
-          if (sp.name === "path") {
+          if (sp.name === 'path') {
             const flattened = flattenObjectProperties(sp.type);
             for (const prop of flattened) {
               parameters.push({
                 name: prop.name,
-                in: "path",
+                in: 'path',
                 required: true,
                 type: prop.type,
                 ...(prop.description ? { description: prop.description } : {}),
               });
             }
-          } else if (sp.name === "query") {
+          } else if (sp.name === 'query') {
             const flattened = flattenObjectProperties(sp.type);
             for (const prop of flattened) {
               parameters.push({
                 name: prop.name,
-                in: "query",
+                in: 'query',
                 required: !prop.optional,
                 type: prop.type,
                 ...(prop.description ? { description: prop.description } : {}),
               });
             }
-          } else if (sp.name === "header") {
+          } else if (sp.name === 'header') {
             const flattened = flattenObjectProperties(sp.type);
             for (const prop of flattened) {
               parameters.push({
                 name: prop.name,
-                in: "header",
+                in: 'header',
                 required: !prop.optional,
                 type: prop.type,
                 ...(prop.description ? { description: prop.description } : {}),
               });
             }
-          } else if (sp.name === "cookie") {
+          } else if (sp.name === 'cookie') {
             const flattened = flattenObjectProperties(sp.type);
             for (const prop of flattened) {
               parameters.push({
                 name: prop.name,
-                in: "cookie",
+                in: 'cookie',
                 required: !prop.optional,
                 type: prop.type,
                 ...(prop.description ? { description: prop.description } : {}),
               });
             }
-          } else if (sp.name === "body") {
+          } else if (sp.name === 'body') {
             request.body = [{ mimetype: JSON_MIME, content: sp.type }];
           }
         }
@@ -796,85 +873,91 @@ function parseOpenApiMethodFromSignature(
       }
     }
 
-    if (pName === "body" || pJsDoc.meta?.["body"] || pJsDoc.meta?.["Body"]) {
+    if (pName === 'body' || pJsDoc.meta?.['body'] || pJsDoc.meta?.['Body']) {
       request.body = [{ mimetype: JSON_MIME, content: pIR }];
     } else if (
-      pName === "query" ||
-      pJsDoc.meta?.["queryParams"] ||
-      pJsDoc.meta?.["queryparams"] ||
-      (pIR.kind === "object" && !openApiPath.includes(`{${pName}}`))
+      pName === 'query' ||
+      pJsDoc.meta?.['queryParams'] ||
+      pJsDoc.meta?.['queryparams'] ||
+      (pIR.kind === 'object' && !openApiPath.includes(`{${pName}}`))
     ) {
       const flattened = flattenObjectProperties(pIR);
       for (const prop of flattened) {
         parameters.push({
           name: prop.name,
-          in: "query",
+          in: 'query',
           required: !prop.optional,
           type: prop.type,
           ...(prop.description ? { description: prop.description } : {}),
         });
       }
-    } else if (pName === "path" || pJsDoc.meta?.["pathParams"] || pJsDoc.meta?.["pathparams"]) {
+    } else if (pName === 'path' || pJsDoc.meta?.['pathParams'] || pJsDoc.meta?.['pathparams']) {
       const flattened = flattenObjectProperties(pIR);
       for (const prop of flattened) {
         parameters.push({
           name: prop.name,
-          in: "path",
+          in: 'path',
           required: true,
           type: prop.type,
           ...(prop.description ? { description: prop.description } : {}),
         });
       }
     } else {
-      const loc: ParameterIR["in"] = openApiPath.includes(`{${pName}}`) ? "path" : "query";
+      const loc: ParameterIR['in'] = openApiPath.includes(`{${pName}}`) ? 'path' : 'query';
       parameters.push({
         name: pName,
         in: loc,
-        required: loc === "path" ? true : !isOpt,
+        required: loc === 'path' ? true : !isOpt,
         type: pIR,
         ...(pJsDoc.description ? { description: pJsDoc.description } : {}),
       });
     }
   }
-  if (parameters.length > 0) request.parameters = parameters;
+  if (parameters.length > 0) {
+    request.parameters = parameters;
+  }
 
   const responses: HttpResponseIR[] = [];
-  const responseTags = jsDoc?.meta?.["response"] ?? jsDoc?.meta?.["Response"];
+  const responseTags = jsDoc?.meta?.['response'] ?? jsDoc?.meta?.['Response'];
   if (responseTags && responseTags.length > 0) {
     for (const tagVal of responseTags) {
-      if (typeof tagVal === "string") {
+      if (typeof tagVal === 'string') {
         const parts = tagVal.trim().split(/\s+/);
-        let status: number | "default" = 200;
+        let status: number | 'default' = 200;
         let mimetype = JSON_MIME;
         let bodyIR: TypeIR | undefined;
         const descParts: string[] = [];
 
         for (const part of parts) {
-          if (part === "default") {
-            status = "default";
+          if (part === 'default') {
+            status = 'default';
           } else if (/^\d{3}$/.test(part)) {
             status = parseInt(part, 10);
-          } else if (part.includes("/")) {
+          } else if (part.includes('/')) {
             mimetype = part;
           } else {
             let typeStr = part;
             let isArray = false;
-            if (typeStr.endsWith("[]")) {
+            if (typeStr.endsWith('[]')) {
               isArray = true;
               typeStr = typeStr.slice(0, -2);
             }
             const resolved = resolveTypeByName(typeStr, checker, sourceFile, sig);
             if (resolved && !bodyIR) {
-              bodyIR = isArray ? { id: "t_arr", kind: "array", element: resolved } : resolved;
-            } else if (part !== "never" && part !== "void") {
+              bodyIR = isArray ? { id: 't_arr', kind: 'array', element: resolved } : resolved;
+            } else if (part !== 'never' && part !== 'void') {
               descParts.push(part);
             }
           }
         }
-        const description = descParts.length > 0 ? descParts.join(" ") : undefined;
-        const isStreamMime = mimetype === "text/event-stream" || mimetype.includes("stream") || mimetype.includes("ndjson") || mimetype.includes("jsonl");
+        const description = descParts.length > 0 ? descParts.join(' ') : undefined;
+        const isStreamMime =
+          mimetype === 'text/event-stream' ||
+          mimetype.includes('stream') ||
+          mimetype.includes('ndjson') ||
+          mimetype.includes('jsonl');
         responses.push({
-          protocol: "http",
+          protocol: 'http',
           status,
           ...(isStreamMime ? { streaming: true } : {}),
           ...(description ? { description } : {}),
@@ -889,12 +972,12 @@ function parseOpenApiMethodFromSignature(
     const unwrappedPromise = unwrapPromiseType(returnType);
     const { streaming, type: targetType } = unwrapStreamingType(unwrappedPromise);
     if (targetType.flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined | ts.TypeFlags.Never)) {
-      responses.push({ protocol: "http", status: 204 });
+      responses.push({ protocol: 'http', status: 204 });
     } else {
       const resIR = extractTypeIR(targetType, checker);
-      const mimetype = streaming ? "text/event-stream" : JSON_MIME;
+      const mimetype = streaming ? 'text/event-stream' : JSON_MIME;
       responses.push({
-        protocol: "http",
+        protocol: 'http',
         status: 200,
         ...(streaming ? { streaming: true } : {}),
         body: [{ mimetype, content: resIR }],
@@ -903,10 +986,10 @@ function parseOpenApiMethodFromSignature(
   }
 
   return {
-    kind: "serviceMethod",
-    protocol: "http",
+    kind: 'serviceMethod',
+    protocol: 'http',
     address: {
-      protocol: "http",
+      protocol: 'http',
       method: httpVerb,
       path: openApiPath,
       ...(pkg ? { package: pkg } : {}),
@@ -941,20 +1024,33 @@ export function harvestAsyncApiOperationsFromTypeArgs(
       const sig = signatures[0]!;
       const sym = elemType.aliasSymbol ?? elemType.symbol ?? getSignatureSymbol(sig, checker);
       const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
-      const method = parseAsyncApiMethodFromSignature(sig, sym, jsDoc, checker, undefined, undefined);
-      if (method) methods.push(method);
-      else if (logger) {
-        warnUndocumentable(logger, noDirectionTagMessage(sym?.name ?? "signature"), node, sourceFile);
+      const method = parseAsyncApiMethodFromSignature(
+        sig,
+        sym,
+        jsDoc,
+        checker,
+        undefined,
+        undefined
+      );
+      if (method) {
+        methods.push(method);
+      } else if (logger) {
+        warnUndocumentable(
+          logger,
+          noDirectionTagMessage(sym?.name ?? 'signature'),
+          node,
+          sourceFile
+        );
       }
     } else {
       const objectMethods = extractMethodsFromObjectType(elemType, checker);
       const sym = elemType.aliasSymbol ?? elemType.symbol;
-      const typeName = sym && !sym.name.startsWith("__") ? sym.name : "Service";
+      const typeName = sym && !sym.name.startsWith('__') ? sym.name : 'Service';
       const jsDocType = sym ? extractJSDocInfo(sym, checker) : undefined;
-      const pkgOverride = jsDocType?.meta?.["package"]?.[0] ?? jsDocType?.meta?.["Package"]?.[0];
-      const svcOverride = jsDocType?.meta?.["service"]?.[0] ?? jsDocType?.meta?.["Service"]?.[0];
-      const pkg = typeof pkgOverride === "string" ? pkgOverride : undefined;
-      const svc = typeof svcOverride === "string" ? svcOverride : typeName;
+      const pkgOverride = jsDocType?.meta?.['package']?.[0] ?? jsDocType?.meta?.['Package']?.[0];
+      const svcOverride = jsDocType?.meta?.['service']?.[0] ?? jsDocType?.meta?.['Service']?.[0];
+      const pkg = typeof pkgOverride === 'string' ? pkgOverride : undefined;
+      const svc = typeof svcOverride === 'string' ? svcOverride : typeName;
 
       if (objectMethods.length === 0) {
         // A plain message type is a legitimate `asyncapiSchema` argument: it
@@ -975,7 +1071,15 @@ export function harvestAsyncApiOperationsFromTypeArgs(
         const sig = m.signatures[0]!;
         const mSym = m.symbol;
         const jsDoc = extractJSDocInfo(mSym, checker);
-        const method = parseAsyncApiMethodFromSignature(sig, mSym, jsDoc, checker, pkg, svc, m.name);
+        const method = parseAsyncApiMethodFromSignature(
+          sig,
+          mSym,
+          jsDoc,
+          checker,
+          pkg,
+          svc,
+          m.name
+        );
         if (method) {
           methods.push(method);
           documented++;
@@ -998,31 +1102,39 @@ function parseAsyncApiMethodFromSignature(
   defaultSvc: string | undefined,
   methodNameOverride?: string
 ): AsyncApiServiceMethodIR | undefined {
-  const rawName = jsDoc?.meta?.["name"]?.[0] ?? jsDoc?.meta?.["Name"]?.[0];
-  const name = typeof rawName === "string" && rawName ? rawName : (methodNameOverride ?? sym?.name ?? "channel");
-  const pkgMeta = jsDoc?.meta?.["package"]?.[0] ?? jsDoc?.meta?.["Package"]?.[0];
-  const svcMeta = jsDoc?.meta?.["service"]?.[0] ?? jsDoc?.meta?.["Service"]?.[0];
-  const pkg = typeof pkgMeta === "string" ? pkgMeta : defaultPkg;
-  const svc = typeof svcMeta === "string" ? svcMeta : defaultSvc;
-  const channelTag = jsDoc?.meta?.["channel"]?.[0] ?? jsDoc?.meta?.["Channel"]?.[0];
-  const channel = typeof channelTag === "string" ? channelTag : name;
+  const rawName = jsDoc?.meta?.['name']?.[0] ?? jsDoc?.meta?.['Name']?.[0];
+  const name =
+    typeof rawName === 'string' && rawName
+      ? rawName
+      : (methodNameOverride ?? sym?.name ?? 'channel');
+  const pkgMeta = jsDoc?.meta?.['package']?.[0] ?? jsDoc?.meta?.['Package']?.[0];
+  const svcMeta = jsDoc?.meta?.['service']?.[0] ?? jsDoc?.meta?.['Service']?.[0];
+  const pkg = typeof pkgMeta === 'string' ? pkgMeta : defaultPkg;
+  const svc = typeof svcMeta === 'string' ? svcMeta : defaultSvc;
+  const channelTag = jsDoc?.meta?.['channel']?.[0] ?? jsDoc?.meta?.['Channel']?.[0];
+  const channel = typeof channelTag === 'string' ? channelTag : name;
 
   // A channel operation says which way it runs, or it is not one. Defaulting to
   // `send` would turn every ordinary method of a service into a channel.
   let action: string | undefined;
-  if (jsDoc?.meta?.["consumer"] || jsDoc?.meta?.["subscribe"] || jsDoc?.meta?.["receive"]) {
-    action = "receive";
-  } else if (jsDoc?.meta?.["producer"] || jsDoc?.meta?.["publish"] || jsDoc?.meta?.["send"]) {
-    action = "send";
-  } else if (jsDoc?.meta?.["action"]) {
-    const actTag = String(jsDoc.meta["action"][0]).trim();
-    if (actTag === "subscribe" || actTag === "receive") action = "receive";
-    else if (actTag === "publish" || actTag === "send") action = "send";
+  if (jsDoc?.meta?.['consumer'] || jsDoc?.meta?.['subscribe'] || jsDoc?.meta?.['receive']) {
+    action = 'receive';
+  } else if (jsDoc?.meta?.['producer'] || jsDoc?.meta?.['publish'] || jsDoc?.meta?.['send']) {
+    action = 'send';
+  } else if (jsDoc?.meta?.['action']) {
+    const actTag = String(jsDoc.meta['action'][0]).trim();
+    if (actTag === 'subscribe' || actTag === 'receive') {
+      action = 'receive';
+    } else if (actTag === 'publish' || actTag === 'send') {
+      action = 'send';
+    }
   }
-  if (!action) return undefined;
+  if (!action) {
+    return undefined;
+  }
 
-  const jsDocSummary = jsDoc?.meta?.["summary"]?.[0] ?? jsDoc?.meta?.["Summary"]?.[0];
-  const summary = typeof jsDocSummary === "string" ? jsDocSummary : undefined;
+  const jsDocSummary = jsDoc?.meta?.['summary']?.[0] ?? jsDoc?.meta?.['Summary']?.[0];
+  const summary = typeof jsDocSummary === 'string' ? jsDocSummary : undefined;
   const params = sig.getParameters();
   const first = params[0];
   let msgType = first
@@ -1050,10 +1162,10 @@ function parseAsyncApiMethodFromSignature(
   const msgIR = extractTypeIR(msgType, checker);
 
   return {
-    kind: "serviceMethod",
-    protocol: "asyncapi",
+    kind: 'serviceMethod',
+    protocol: 'asyncapi',
     address: {
-      protocol: "asyncapi",
+      protocol: 'asyncapi',
       channel,
       action,
       ...(pkg ? { package: pkg } : {}),
@@ -1064,7 +1176,7 @@ function parseAsyncApiMethodFromSignature(
     ...(jsDoc?.description ? { description: jsDoc.description } : {}),
     ...(jsDoc?.deprecated ? { deprecated: true } : {}),
     request: {
-      protocol: "asyncapi",
+      protocol: 'asyncapi',
       body: [{ mimetype: JSON_MIME, content: msgIR }],
     },
     responses: [],
@@ -1089,33 +1201,30 @@ export function harvestOpenRpcOperationsFromTypeArgs(
     const signatures = elemType.getCallSignatures();
     if (signatures.length > 0) {
       const sig = signatures[0]!;
-      const sym =
-        elemType.aliasSymbol ??
-        elemType.symbol ??
-        getSignatureSymbol(sig, checker);
+      const sym = elemType.aliasSymbol ?? elemType.symbol ?? getSignatureSymbol(sig, checker);
       const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
-      const rpcTag = jsDoc?.meta?.["rpc"] ?? jsDoc?.meta?.["RPC"];
+      const rpcTag = jsDoc?.meta?.['rpc'] ?? jsDoc?.meta?.['RPC'];
       if (!rpcTag) {
         if (logger) {
-          warnUndocumentable(logger, noRpcTagMessage(sym?.name ?? "signature"), node, sourceFile);
+          warnUndocumentable(logger, noRpcTagMessage(sym?.name ?? 'signature'), node, sourceFile);
         }
         continue;
       }
-      const taggedName = typeof rpcTag[0] === "string" && rpcTag[0] ? rpcTag[0] : undefined;
-      const rawName = jsDoc?.meta?.["name"]?.[0] ?? jsDoc?.meta?.["Name"]?.[0];
+      const taggedName = typeof rpcTag[0] === 'string' && rpcTag[0] ? rpcTag[0] : undefined;
+      const rawName = jsDoc?.meta?.['name']?.[0] ?? jsDoc?.meta?.['Name']?.[0];
       const name =
-        (typeof rawName === "string" && rawName ? rawName : undefined) ??
+        (typeof rawName === 'string' && rawName ? rawName : undefined) ??
         taggedName ??
-        (sym && !sym.name.startsWith("__") ? sym.name : undefined) ??
-        "method";
+        (sym && !sym.name.startsWith('__') ? sym.name : undefined) ??
+        'method';
 
-      const pkgMeta = jsDoc?.meta?.["package"]?.[0] ?? jsDoc?.meta?.["Package"]?.[0];
-      const svcMeta = jsDoc?.meta?.["service"]?.[0] ?? jsDoc?.meta?.["Service"]?.[0];
-      const pkg = typeof pkgMeta === "string" ? pkgMeta : undefined;
-      const svc = typeof svcMeta === "string" ? svcMeta : undefined;
+      const pkgMeta = jsDoc?.meta?.['package']?.[0] ?? jsDoc?.meta?.['Package']?.[0];
+      const svcMeta = jsDoc?.meta?.['service']?.[0] ?? jsDoc?.meta?.['Service']?.[0];
+      const pkg = typeof pkgMeta === 'string' ? pkgMeta : undefined;
+      const svc = typeof svcMeta === 'string' ? svcMeta : undefined;
 
-      const jsDocSummary = jsDoc?.meta?.["summary"]?.[0] ?? jsDoc?.meta?.["Summary"]?.[0];
-      const summary = typeof jsDocSummary === "string" ? jsDocSummary : undefined;
+      const jsDocSummary = jsDoc?.meta?.['summary']?.[0] ?? jsDoc?.meta?.['Summary']?.[0];
+      const summary = typeof jsDocSummary === 'string' ? jsDocSummary : undefined;
 
       const params: ParameterIR[] = sig.getParameters().map((p) => {
         const pDecl = p.valueDeclaration ?? p.declarations?.[0];
@@ -1127,7 +1236,7 @@ export function harvestOpenRpcOperationsFromTypeArgs(
         const pJsDoc = extractJSDocInfo(p, checker);
         return {
           name: p.name,
-          in: "rpc",
+          in: 'rpc',
           required: !isOpt,
           type: pIR,
           ...(pJsDoc.description ? { description: pJsDoc.description } : {}),
@@ -1137,8 +1246,7 @@ export function harvestOpenRpcOperationsFromTypeArgs(
       const returnType = sig.getReturnType();
       let targetType = returnType;
       if (
-        (returnType.symbol?.name === "Promise" ||
-          returnType.aliasSymbol?.name === "Promise") &&
+        (returnType.symbol?.name === 'Promise' || returnType.aliasSymbol?.name === 'Promise') &&
         (returnType as ts.TypeReference).typeArguments?.length
       ) {
         targetType = (returnType as ts.TypeReference).typeArguments![0]!;
@@ -1146,10 +1254,10 @@ export function harvestOpenRpcOperationsFromTypeArgs(
       const resultIR = extractTypeIR(targetType, checker);
 
       const methodIR: OpenRpcServiceMethodIR = {
-        kind: "serviceMethod",
-        protocol: "openrpc",
+        kind: 'serviceMethod',
+        protocol: 'openrpc',
         address: {
-          protocol: "openrpc",
+          protocol: 'openrpc',
           ...(pkg ? { package: pkg } : {}),
           ...(svc ? { service: svc } : {}),
           method: name,
@@ -1158,13 +1266,13 @@ export function harvestOpenRpcOperationsFromTypeArgs(
         ...(jsDoc?.description ? { description: jsDoc.description } : {}),
         ...(jsDoc?.deprecated ? { deprecated: true } : {}),
         request: {
-          protocol: "openrpc",
+          protocol: 'openrpc',
           params,
           paramsByName: true,
         },
         responses: [
           {
-            protocol: "openrpc",
+            protocol: 'openrpc',
             result: resultIR,
           },
         ],
@@ -1173,13 +1281,12 @@ export function harvestOpenRpcOperationsFromTypeArgs(
     } else {
       const objectMethods = extractMethodsFromObjectType(elemType, checker);
       const sym = elemType.aliasSymbol ?? elemType.symbol;
-      const typeName =
-        sym && !sym.name.startsWith("__") ? sym.name : "Service";
+      const typeName = sym && !sym.name.startsWith('__') ? sym.name : 'Service';
       const jsDocType = sym ? extractJSDocInfo(sym, checker) : undefined;
-      const pkgOverride = jsDocType?.meta?.["package"]?.[0] ?? jsDocType?.meta?.["Package"]?.[0];
-      const svcOverride = jsDocType?.meta?.["service"]?.[0] ?? jsDocType?.meta?.["Service"]?.[0];
-      const pkg = typeof pkgOverride === "string" ? pkgOverride : undefined;
-      const svc = typeof svcOverride === "string" ? svcOverride : typeName;
+      const pkgOverride = jsDocType?.meta?.['package']?.[0] ?? jsDocType?.meta?.['Package']?.[0];
+      const svcOverride = jsDocType?.meta?.['service']?.[0] ?? jsDocType?.meta?.['Service']?.[0];
+      const pkg = typeof pkgOverride === 'string' ? pkgOverride : undefined;
+      const svc = typeof svcOverride === 'string' ? svcOverride : typeName;
 
       if (objectMethods.length === 0) {
         if (logger) {
@@ -1201,21 +1308,23 @@ export function harvestOpenRpcOperationsFromTypeArgs(
         // A member is a JSON-RPC method because it says so. Everything else on
         // the type - HTTP operations, event registrations, plain helpers - is
         // not one.
-        const rpcTag = jsDoc.meta?.["rpc"] ?? jsDoc.meta?.["RPC"];
-        if (!rpcTag) continue;
+        const rpcTag = jsDoc.meta?.['rpc'] ?? jsDoc.meta?.['RPC'];
+        if (!rpcTag) {
+          continue;
+        }
         documented++;
 
-        const rawName = jsDoc.meta?.["name"]?.[0] ?? jsDoc.meta?.["Name"]?.[0];
-        const taggedName = typeof rpcTag[0] === "string" && rpcTag[0] ? rpcTag[0] : undefined;
+        const rawName = jsDoc.meta?.['name']?.[0] ?? jsDoc.meta?.['Name']?.[0];
+        const taggedName = typeof rpcTag[0] === 'string' && rpcTag[0] ? rpcTag[0] : undefined;
         // An explicitly written method name is the whole name, so it is not
         // namespaced again.
         const explicitName =
-          (typeof rawName === "string" && rawName ? rawName : undefined) ?? taggedName;
+          (typeof rawName === 'string' && rawName ? rawName : undefined) ?? taggedName;
         const hasOverride = explicitName !== undefined;
         const methodName = explicitName ?? m.name;
 
-        const jsDocSummary = jsDoc.meta?.["summary"]?.[0] ?? jsDoc.meta?.["Summary"]?.[0];
-        const summary = typeof jsDocSummary === "string" ? jsDocSummary : undefined;
+        const jsDocSummary = jsDoc.meta?.['summary']?.[0] ?? jsDoc.meta?.['Summary']?.[0];
+        const summary = typeof jsDocSummary === 'string' ? jsDocSummary : undefined;
 
         const params: ParameterIR[] = sig.getParameters().map((p) => {
           const pDecl = p.valueDeclaration ?? p.declarations?.[0];
@@ -1227,7 +1336,7 @@ export function harvestOpenRpcOperationsFromTypeArgs(
           const pJsDoc = extractJSDocInfo(p, checker);
           return {
             name: p.name,
-            in: "rpc",
+            in: 'rpc',
             required: !isOpt,
             type: pIR,
             ...(pJsDoc.description ? { description: pJsDoc.description } : {}),
@@ -1237,8 +1346,7 @@ export function harvestOpenRpcOperationsFromTypeArgs(
         const returnType = sig.getReturnType();
         let targetType = returnType;
         if (
-          (returnType.symbol?.name === "Promise" ||
-            returnType.aliasSymbol?.name === "Promise") &&
+          (returnType.symbol?.name === 'Promise' || returnType.aliasSymbol?.name === 'Promise') &&
           (returnType as ts.TypeReference).typeArguments?.length
         ) {
           targetType = (returnType as ts.TypeReference).typeArguments![0]!;
@@ -1246,10 +1354,10 @@ export function harvestOpenRpcOperationsFromTypeArgs(
         const resultIR = extractTypeIR(targetType, checker);
 
         const methodIR: OpenRpcServiceMethodIR = {
-          kind: "serviceMethod",
-          protocol: "openrpc",
+          kind: 'serviceMethod',
+          protocol: 'openrpc',
           address: {
-            protocol: "openrpc",
+            protocol: 'openrpc',
             ...(pkg ? { package: pkg } : {}),
             ...(hasOverride ? {} : { service: svc }),
             method: methodName,
@@ -1258,13 +1366,13 @@ export function harvestOpenRpcOperationsFromTypeArgs(
           ...(jsDoc.description ? { description: jsDoc.description } : {}),
           ...(jsDoc.deprecated ? { deprecated: true } : {}),
           request: {
-            protocol: "openrpc",
+            protocol: 'openrpc',
             params,
             paramsByName: true,
           },
           responses: [
             {
-              protocol: "openrpc",
+              protocol: 'openrpc',
               result: resultIR,
             },
           ],
@@ -1293,32 +1401,31 @@ export function harvestMcpOperationsFromTypeArgs(
     const signatures = elemType.getCallSignatures();
     if (signatures.length > 0) {
       const sig = signatures[0]!;
-      const sym =
-        elemType.aliasSymbol ??
-        elemType.symbol ??
-        getSignatureSymbol(sig, checker);
+      const sym = elemType.aliasSymbol ?? elemType.symbol ?? getSignatureSymbol(sig, checker);
       const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
-      const rawName = jsDoc?.meta?.["name"]?.[0] ?? jsDoc?.meta?.["Name"]?.[0];
-      const symName = sym && !sym.name.startsWith("__") ? sym.name : undefined;
+      const rawName = jsDoc?.meta?.['name']?.[0] ?? jsDoc?.meta?.['Name']?.[0];
+      const symName = sym && !sym.name.startsWith('__') ? sym.name : undefined;
       const toolName =
-        (typeof rawName === "string" && rawName ? rawName : undefined) ??
-        (symName ? toSnakeCase(symName) : "tool");
+        (typeof rawName === 'string' && rawName ? rawName : undefined) ??
+        (symName ? toSnakeCase(symName) : 'tool');
 
-      const jsDocSummary = jsDoc?.meta?.["summary"]?.[0] ?? jsDoc?.meta?.["Summary"]?.[0];
-      const jsDocTitle = jsDoc?.meta?.["title"]?.[0] ?? jsDoc?.meta?.["Title"]?.[0] ?? jsDocSummary;
-      const title = typeof jsDocTitle === "string" ? jsDocTitle : undefined;
+      const jsDocSummary = jsDoc?.meta?.['summary']?.[0] ?? jsDoc?.meta?.['Summary']?.[0];
+      const jsDocTitle = jsDoc?.meta?.['title']?.[0] ?? jsDoc?.meta?.['Title']?.[0] ?? jsDocSummary;
+      const title = typeof jsDocTitle === 'string' ? jsDocTitle : undefined;
       const description = jsDoc?.description;
 
-      const rawAudience = jsDoc?.meta?.["audience"] ?? jsDoc?.meta?.["Audience"];
+      const rawAudience = jsDoc?.meta?.['audience'] ?? jsDoc?.meta?.['Audience'];
       const jsDocAudience = rawAudience
-        ? parseAudience(rawAudience.filter((a): a is string => typeof a === "string"))
+        ? parseAudience(rawAudience.filter((a): a is string => typeof a === 'string'))
         : undefined;
 
-      const rawPriority = jsDoc?.meta?.["priority"]?.[0] ?? jsDoc?.meta?.["Priority"]?.[0];
+      const rawPriority = jsDoc?.meta?.['priority']?.[0] ?? jsDoc?.meta?.['Priority']?.[0];
       let jsDocPriority: number | undefined;
-      if (typeof rawPriority === "string") {
+      if (typeof rawPriority === 'string') {
         const parsedP = parseFloat(rawPriority);
-        if (!Number.isNaN(parsedP)) jsDocPriority = parsedP;
+        if (!Number.isNaN(parsedP)) {
+          jsDocPriority = parsedP;
+        }
       }
 
       const annotations: McpToolAnnotationsIR | undefined =
@@ -1337,13 +1444,13 @@ export function harvestMcpOperationsFromTypeArgs(
           ? checker.getTypeOfSymbolAtLocation(params[0]!, pDecl)
           : checker.getTypeOfSymbol(params[0]!);
         const pIR = extractTypeIR(pType, checker);
-        if (pIR.kind === "object") {
+        if (pIR.kind === 'object') {
           inputIR = pIR;
         } else {
           const isOpt = (params[0]!.flags & ts.SymbolFlags.Optional) !== 0;
           inputIR = {
-            id: "t_input",
-            kind: "object",
+            id: 't_input',
+            kind: 'object',
             properties: [{ name: params[0]!.name, type: pIR, optional: isOpt, readonly: false }],
           };
         }
@@ -1357,16 +1464,15 @@ export function harvestMcpOperationsFromTypeArgs(
           const isOpt = (p.flags & ts.SymbolFlags.Optional) !== 0;
           return { name: p.name, type: pIR, optional: isOpt, readonly: false };
         });
-        inputIR = { id: "t_input", kind: "object", properties };
+        inputIR = { id: 't_input', kind: 'object', properties };
       } else {
-        inputIR = { id: "t_input", kind: "object", properties: [] };
+        inputIR = { id: 't_input', kind: 'object', properties: [] };
       }
 
       const returnType = sig.getReturnType();
       let targetType = returnType;
       if (
-        (returnType.symbol?.name === "Promise" ||
-          returnType.aliasSymbol?.name === "Promise") &&
+        (returnType.symbol?.name === 'Promise' || returnType.aliasSymbol?.name === 'Promise') &&
         (returnType as ts.TypeReference).typeArguments?.length
       ) {
         targetType = (returnType as ts.TypeReference).typeArguments![0]!;
@@ -1374,22 +1480,22 @@ export function harvestMcpOperationsFromTypeArgs(
       const outputIR = extractTypeIR(targetType, checker);
 
       const methodIR: McpServiceMethodIR = {
-        kind: "serviceMethod",
-        protocol: "mcp",
+        kind: 'serviceMethod',
+        protocol: 'mcp',
         address: {
-          protocol: "mcp",
+          protocol: 'mcp',
           name: toolName,
         },
         ...(title ? { title } : {}),
         ...(description ? { description } : {}),
         ...(annotations ? { annotations } : {}),
         request: {
-          protocol: "mcp",
+          protocol: 'mcp',
           input: inputIR,
         },
         responses: [
           {
-            protocol: "mcp",
+            protocol: 'mcp',
             ...(!isAbsent(outputIR) ? { output: outputIR } : {}),
           },
         ],
@@ -1398,8 +1504,7 @@ export function harvestMcpOperationsFromTypeArgs(
     } else {
       const objectMethods = extractMethodsFromObjectType(elemType, checker);
       const sym = elemType.aliasSymbol ?? elemType.symbol;
-      const typeName =
-        sym && !sym.name.startsWith("__") ? sym.name : "Service";
+      const typeName = sym && !sym.name.startsWith('__') ? sym.name : 'Service';
 
       if (objectMethods.length === 0) {
         if (logger) {
@@ -1417,27 +1522,27 @@ export function harvestMcpOperationsFromTypeArgs(
         const sig = m.signatures[0]!;
         const mSym = m.symbol;
         const jsDoc = extractJSDocInfo(mSym, checker);
-        const rawName = jsDoc.meta?.["name"]?.[0] ?? jsDoc.meta?.["Name"]?.[0];
-        const hasOverride = typeof rawName === "string" && rawName.length > 0;
-        const toolName = hasOverride
-          ? rawName
-          : `${typeName}.${toSnakeCase(m.name)}`;
+        const rawName = jsDoc.meta?.['name']?.[0] ?? jsDoc.meta?.['Name']?.[0];
+        const hasOverride = typeof rawName === 'string' && rawName.length > 0;
+        const toolName = hasOverride ? rawName : `${typeName}.${toSnakeCase(m.name)}`;
 
-        const jsDocSummary = jsDoc.meta?.["summary"]?.[0] ?? jsDoc.meta?.["Summary"]?.[0];
-        const jsDocTitle = jsDoc.meta?.["title"]?.[0] ?? jsDoc.meta?.["Title"]?.[0] ?? jsDocSummary;
-        const title = typeof jsDocTitle === "string" ? jsDocTitle : undefined;
+        const jsDocSummary = jsDoc.meta?.['summary']?.[0] ?? jsDoc.meta?.['Summary']?.[0];
+        const jsDocTitle = jsDoc.meta?.['title']?.[0] ?? jsDoc.meta?.['Title']?.[0] ?? jsDocSummary;
+        const title = typeof jsDocTitle === 'string' ? jsDocTitle : undefined;
         const description = jsDoc.description;
 
-        const rawAudience = jsDoc.meta?.["audience"] ?? jsDoc.meta?.["Audience"];
+        const rawAudience = jsDoc.meta?.['audience'] ?? jsDoc.meta?.['Audience'];
         const jsDocAudience = rawAudience
-          ? parseAudience(rawAudience.filter((a): a is string => typeof a === "string"))
+          ? parseAudience(rawAudience.filter((a): a is string => typeof a === 'string'))
           : undefined;
 
-        const rawPriority = jsDoc.meta?.["priority"]?.[0] ?? jsDoc.meta?.["Priority"]?.[0];
+        const rawPriority = jsDoc.meta?.['priority']?.[0] ?? jsDoc.meta?.['Priority']?.[0];
         let jsDocPriority: number | undefined;
-        if (typeof rawPriority === "string") {
+        if (typeof rawPriority === 'string') {
           const parsedP = parseFloat(rawPriority);
-          if (!Number.isNaN(parsedP)) jsDocPriority = parsedP;
+          if (!Number.isNaN(parsedP)) {
+            jsDocPriority = parsedP;
+          }
         }
 
         const annotations: McpToolAnnotationsIR | undefined =
@@ -1456,13 +1561,13 @@ export function harvestMcpOperationsFromTypeArgs(
             ? checker.getTypeOfSymbolAtLocation(params[0]!, pDecl)
             : checker.getTypeOfSymbol(params[0]!);
           const pIR = extractTypeIR(pType, checker);
-          if (pIR.kind === "object") {
+          if (pIR.kind === 'object') {
             inputIR = pIR;
           } else {
             const isOpt = (params[0]!.flags & ts.SymbolFlags.Optional) !== 0;
             inputIR = {
-              id: "t_input",
-              kind: "object",
+              id: 't_input',
+              kind: 'object',
               properties: [{ name: params[0]!.name, type: pIR, optional: isOpt, readonly: false }],
             };
           }
@@ -1476,16 +1581,15 @@ export function harvestMcpOperationsFromTypeArgs(
             const isOpt = (p.flags & ts.SymbolFlags.Optional) !== 0;
             return { name: p.name, type: pIR, optional: isOpt, readonly: false };
           });
-          inputIR = { id: "t_input", kind: "object", properties };
+          inputIR = { id: 't_input', kind: 'object', properties };
         } else {
-          inputIR = { id: "t_input", kind: "object", properties: [] };
+          inputIR = { id: 't_input', kind: 'object', properties: [] };
         }
 
         const returnType = sig.getReturnType();
         let targetType = returnType;
         if (
-          (returnType.symbol?.name === "Promise" ||
-            returnType.aliasSymbol?.name === "Promise") &&
+          (returnType.symbol?.name === 'Promise' || returnType.aliasSymbol?.name === 'Promise') &&
           (returnType as ts.TypeReference).typeArguments?.length
         ) {
           targetType = (returnType as ts.TypeReference).typeArguments![0]!;
@@ -1493,22 +1597,22 @@ export function harvestMcpOperationsFromTypeArgs(
         const outputIR = extractTypeIR(targetType, checker);
 
         const methodIR: McpServiceMethodIR = {
-          kind: "serviceMethod",
-          protocol: "mcp",
+          kind: 'serviceMethod',
+          protocol: 'mcp',
           address: {
-            protocol: "mcp",
+            protocol: 'mcp',
             name: toolName,
           },
           ...(title ? { title } : {}),
           ...(description ? { description } : {}),
           ...(annotations ? { annotations } : {}),
           request: {
-            protocol: "mcp",
+            protocol: 'mcp',
             input: inputIR,
           },
           responses: [
             {
-              protocol: "mcp",
+              protocol: 'mcp',
               ...(!isAbsent(outputIR) ? { output: outputIR } : {}),
             },
           ],
@@ -1529,11 +1633,11 @@ export function harvestMcpOperationsFromTypeArgs(
 function unwrapStreamingType(type: ts.Type): { streaming: boolean; type: ts.Type } {
   const symName = type.aliasSymbol?.name ?? type.symbol?.name;
   if (
-    symName === "AsyncIterable" ||
-    symName === "AsyncIterator" ||
-    symName === "AsyncIterableIterator" ||
-    symName === "AsyncGenerator" ||
-    symName === "ReadableStream"
+    symName === 'AsyncIterable' ||
+    symName === 'AsyncIterator' ||
+    symName === 'AsyncIterableIterator' ||
+    symName === 'AsyncGenerator' ||
+    symName === 'ReadableStream'
   ) {
     const typeArgs = (type as ts.TypeReference).typeArguments;
     if (typeArgs && typeArgs.length > 0) {
@@ -1545,7 +1649,7 @@ function unwrapStreamingType(type: ts.Type): { streaming: boolean; type: ts.Type
 
 function unwrapPromiseType(type: ts.Type): ts.Type {
   const symName = type.aliasSymbol?.name ?? type.symbol?.name;
-  if (symName === "Promise") {
+  if (symName === 'Promise') {
     const typeArgs = (type as ts.TypeReference).typeArguments;
     if (typeArgs && typeArgs.length > 0) {
       return typeArgs[0]!;
@@ -1572,34 +1676,30 @@ export function harvestGrpcOperationsFromTypeArgs(
     const signatures = elemType.getCallSignatures();
     if (signatures.length > 0) {
       const sig = signatures[0]!;
-      const sym =
-        elemType.aliasSymbol ??
-        elemType.symbol ??
-        getSignatureSymbol(sig, checker);
+      const sym = elemType.aliasSymbol ?? elemType.symbol ?? getSignatureSymbol(sig, checker);
       const jsDoc = sym ? extractJSDocInfo(sym, checker) : undefined;
-      const grpcTag =
-        jsDoc?.meta?.["grpc"] ?? jsDoc?.meta?.["gRPC"] ?? jsDoc?.meta?.["GRPC"];
+      const grpcTag = jsDoc?.meta?.['grpc'] ?? jsDoc?.meta?.['gRPC'] ?? jsDoc?.meta?.['GRPC'];
       if (!grpcTag) {
         if (logger) {
-          warnUndocumentable(logger, noGrpcTagMessage(sym?.name ?? "signature"), node, sourceFile);
+          warnUndocumentable(logger, noGrpcTagMessage(sym?.name ?? 'signature'), node, sourceFile);
         }
         continue;
       }
-      const taggedName = typeof grpcTag[0] === "string" && grpcTag[0] ? grpcTag[0] : undefined;
-      const rawName = jsDoc?.meta?.["name"]?.[0] ?? jsDoc?.meta?.["Name"]?.[0];
+      const taggedName = typeof grpcTag[0] === 'string' && grpcTag[0] ? grpcTag[0] : undefined;
+      const rawName = jsDoc?.meta?.['name']?.[0] ?? jsDoc?.meta?.['Name']?.[0];
       const name =
-        (typeof rawName === "string" && rawName ? rawName : undefined) ??
+        (typeof rawName === 'string' && rawName ? rawName : undefined) ??
         taggedName ??
-        (sym && !sym.name.startsWith("__") ? sym.name : undefined) ??
-        "method";
+        (sym && !sym.name.startsWith('__') ? sym.name : undefined) ??
+        'method';
 
-      const pkgMeta = jsDoc?.meta?.["package"]?.[0] ?? jsDoc?.meta?.["Package"]?.[0];
-      const svcMeta = jsDoc?.meta?.["service"]?.[0] ?? jsDoc?.meta?.["Service"]?.[0];
-      const pkg = typeof pkgMeta === "string" ? pkgMeta : undefined;
-      const svc = typeof svcMeta === "string" ? svcMeta : "Service";
+      const pkgMeta = jsDoc?.meta?.['package']?.[0] ?? jsDoc?.meta?.['Package']?.[0];
+      const svcMeta = jsDoc?.meta?.['service']?.[0] ?? jsDoc?.meta?.['Service']?.[0];
+      const pkg = typeof pkgMeta === 'string' ? pkgMeta : undefined;
+      const svc = typeof svcMeta === 'string' ? svcMeta : 'Service';
 
-      const jsDocSummary = jsDoc?.meta?.["summary"]?.[0] ?? jsDoc?.meta?.["Summary"]?.[0];
-      const summary = typeof jsDocSummary === "string" ? jsDocSummary : undefined;
+      const jsDocSummary = jsDoc?.meta?.['summary']?.[0] ?? jsDoc?.meta?.['Summary']?.[0];
+      const summary = typeof jsDocSummary === 'string' ? jsDocSummary : undefined;
 
       const params = sig.getParameters();
       let reqIR: TypeIR;
@@ -1619,14 +1719,15 @@ export function harvestGrpcOperationsFromTypeArgs(
 
       const returnType = sig.getReturnType();
       const unwrappedPromise = unwrapPromiseType(returnType);
-      const { streaming: resStreaming, type: unwrappedResType } = unwrapStreamingType(unwrappedPromise);
+      const { streaming: resStreaming, type: unwrappedResType } =
+        unwrapStreamingType(unwrappedPromise);
       const resIR = extractTypeIR(unwrappedResType, checker);
 
       const methodIR: GrpcServiceMethodIR = {
-        kind: "serviceMethod",
-        protocol: "grpc",
+        kind: 'serviceMethod',
+        protocol: 'grpc',
         address: {
-          protocol: "grpc",
+          protocol: 'grpc',
           ...(pkg ? { package: pkg } : {}),
           service: svc,
           method: name,
@@ -1635,13 +1736,13 @@ export function harvestGrpcOperationsFromTypeArgs(
         ...(jsDoc?.description ? { description: jsDoc.description } : {}),
         ...(jsDoc?.deprecated ? { deprecated: true } : {}),
         request: {
-          protocol: "grpc",
+          protocol: 'grpc',
           message: reqIR,
           streaming: reqStreaming,
         },
         responses: [
           {
-            protocol: "grpc",
+            protocol: 'grpc',
             message: resIR,
             streaming: resStreaming,
           },
@@ -1651,13 +1752,12 @@ export function harvestGrpcOperationsFromTypeArgs(
     } else {
       const objectMethods = extractMethodsFromObjectType(elemType, checker);
       const sym = elemType.aliasSymbol ?? elemType.symbol;
-      const typeName =
-        sym && !sym.name.startsWith("__") ? sym.name : "Service";
+      const typeName = sym && !sym.name.startsWith('__') ? sym.name : 'Service';
       const jsDocType = sym ? extractJSDocInfo(sym, checker) : undefined;
-      const pkgOverride = jsDocType?.meta?.["package"]?.[0] ?? jsDocType?.meta?.["Package"]?.[0];
-      const svcOverride = jsDocType?.meta?.["service"]?.[0] ?? jsDocType?.meta?.["Service"]?.[0];
-      const pkg = typeof pkgOverride === "string" ? pkgOverride : undefined;
-      const svc = typeof svcOverride === "string" ? svcOverride : typeName;
+      const pkgOverride = jsDocType?.meta?.['package']?.[0] ?? jsDocType?.meta?.['Package']?.[0];
+      const svcOverride = jsDocType?.meta?.['service']?.[0] ?? jsDocType?.meta?.['Service']?.[0];
+      const pkg = typeof pkgOverride === 'string' ? pkgOverride : undefined;
+      const svc = typeof svcOverride === 'string' ? svcOverride : typeName;
 
       if (objectMethods.length === 0) {
         if (logger) {
@@ -1678,25 +1778,24 @@ export function harvestGrpcOperationsFromTypeArgs(
         const jsDoc = extractJSDocInfo(mSym, checker);
         // A member is an rpc because it says so; the rest of the type is not
         // part of the service block.
-        const grpcTag =
-          jsDoc.meta?.["grpc"] ?? jsDoc.meta?.["gRPC"] ?? jsDoc.meta?.["GRPC"];
-        if (!grpcTag) continue;
+        const grpcTag = jsDoc.meta?.['grpc'] ?? jsDoc.meta?.['gRPC'] ?? jsDoc.meta?.['GRPC'];
+        if (!grpcTag) {
+          continue;
+        }
         documented++;
 
-        const rawName = jsDoc.meta?.["name"]?.[0] ?? jsDoc.meta?.["Name"]?.[0];
-        const taggedName = typeof grpcTag[0] === "string" && grpcTag[0] ? grpcTag[0] : undefined;
+        const rawName = jsDoc.meta?.['name']?.[0] ?? jsDoc.meta?.['Name']?.[0];
+        const taggedName = typeof grpcTag[0] === 'string' && grpcTag[0] ? grpcTag[0] : undefined;
         const methodName =
-          (typeof rawName === "string" && rawName ? rawName : undefined) ??
-          taggedName ??
-          m.name;
+          (typeof rawName === 'string' && rawName ? rawName : undefined) ?? taggedName ?? m.name;
 
-        const mPkgMeta = jsDoc.meta?.["package"]?.[0] ?? jsDoc.meta?.["Package"]?.[0];
-        const mSvcMeta = jsDoc.meta?.["service"]?.[0] ?? jsDoc.meta?.["Service"]?.[0];
-        const methodPkg = (typeof mPkgMeta === "string" && mPkgMeta) ? mPkgMeta : pkg;
-        const methodSvc = (typeof mSvcMeta === "string" && mSvcMeta) ? mSvcMeta : svc;
+        const mPkgMeta = jsDoc.meta?.['package']?.[0] ?? jsDoc.meta?.['Package']?.[0];
+        const mSvcMeta = jsDoc.meta?.['service']?.[0] ?? jsDoc.meta?.['Service']?.[0];
+        const methodPkg = typeof mPkgMeta === 'string' && mPkgMeta ? mPkgMeta : pkg;
+        const methodSvc = typeof mSvcMeta === 'string' && mSvcMeta ? mSvcMeta : svc;
 
-        const jsDocSummary = jsDoc.meta?.["summary"]?.[0] ?? jsDoc.meta?.["Summary"]?.[0];
-        const summary = typeof jsDocSummary === "string" ? jsDocSummary : undefined;
+        const jsDocSummary = jsDoc.meta?.['summary']?.[0] ?? jsDoc.meta?.['Summary']?.[0];
+        const summary = typeof jsDocSummary === 'string' ? jsDocSummary : undefined;
 
         const params = sig.getParameters();
         let reqIR: TypeIR;
@@ -1716,14 +1815,15 @@ export function harvestGrpcOperationsFromTypeArgs(
 
         const returnType = sig.getReturnType();
         const unwrappedPromise = unwrapPromiseType(returnType);
-        const { streaming: resStreaming, type: unwrappedResType } = unwrapStreamingType(unwrappedPromise);
+        const { streaming: resStreaming, type: unwrappedResType } =
+          unwrapStreamingType(unwrappedPromise);
         const resIR = extractTypeIR(unwrappedResType, checker);
 
         const methodIR: GrpcServiceMethodIR = {
-          kind: "serviceMethod",
-          protocol: "grpc",
+          kind: 'serviceMethod',
+          protocol: 'grpc',
           address: {
-            protocol: "grpc",
+            protocol: 'grpc',
             ...(methodPkg ? { package: methodPkg } : {}),
             service: methodSvc,
             method: methodName,
@@ -1732,13 +1832,13 @@ export function harvestGrpcOperationsFromTypeArgs(
           ...(jsDoc.description ? { description: jsDoc.description } : {}),
           ...(jsDoc.deprecated ? { deprecated: true } : {}),
           request: {
-            protocol: "grpc",
+            protocol: 'grpc',
             message: reqIR,
             streaming: reqStreaming,
           },
           responses: [
             {
-              protocol: "grpc",
+              protocol: 'grpc',
               message: resIR,
               streaming: resStreaming,
             },

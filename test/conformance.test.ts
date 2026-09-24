@@ -1,11 +1,11 @@
 // @wiz-ignore
-import { describe, expect, test } from "bun:test";
-import Ajv2020 from "ajv/dist/2020.js";
-import addFormats from "ajv-formats";
-import { generateSchemaCode } from "../src/generators/schema.ts";
-import { generateValidatorCode } from "../src/generators/validator.ts";
-import { evalModule, getIRForSource } from "./helpers.ts";
-import conformance from "./fixtures/jsonschema-conformance.json";
+import { describe, expect, test } from 'bun:test';
+import addFormats from 'ajv-formats';
+import Ajv2020 from 'ajv/dist/2020.js';
+import { generateSchemaCode } from '../src/generators/schema.ts';
+import { generateValidatorCode } from '../src/generators/validator.ts';
+import conformance from './fixtures/jsonschema-conformance.json';
+import { evalModule, getIRForSource } from './helpers.ts';
 
 /**
  * Conformance against the official JSON Schema Test Suite.
@@ -33,7 +33,7 @@ function sourceFor(keyword: string, tsType: string, value: unknown): string {
   return `
     export interface M {
       /**
-       * @${keyword} ${typeof value === "string" ? value : JSON.stringify(value)}
+       * @${keyword} ${typeof value === 'string' ? value : JSON.stringify(value)}
        */
       v: ${tsType};
     }
@@ -46,19 +46,17 @@ const ajv = (() => {
   return instance;
 })();
 
-describe("JSON Schema Test Suite", () => {
+describe('JSON Schema Test Suite', () => {
   for (const [keyword, { ts, groups }] of Object.entries(KEYWORDS)) {
     describe(keyword, () => {
       groups.forEach((group, index) => {
         const label = `${keyword} = ${JSON.stringify(group.value)}${
-          groups.length > 1 ? ` (#${index + 1})` : ""
+          groups.length > 1 ? ` (#${index + 1})` : ''
         }`;
 
         test(`the validator matches the spec for ${label}`, () => {
-          const ir = getIRForSource(sourceFor(keyword, ts, group.value), "M");
-          const validator = evalModule<{ is: (v: unknown) => boolean }>(
-            generateValidatorCode(ir)
-          );
+          const ir = getIRForSource(sourceFor(keyword, ts, group.value), 'M');
+          const validator = evalModule<{ is: (v: unknown) => boolean }>(generateValidatorCode(ir));
 
           const wrong = group.tests
             .filter((c) => validator.is({ v: c.data }) !== c.valid)
@@ -67,7 +65,7 @@ describe("JSON Schema Test Suite", () => {
         });
 
         test(`the generated schema matches the spec for ${label}`, () => {
-          const ir = getIRForSource(sourceFor(keyword, ts, group.value), "M");
+          const ir = getIRForSource(sourceFor(keyword, ts, group.value), 'M');
           const { schema_draft2020 } = evalModule<{ schema_draft2020: object }>(
             generateSchemaCode(ir)
           );

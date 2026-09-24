@@ -5,21 +5,21 @@ import {
   type Annotated,
   type EnumMemberIR,
   type TypeIR,
-} from "../types.ts";
+} from '../types.ts';
 
 /**
  * Avro's primitive type names. `int` is 32-bit and `long` is 64-bit; both are
  * zig-zag varints on the wire, while `float`/`double` are fixed-width IEEE 754.
  */
 export type AvroPrimitive =
-  | "null"
-  | "boolean"
-  | "int"
-  | "long"
-  | "float"
-  | "double"
-  | "bytes"
-  | "string";
+  | 'null'
+  | 'boolean'
+  | 'int'
+  | 'long'
+  | 'float'
+  | 'double'
+  | 'bytes'
+  | 'string';
 
 /**
  * Numeric width comes from `@format`, reusing the OpenAPI Format Registry
@@ -30,31 +30,31 @@ export type AvroPrimitive =
  * type that can hold their full range.
  */
 const FORMAT_TO_AVRO: Record<string, AvroPrimitive> = {
-  int32: "int",
-  int64: "long",
-  uint32: "long",
-  uint64: "long",
-  sint32: "int",
-  sint64: "long",
-  fixed32: "int",
-  sfixed32: "int",
-  fixed64: "long",
-  sfixed64: "long",
-  float: "float",
-  double: "double",
-  byte: "bytes",
-  binary: "bytes",
+  int32: 'int',
+  int64: 'long',
+  uint32: 'long',
+  uint64: 'long',
+  sint32: 'int',
+  sint64: 'long',
+  fixed32: 'int',
+  sfixed32: 'int',
+  fixed64: 'long',
+  sfixed64: 'long',
+  float: 'float',
+  double: 'double',
+  byte: 'bytes',
+  binary: 'bytes',
   // Avro has no integer narrower than 32 bits and none unsigned, so the narrow
   // registry widths travel in the smallest signed type that holds them. The
   // declared range is enforced by the validator, so nothing widens silently.
-  int8: "int",
-  int16: "int",
-  uint8: "int",
-  uint16: "int",
-  "double-int": "long",
-  unixtime: "long",
-  "sf-integer": "long",
-  "sf-decimal": "double",
+  int8: 'int',
+  int16: 'int',
+  uint8: 'int',
+  uint16: 'int',
+  'double-int': 'long',
+  unixtime: 'long',
+  'sf-integer': 'long',
+  'sf-decimal': 'double',
 };
 
 /**
@@ -62,18 +62,19 @@ const FORMAT_TO_AVRO: Record<string, AvroPrimitive> = {
  * so a uuid is still a string and a timestamp is still a long.
  */
 const FORMAT_TO_LOGICAL: Record<string, { type: AvroPrimitive; logicalType: string }> = {
-  uuid: { type: "string", logicalType: "uuid" },
-  date: { type: "int", logicalType: "date" },
-  time: { type: "int", logicalType: "time-millis" },
-  "date-time": { type: "long", logicalType: "timestamp-millis" },
+  uuid: { type: 'string', logicalType: 'uuid' },
+  date: { type: 'int', logicalType: 'date' },
+  time: { type: 'int', logicalType: 'time-millis' },
+  'date-time': { type: 'long', logicalType: 'timestamp-millis' },
 };
 
 /** `T | undefined` is how an optional property reaches us; Avro spells it `["null", T]`. */
 function unwrapNullable(ir: TypeIR): { nullable: boolean; inner: TypeIR } {
-  if (ir.kind !== "union") return { nullable: false, inner: ir };
+  if (ir.kind !== 'union') {
+    return { nullable: false, inner: ir };
+  }
   const isAbsent = (t: TypeIR) =>
-    t.kind === "primitive" &&
-    (t.type === "null" || t.type === "undefined" || t.type === "void");
+    t.kind === 'primitive' && (t.type === 'null' || t.type === 'undefined' || t.type === 'void');
   const present = ir.types.filter((t) => !isAbsent(t));
   if (present.length === 1 && present.length < ir.types.length) {
     return { nullable: true, inner: present[0]! };
@@ -86,43 +87,44 @@ function avroLogicalFor(
   ir: TypeIR,
   carrier?: Annotated
 ): { type: AvroPrimitive; logicalType: string } | undefined {
-  if (ir.kind === "primitive" && ir.type === "date") {
-    return { type: "long", logicalType: "timestamp-millis" };
+  if (ir.kind === 'primitive' && ir.type === 'date') {
+    return { type: 'long', logicalType: 'timestamp-millis' };
   }
-  if (ir.kind !== "primitive" || ir.type !== "string") return undefined;
+  if (ir.kind !== 'primitive' || ir.type !== 'string') {
+    return undefined;
+  }
   const format = declaredFormat(carrier, ir);
   return format ? FORMAT_TO_LOGICAL[format] : undefined;
 }
 
-function avroPrimitiveFor(
-  ir: TypeIR,
-  carrier?: Annotated
-): AvroPrimitive | undefined {
-  if (ir.kind !== "primitive") return undefined;
+function avroPrimitiveFor(ir: TypeIR, carrier?: Annotated): AvroPrimitive | undefined {
+  if (ir.kind !== 'primitive') {
+    return undefined;
+  }
   const format = declaredFormat(carrier, ir);
   const declared = format ? FORMAT_TO_AVRO[format] : undefined;
   switch (ir.type) {
-    case "string":
-    case "symbol":
+    case 'string':
+    case 'symbol':
       // `@format byte`/`binary` means the string is really opaque bytes.
-      return declared === "bytes" ? "bytes" : "string";
-    case "boolean":
-      return "boolean";
-    case "bytes":
-      return "bytes";
-    case "date":
-      return "long";
-    case "bigint":
+      return declared === 'bytes' ? 'bytes' : 'string';
+    case 'boolean':
+      return 'boolean';
+    case 'bytes':
+      return 'bytes';
+    case 'date':
+      return 'long';
+    case 'bigint':
       // A JS bigint is 64-bit by definition; `@format int32` may still narrow it.
-      return declared ?? "long";
-    case "number":
+      return declared ?? 'long';
+    case 'number':
       // A JS number *is* a double, so that is the honest default. `@format`
       // narrows it when the field is really an int32/int64/float.
-      return declared ?? "double";
-    case "null":
-    case "undefined":
-    case "void":
-      return "null";
+      return declared ?? 'double';
+    case 'null':
+    case 'undefined':
+    case 'void':
+      return 'null';
     default:
       return undefined;
   }
@@ -161,7 +163,7 @@ function newCtx(roots: TypeIR[] = []): Ctx {
     next: () => counter++,
     defined: new Set(),
     emitting: new Set(),
-    resolve: (ir) => (ir.kind === "ref" ? byId.get(ir.targetId) ?? ir : ir),
+    resolve: (ir) => (ir.kind === 'ref' ? (byId.get(ir.targetId) ?? ir) : ir),
   };
 }
 
@@ -188,9 +190,7 @@ function resolveForEmit(ir: TypeIR, ctx: Ctx): TypeIR {
  */
 function avroEnumSymbols(members: EnumMemberIR[]): string[] {
   const values = members.map((m) => m.value);
-  const usable = values.every(
-    (v) => typeof v === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(v)
-  );
+  const usable = values.every((v) => typeof v === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(v));
   return usable ? (values as string[]) : members.map((m) => m.name);
 }
 
@@ -198,60 +198,69 @@ function avroEnumSymbols(members: EnumMemberIR[]): string[] {
 // Schema
 // ---------------------------------------------------------------------------
 
-function irToAvroSchema(
-  ir: TypeIR,
-  ctx: Ctx,
-  carrier?: Annotated,
-  fallbackName?: string
-): unknown {
+function irToAvroSchema(ir: TypeIR, ctx: Ctx, carrier?: Annotated, fallbackName?: string): unknown {
   const { nullable, inner } = unwrapNullable(ctx.resolve(ir));
   if (nullable) {
-    return ["null", irToAvroSchema(inner, ctx, carrier, fallbackName)];
+    return ['null', irToAvroSchema(inner, ctx, carrier, fallbackName)];
   }
 
   const logical = avroLogicalFor(inner, carrier);
-  if (logical) return logical;
+  if (logical) {
+    return logical;
+  }
 
   const primitive = avroPrimitiveFor(inner, carrier);
-  if (primitive) return primitive;
+  if (primitive) {
+    return primitive;
+  }
 
   switch (inner.kind) {
-    case "literal":
-      if (typeof inner.value === "string") return "string";
-      if (typeof inner.value === "boolean") return "boolean";
-      if (typeof inner.value === "bigint") return "long";
-      return "double";
+    case 'literal':
+      if (typeof inner.value === 'string') {
+        return 'string';
+      }
+      if (typeof inner.value === 'boolean') {
+        return 'boolean';
+      }
+      if (typeof inner.value === 'bigint') {
+        return 'long';
+      }
+      return 'double';
 
-    case "enum": {
+    case 'enum': {
       const name = inner.name ?? fallbackName ?? `Enum${ctx.next()}`;
-      if (ctx.defined.has(name)) return name;
+      if (ctx.defined.has(name)) {
+        return name;
+      }
       ctx.defined.add(name);
       return {
-        type: "enum",
+        type: 'enum',
         name,
         symbols: avroEnumSymbols(inner.members),
       };
     }
 
-    case "array":
+    case 'array':
       return {
-        type: "array",
+        type: 'array',
         items: irToAvroSchema(inner.element, ctx, undefined, fallbackName),
       };
 
-    case "record":
+    case 'record':
       return {
-        type: "map",
+        type: 'map',
         values: irToAvroSchema(inner.valueType, ctx, undefined, fallbackName),
       };
 
-    case "object":
-    case "intersection": {
+    case 'object':
+    case 'intersection': {
       const name = inner.name ?? fallbackName ?? `Record${ctx.next()}`;
-      if (ctx.defined.has(name)) return name;
+      if (ctx.defined.has(name)) {
+        return name;
+      }
       ctx.defined.add(name);
       return {
-        type: "record",
+        type: 'record',
         name,
         ...(inner.description ? { doc: inner.description } : {}),
         fields: flattenObjectProperties(inner).map((p) => {
@@ -260,7 +269,7 @@ function irToAvroSchema(
           return {
             name: p.name,
             type: optional
-              ? ["null", irToAvroSchema(unwrapNullable(p.type).inner, ctx, p, p.name)]
+              ? ['null', irToAvroSchema(unwrapNullable(p.type).inner, ctx, p, p.name)]
               : irToAvroSchema(p.type, ctx, p, p.name),
             ...(p.description ? { doc: p.description } : {}),
             ...(optional ? { default: null } : {}),
@@ -269,17 +278,15 @@ function irToAvroSchema(
       };
     }
 
-    case "union":
+    case 'union':
       return inner.types.map((t) => irToAvroSchema(t, ctx, undefined, fallbackName));
 
     default:
-      return "string";
+      return 'string';
   }
 }
 
-export function generateAvroSchemaCode(
-  types: Array<{ name: string; ir: TypeIR }>
-): string {
+export function generateAvroSchemaCode(types: Array<{ name: string; ir: TypeIR }>): string {
   const ctx = newCtx(types.map((t) => t.ir));
   const schemas = types.map(({ name, ir }) => irToAvroSchema(ir, ctx, undefined, name));
   // A .avsc file holds one schema; several roots form a union.
@@ -290,19 +297,14 @@ export function generateAvroSchemaCode(
     `  const indent = options.indent ?? "  ";`,
     `  return JSON.stringify(${JSON.stringify(root)}, null, indent);`,
     `}`,
-  ].join("\n");
+  ].join('\n');
 }
 
 // ---------------------------------------------------------------------------
 // Binary codec
 // ---------------------------------------------------------------------------
 
-function emitEncode(
-  ir: TypeIR,
-  expr: string,
-  ctx: Ctx,
-  carrier?: Annotated
-): string[] {
+function emitEncode(ir: TypeIR, expr: string, ctx: Ctx, carrier?: Annotated): string[] {
   const { nullable, inner } = unwrapNullable(resolveForEmit(ir, ctx));
   if (nullable) {
     return [
@@ -316,53 +318,51 @@ function emitEncode(
   }
 
   // A Date is carried by its logical type's underlying long.
-  if (inner.kind === "primitive" && inner.type === "date") {
+  if (inner.kind === 'primitive' && inner.type === 'date') {
     return [`o += writeLong(buf, o, BigInt(${expr}.getTime()));`];
   }
 
   const primitive = avroPrimitiveFor(inner, carrier);
   if (primitive) {
     switch (primitive) {
-      case "null":
+      case 'null':
         return [];
-      case "boolean":
+      case 'boolean':
         return [`buf[o++] = ${expr} ? 1 : 0;`];
-      case "int":
-      case "long":
+      case 'int':
+      case 'long':
         return [`o += writeLong(buf, o, ${expr});`];
-      case "float":
+      case 'float':
         return [`view.setFloat32(o, Number(${expr}), true); o += 4;`];
-      case "double":
+      case 'double':
         return [`view.setFloat64(o, Number(${expr}), true); o += 8;`];
-      case "string":
+      case 'string':
         return [`o += writeString(buf, o, String(${expr}));`];
-      case "bytes":
+      case 'bytes':
         return [`o += writeBytes(buf, o, ${expr});`];
     }
   }
 
   switch (inner.kind) {
-    case "literal":
-      if (typeof inner.value === "string") {
+    case 'literal':
+      if (typeof inner.value === 'string') {
         return [`o += writeString(buf, o, String(${expr}));`];
       }
-      if (typeof inner.value === "boolean") {
+      if (typeof inner.value === 'boolean') {
         return [`buf[o++] = ${expr} ? 1 : 0;`];
       }
-      if (typeof inner.value === "bigint") {
+      if (typeof inner.value === 'bigint') {
         return [`o += writeLong(buf, o, ${expr});`];
       }
       return [`view.setFloat64(o, Number(${expr}), true); o += 8;`];
 
-    case "enum": {
+    case 'enum': {
       const table = `__avroEnum${ctx.next()}`;
-      ctx.prelude.push(
-        `const ${table} = ${JSON.stringify(inner.members.map((m) => m.value))};`
-      );
+      ctx.prelude.push(`const ${table} = ${JSON.stringify(inner.members.map((m) => m.value))};`);
       return [`o += writeIndex(buf, o, ${table}.indexOf(${expr}));`];
     }
 
-    case "array": {
+    case 'array': {
       const item = `item${ctx.next()}`;
       return [
         `if (Array.isArray(${expr}) && ${expr}.length > 0) {`,
@@ -375,7 +375,7 @@ function emitEncode(
       ];
     }
 
-    case "record": {
+    case 'record': {
       const key = `key${ctx.next()}`;
       const value = `value${ctx.next()}`;
       return [
@@ -393,17 +393,21 @@ function emitEncode(
       ];
     }
 
-    case "object":
-    case "intersection": {
+    case 'object':
+    case 'intersection': {
       const lines: string[] = [];
       ctx.emitting.add(inner.id);
       for (const property of flattenObjectProperties(inner)) {
         const access = `${expr}[${JSON.stringify(property.name)}]`;
         const target = property.optional
-          ? { kind: "union" as const, id: "", types: [
-              { kind: "primitive" as const, id: "", type: "undefined" as const },
-              unwrapNullable(property.type).inner,
-            ] }
+          ? {
+              kind: 'union' as const,
+              id: '',
+              types: [
+                { kind: 'primitive' as const, id: '', type: 'undefined' as const },
+                unwrapNullable(property.type).inner,
+              ],
+            }
           : property.type;
         lines.push(...emitEncode(target, access, ctx, property));
       }
@@ -417,12 +421,7 @@ function emitEncode(
   }
 }
 
-function emitDecode(
-  ir: TypeIR,
-  target: string,
-  ctx: Ctx,
-  carrier?: Annotated
-): string[] {
+function emitDecode(ir: TypeIR, target: string, ctx: Ctx, carrier?: Annotated): string[] {
   const { nullable, inner } = unwrapNullable(resolveForEmit(ir, ctx));
   if (nullable) {
     const branch = `branch${ctx.next()}`;
@@ -436,65 +435,61 @@ function emitDecode(
     ];
   }
 
-  if (inner.kind === "primitive" && inner.type === "date") {
+  if (inner.kind === 'primitive' && inner.type === 'date') {
     const tmp = `ms${ctx.next()}`;
-    return [
-      `let ${tmp}; [${tmp}, o] = readLong(buf, o);`,
-      `${target} = new Date(Number(${tmp}));`,
-    ];
+    return [`let ${tmp}; [${tmp}, o] = readLong(buf, o);`, `${target} = new Date(Number(${tmp}));`];
   }
 
   const primitive = avroPrimitiveFor(inner, carrier);
   if (primitive) {
     switch (primitive) {
-      case "null":
+      case 'null':
         return [`${target} = null;`];
-      case "boolean":
+      case 'boolean':
         return [`${target} = buf[o++] !== 0;`];
-      case "int":
-      case "long": {
+      case 'int':
+      case 'long': {
         const tmp = `n${ctx.next()}`;
         // The wire is always 64-bit; the JS type decides what comes back.
-        const asNumber = !(inner.kind === "primitive" && inner.type === "bigint");
+        const asNumber = !(inner.kind === 'primitive' && inner.type === 'bigint');
         return [
           `let ${tmp}; [${tmp}, o] = readLong(buf, o);`,
           `${target} = ${asNumber ? `Number(${tmp})` : tmp};`,
         ];
       }
-      case "float":
+      case 'float':
         return [`${target} = view.getFloat32(o, true); o += 4;`];
-      case "double":
+      case 'double':
         return [`${target} = view.getFloat64(o, true); o += 8;`];
-      case "string":
+      case 'string':
         return [`[${target}, o] = readString(buf, o);`];
-      case "bytes":
+      case 'bytes':
         return [`[${target}, o] = readBytes(buf, o);`];
     }
   }
 
   switch (inner.kind) {
-    case "literal":
-      if (typeof inner.value === "string") return [`[${target}, o] = readString(buf, o);`];
-      if (typeof inner.value === "boolean") return [`${target} = buf[o++] !== 0;`];
-      if (typeof inner.value === "bigint") {
+    case 'literal':
+      if (typeof inner.value === 'string') {
+        return [`[${target}, o] = readString(buf, o);`];
+      }
+      if (typeof inner.value === 'boolean') {
+        return [`${target} = buf[o++] !== 0;`];
+      }
+      if (typeof inner.value === 'bigint') {
         const tmp = `n${ctx.next()}`;
         return [`let ${tmp}; [${tmp}, o] = readLong(buf, o);`, `${target} = ${tmp};`];
       }
       return [`${target} = view.getFloat64(o, true); o += 8;`];
 
-    case "enum": {
+    case 'enum': {
       const table = `__avroEnum${ctx.next()}`;
-      ctx.prelude.push(
-        `const ${table} = ${JSON.stringify(inner.members.map((m) => m.value))};`
-      );
+      ctx.prelude.push(`const ${table} = ${JSON.stringify(inner.members.map((m) => m.value))};`);
       const idx = `idx${ctx.next()}`;
-      return [
-        `let ${idx}; [${idx}, o] = readIndex(buf, o);`,
-        `${target} = ${table}[${idx}];`,
-      ];
+      return [`let ${idx}; [${idx}, o] = readIndex(buf, o);`, `${target} = ${table}[${idx}];`];
     }
 
-    case "array": {
+    case 'array': {
       const arr = `arr${ctx.next()}`;
       const count = `count${ctx.next()}`;
       const size = `size${ctx.next()}`;
@@ -516,7 +511,7 @@ function emitDecode(
       ];
     }
 
-    case "record": {
+    case 'record': {
       const map = `map${ctx.next()}`;
       const count = `count${ctx.next()}`;
       const size = `size${ctx.next()}`;
@@ -540,18 +535,22 @@ function emitDecode(
       ];
     }
 
-    case "object":
-    case "intersection": {
+    case 'object':
+    case 'intersection': {
       const obj = `obj${ctx.next()}`;
       const lines: string[] = [`const ${obj} = {};`];
       ctx.emitting.add(inner.id);
       for (const property of flattenObjectProperties(inner)) {
         const slot = `${obj}[${JSON.stringify(property.name)}]`;
         const source = property.optional
-          ? { kind: "union" as const, id: "", types: [
-              { kind: "primitive" as const, id: "", type: "undefined" as const },
-              unwrapNullable(property.type).inner,
-            ] }
+          ? {
+              kind: 'union' as const,
+              id: '',
+              types: [
+                { kind: 'primitive' as const, id: '', type: 'undefined' as const },
+                unwrapNullable(property.type).inner,
+              ],
+            }
           : property.type;
         lines.push(...emitDecode(source, slot, ctx, property));
       }
@@ -572,8 +571,8 @@ function emitDecode(
 
 export function generateAvroCode(ir: TypeIR): string {
   const ctx = newCtx([ir]);
-  const encodeBody = emitEncode(ir, "val", ctx);
-  const decodeBody = emitDecode(ir, "out", ctx);
+  const encodeBody = emitEncode(ir, 'val', ctx);
+  const decodeBody = emitDecode(ir, 'out', ctx);
 
   return [
     // `var`, and bare: the protobuf and avro codecs are concatenated into one
@@ -671,5 +670,5 @@ export function generateAvroCode(ir: TypeIR): string {
     ...decodeBody.map((l) => `  ${l}`),
     `  return out;`,
     `}`,
-  ].join("\n");
+  ].join('\n');
 }

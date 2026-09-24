@@ -27,20 +27,20 @@ export interface ValidateOptions {
  * tags (`@example`, `@default`) are annotations instead — see {@link Annotated}.
  */
 export type ConstraintKind =
-  | "min"
-  | "max"
-  | "minimum"
-  | "maximum"
-  | "exclusiveMinimum"
-  | "exclusiveMaximum"
-  | "minLength"
-  | "maxLength"
-  | "pattern"
-  | "format"
-  | "multipleOf"
-  | "minItems"
-  | "maxItems"
-  | "uniqueItems";
+  | 'min'
+  | 'max'
+  | 'minimum'
+  | 'maximum'
+  | 'exclusiveMinimum'
+  | 'exclusiveMaximum'
+  | 'minLength'
+  | 'maxLength'
+  | 'pattern'
+  | 'format'
+  | 'multipleOf'
+  | 'minItems'
+  | 'maxItems'
+  | 'uniqueItems';
 
 export interface Constraint {
   kind: ConstraintKind;
@@ -87,27 +87,27 @@ export interface BaseTypeIR extends Annotated {
   name?: string;
 }
 export interface PrimitiveTypeIR extends BaseTypeIR {
-  kind: "primitive";
+  kind: 'primitive';
   type:
-    | "string"
-    | "number"
-    | "boolean"
-    | "bigint"
-    | "null"
-    | "undefined"
-    | "symbol"
-    | "unknown"
-    | "any"
-    | "void"
-    | "never"
+    | 'string'
+    | 'number'
+    | 'boolean'
+    | 'bigint'
+    | 'null'
+    | 'undefined'
+    | 'symbol'
+    | 'unknown'
+    | 'any'
+    | 'void'
+    | 'never'
     /** `Uint8Array` and friends: opaque binary, not a struct of methods. */
-    | "bytes"
+    | 'bytes'
     /** `Date`: an instant, not a struct of methods. */
-    | "date";
+    | 'date';
 }
 
 export interface LiteralTypeIR extends BaseTypeIR {
-  kind: "literal";
+  kind: 'literal';
   value: string | number | boolean | bigint | null;
 }
 
@@ -120,13 +120,13 @@ export interface PropertyIR extends Annotated {
 }
 
 export interface ObjectTypeIR extends BaseTypeIR {
-  kind: "object";
+  kind: 'object';
   properties: PropertyIR[];
   additionalProperties?: TypeIR | boolean;
 }
 
 export interface ArrayTypeIR extends BaseTypeIR {
-  kind: "array";
+  kind: 'array';
   element: TypeIR;
 }
 
@@ -137,13 +137,13 @@ export interface TupleElementIR {
 }
 
 export interface TupleTypeIR extends BaseTypeIR {
-  kind: "tuple";
+  kind: 'tuple';
   elements: TupleElementIR[];
   rest?: TypeIR;
 }
 
 export interface UnionTypeIR extends BaseTypeIR {
-  kind: "union";
+  kind: 'union';
   types: TypeIR[];
   /**
    * Protobuf field numbers from `NumberedUnion`, positionally matching `types`.
@@ -154,7 +154,7 @@ export interface UnionTypeIR extends BaseTypeIR {
 }
 
 export interface IntersectionTypeIR extends BaseTypeIR {
-  kind: "intersection";
+  kind: 'intersection';
   types: TypeIR[];
 }
 
@@ -165,18 +165,18 @@ export interface EnumMemberIR {
 }
 
 export interface EnumTypeIR extends BaseTypeIR {
-  kind: "enum";
+  kind: 'enum';
   members: EnumMemberIR[];
 }
 
 export interface RecordTypeIR extends BaseTypeIR {
-  kind: "record";
+  kind: 'record';
   keyType: TypeIR;
   valueType: TypeIR;
 }
 
 export interface RefTypeIR extends BaseTypeIR {
-  kind: "ref";
+  kind: 'ref';
   targetId: string;
 }
 
@@ -201,7 +201,7 @@ export function fnv1a(str: string): string {
     hash ^= str.charCodeAt(i);
     hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
   }
-  return (hash >>> 0).toString(16).padStart(8, "0");
+  return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
 /** Annotation slice of the structural key, so docs cannot be lost to dedupe. */
@@ -214,9 +214,7 @@ function normalizeAnnotations(node: Annotated): Record<string, unknown> {
     c: node.constraints ? normalizeConstraints(node.constraints) : undefined,
     ex: node.examples ?? undefined,
     def: node.default ?? undefined,
-    meta: node.meta
-      ? Object.entries(node.meta).sort(([a], [b]) => a.localeCompare(b))
-      : undefined,
+    meta: node.meta ? Object.entries(node.meta).sort(([a], [b]) => a.localeCompare(b)) : undefined,
     ext: node.extensions
       ? Object.entries(node.extensions).sort(([a], [b]) => a.localeCompare(b))
       : undefined,
@@ -243,21 +241,21 @@ export function normalizeTypeIR(ir: TypeIR, withNames = false): unknown {
   const child = (node: TypeIR): unknown => normalizeTypeIR(node, withNames);
 
   switch (ir.kind) {
-    case "primitive":
+    case 'primitive':
       return {
-        k: "primitive",
+        k: 'primitive',
         t: ir.type,
         ...self,
       };
-    case "literal":
+    case 'literal':
       return {
-        k: "literal",
-        v: typeof ir.value === "bigint" ? ir.value.toString() + "n" : ir.value,
+        k: 'literal',
+        v: typeof ir.value === 'bigint' ? `${ir.value.toString()}n` : ir.value,
         ...self,
       };
-    case "object":
+    case 'object':
       return {
-        k: "object",
+        k: 'object',
         props: [...ir.properties]
           .sort((a, b) => a.name.localeCompare(b.name))
           .map((p) => ({
@@ -269,20 +267,21 @@ export function normalizeTypeIR(ir: TypeIR, withNames = false): unknown {
             fn: p.fieldNumber ?? undefined,
             ...normalizeAnnotations(p),
           })),
-        add: typeof ir.additionalProperties === "object"
-          ? child(ir.additionalProperties)
-          : ir.additionalProperties,
+        add:
+          typeof ir.additionalProperties === 'object'
+            ? child(ir.additionalProperties)
+            : ir.additionalProperties,
         ...self,
       };
-    case "array":
+    case 'array':
       return {
-        k: "array",
+        k: 'array',
         e: child(ir.element),
         ...self,
       };
-    case "tuple":
+    case 'tuple':
       return {
-        k: "tuple",
+        k: 'tuple',
         el: ir.elements.map((e) => ({
           t: child(e.type),
           o: e.optional,
@@ -291,17 +290,15 @@ export function normalizeTypeIR(ir: TypeIR, withNames = false): unknown {
         r: ir.rest ? child(ir.rest) : undefined,
         ...self,
       };
-    case "union":
+    case 'union':
       return {
-        k: "union",
+        k: 'union',
         u: ir.types
           .map((t, i) => {
             const normalized = child(t);
             const fieldNumber = ir.fieldNumbers?.[i];
             // Pair before sorting, or the sort would scramble the numbering.
-            return fieldNumber === undefined
-              ? normalized
-              : { n: fieldNumber, t: normalized };
+            return fieldNumber === undefined ? normalized : { n: fieldNumber, t: normalized };
           })
           .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
         // A discriminated union emits `oneOf` + `discriminator`; a plain one
@@ -309,32 +306,32 @@ export function normalizeTypeIR(ir: TypeIR, withNames = false): unknown {
         d: ir.discriminator ? { p: ir.discriminator.propertyName } : undefined,
         ...self,
       };
-    case "intersection":
+    case 'intersection':
       return {
-        k: "intersection",
+        k: 'intersection',
         i: ir.types
           .map((t) => child(t))
           .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
         ...self,
       };
-    case "enum":
+    case 'enum':
       return {
-        k: "enum",
+        k: 'enum',
         m: [...ir.members]
           .sort((a, b) => a.name.localeCompare(b.name))
           .map((m) => ({ n: m.name, v: m.value })),
         ...self,
       };
-    case "record":
+    case 'record':
       return {
-        k: "record",
+        k: 'record',
         kt: child(ir.keyType),
         vt: child(ir.valueType),
         ...self,
       };
-    case "ref":
+    case 'ref':
       return {
-        k: "ref",
+        k: 'ref',
         id: ir.targetId,
         ...self,
       };
@@ -366,24 +363,26 @@ export function walkTypeIR(
   visitor: (node: TypeIR) => void,
   visited = new Set<TypeIR>()
 ): void {
-  if (visited.has(ir)) return;
+  if (visited.has(ir)) {
+    return;
+  }
   visited.add(ir);
 
   visitor(ir);
 
   switch (ir.kind) {
-    case "object":
+    case 'object':
       for (const prop of ir.properties) {
         walkTypeIR(prop.type, visitor, visited);
       }
-      if (typeof ir.additionalProperties === "object") {
+      if (typeof ir.additionalProperties === 'object') {
         walkTypeIR(ir.additionalProperties, visitor, visited);
       }
       break;
-    case "array":
+    case 'array':
       walkTypeIR(ir.element, visitor, visited);
       break;
-    case "tuple":
+    case 'tuple':
       for (const elem of ir.elements) {
         walkTypeIR(elem.type, visitor, visited);
       }
@@ -391,19 +390,19 @@ export function walkTypeIR(
         walkTypeIR(ir.rest, visitor, visited);
       }
       break;
-    case "union":
-    case "intersection":
+    case 'union':
+    case 'intersection':
       for (const subType of ir.types) {
         walkTypeIR(subType, visitor, visited);
       }
       break;
-    case "record":
+    case 'record':
       walkTypeIR(ir.keyType, visitor, visited);
       walkTypeIR(ir.valueType, visitor, visited);
       break;
-    case "primitive":
-    case "literal":
-    case "enum":
+    case 'primitive':
+    case 'literal':
+    case 'enum':
       break;
   }
 }
@@ -414,42 +413,42 @@ export function walkTypeIR(
  * not the alias name, so they are inlined rather than emitted as a named schema.
  */
 export const BUILTIN_TYPE_NAMES = new Set([
-  "Array",
-  "ReadonlyArray",
-  "Record",
-  "Promise",
-  "Set",
-  "Map",
-  "Object",
-  "Function",
-  "Symbol",
-  "Boolean",
-  "Number",
-  "String",
-  "RegExp",
-  "Error",
-  "Partial",
-  "Required",
-  "Readonly",
-  "Pick",
-  "Omit",
-  "Exclude",
-  "Extract",
-  "NonNullable",
-  "Parameters",
-  "ReturnType",
-  "Awaited",
+  'Array',
+  'ReadonlyArray',
+  'Record',
+  'Promise',
+  'Set',
+  'Map',
+  'Object',
+  'Function',
+  'Symbol',
+  'Boolean',
+  'Number',
+  'String',
+  'RegExp',
+  'Error',
+  'Partial',
+  'Required',
+  'Readonly',
+  'Pick',
+  'Omit',
+  'Exclude',
+  'Extract',
+  'NonNullable',
+  'Parameters',
+  'ReturnType',
+  'Awaited',
   // Modelled as opaque scalars elsewhere; their lib documentation describes the
   // class, not the field, so it must not reach a generated schema.
-  "Uint8Array",
-  "Uint8ClampedArray",
-  "ArrayBuffer",
-  "SharedArrayBuffer",
-  "Date",
+  'Uint8Array',
+  'Uint8ClampedArray',
+  'ArrayBuffer',
+  'SharedArrayBuffer',
+  'Date',
 ]);
 
 export function isUserNamedType(name: string | undefined): boolean {
-  return Boolean(name && !name.startsWith("__") && !BUILTIN_TYPE_NAMES.has(name));
+  return Boolean(name && !name.startsWith('__') && !BUILTIN_TYPE_NAMES.has(name));
 }
 /**
  * Collects all transitively referenced named types from a TypeIR tree.
@@ -460,7 +459,7 @@ export function collectNamedTypes(ir: TypeIR): Map<string, TypeIR> {
   walkTypeIR(ir, (node) => {
     if (isUserNamedType(node.name)) {
       const existing = namedMap.get(node.name!);
-      if (!existing || (existing.kind === "ref" && node.kind !== "ref")) {
+      if (!existing || (existing.kind === 'ref' && node.kind !== 'ref')) {
         namedMap.set(node.name!, node);
       }
     }
@@ -474,10 +473,10 @@ export function collectNamedTypes(ir: TypeIR): Map<string, TypeIR> {
  * Later members win, matching TypeScript's own intersection resolution.
  */
 export function flattenObjectProperties(ir: TypeIR): PropertyIR[] {
-  if (ir.kind === "object") {
+  if (ir.kind === 'object') {
     return ir.properties;
   }
-  if (ir.kind === "intersection") {
+  if (ir.kind === 'intersection') {
     const merged = new Map<string, PropertyIR>();
     for (const member of ir.types) {
       for (const property of flattenObjectProperties(member)) {
@@ -497,12 +496,12 @@ export function flattenObjectProperties(ir: TypeIR): PropertyIR[] {
  * width chosen by the protobuf and avro codecs. Carriers are checked in order,
  * which lets a property override the type it refers to.
  */
-export function declaredFormat(
-  ...carriers: Array<Annotated | undefined>
-): string | undefined {
+export function declaredFormat(...carriers: Array<Annotated | undefined>): string | undefined {
   for (const carrier of carriers) {
-    const format = carrier?.constraints?.find((c) => c.kind === "format");
-    if (typeof format?.value === "string") return format.value;
+    const format = carrier?.constraints?.find((c) => c.kind === 'format');
+    if (typeof format?.value === 'string') {
+      return format.value;
+    }
   }
   return undefined;
 }
@@ -536,8 +535,8 @@ export const INTEGER_FORMATS: Record<string, { min: bigint; max: bigint }> = {
   // Exactly the integers a double holds without loss, which is what the format
   // means, and also the practical limit for any 64-bit width carried by a
   // `number` rather than a `bigint`.
-  "double-int": { min: -(2n ** 53n - 1n), max: 2n ** 53n - 1n },
-  "sf-integer": { min: -999999999999999n, max: 999999999999999n },
+  'double-int': { min: -(2n ** 53n - 1n), max: 2n ** 53n - 1n },
+  'sf-integer': { min: -999999999999999n, max: 999999999999999n },
   unixtime: { min: -(2n ** 63n), max: 2n ** 63n - 1n },
 };
 
@@ -562,41 +561,40 @@ export const STRING_FORMATS: Record<string, { pattern: string; label: string }> 
     // Deliberately loose, and unchanged from when it was the only format: a
     // full RFC 5322 address is not expressible in a readable regex, and a
     // stricter one rejects addresses that deliver.
-    pattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
-    label: "email",
+    pattern: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$',
+    label: 'email',
   },
   uuid: {
-    pattern:
-      "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-    label: "uuid",
+    pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+    label: 'uuid',
   },
   // RFC 3986: a URI has a scheme, a reference need not.
   uri: {
-    pattern: "^[A-Za-z][A-Za-z0-9+.-]*:[^\\s]*$",
-    label: "uri",
+    pattern: '^[A-Za-z][A-Za-z0-9+.-]*:[^\\s]*$',
+    label: 'uri',
   },
-  "uri-reference": {
-    pattern: "^(?:[A-Za-z][A-Za-z0-9+.-]*:)?[^\\s]*$",
-    label: "uri-reference",
+  'uri-reference': {
+    pattern: '^(?:[A-Za-z][A-Za-z0-9+.-]*:)?[^\\s]*$',
+    label: 'uri-reference',
   },
   // RFC 6570: a reference that may carry `{...}` expressions. Braces are only
   // legal as balanced, non-nested pairs, which is what rules out `{a{b}`.
-  "uri-template": {
-    pattern: "^(?:[^\\s{}]|\\{[^{}\\s]*\\})*$",
-    label: "uri-template",
+  'uri-template': {
+    pattern: '^(?:[^\\s{}]|\\{[^{}\\s]*\\})*$',
+    label: 'uri-template',
   },
   // RFC 1123: labels of alphanumerics and inner hyphens, 63 bytes each, and a
   // 253-byte whole. Length is checked by the lookahead, not by counting twice.
   hostname: {
     pattern:
-      "^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\\.?$",
-    label: "hostname",
+      '^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\\.?$',
+    label: 'hostname',
   },
   // Four octets, each 0-255: the alternation is what rejects `256` and `01`.
   ipv4: {
     pattern:
-      "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$",
-    label: "ipv4",
+      '^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$',
+    label: 'ipv4',
   },
   /**
    * RFC 4291, including every legal `::` elision and the IPv4-mapped tail.
@@ -605,33 +603,33 @@ export const STRING_FORMATS: Record<string, { pattern: string; label: string }> 
    */
   ipv6: {
     pattern:
-      "^(?:" +
-      "(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}" +
-      "|(?:[0-9a-fA-F]{1,4}:){1,7}:" +
-      "|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}" +
-      "|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}" +
-      "|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}" +
-      "|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}" +
-      "|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}" +
-      "|[0-9a-fA-F]{1,4}:(?::[0-9a-fA-F]{1,4}){1,6}" +
-      "|:(?:(?::[0-9a-fA-F]{1,4}){1,7}|:)" +
-      "|fe80:(?::[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]+" +
-      "|::(?:ffff(?::0{1,4})?:)?(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])" +
-      "|(?:[0-9a-fA-F]{1,4}:){1,4}:(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])" +
-      ")$",
-    label: "ipv6",
+      '^(?:' +
+      '(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}' +
+      '|(?:[0-9a-fA-F]{1,4}:){1,7}:' +
+      '|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}' +
+      '|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}' +
+      '|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}' +
+      '|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}' +
+      '|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}' +
+      '|[0-9a-fA-F]{1,4}:(?::[0-9a-fA-F]{1,4}){1,6}' +
+      '|:(?:(?::[0-9a-fA-F]{1,4}){1,7}|:)' +
+      '|fe80:(?::[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]+' +
+      '|::(?:ffff(?::0{1,4})?:)?(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])' +
+      '|(?:[0-9a-fA-F]{1,4}:){1,4}:(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])' +
+      ')$',
+    label: 'ipv6',
   },
   // RFC 6901: either empty, or `/`-prefixed tokens where `~` only ever
   // introduces `~0` or `~1`.
-  "json-pointer": {
-    pattern: "^(?:/(?:[^~/]|~[01])*)*$",
-    label: "json-pointer",
+  'json-pointer': {
+    pattern: '^(?:/(?:[^~/]|~[01])*)*$',
+    label: 'json-pointer',
   },
   // RFC 6901 relative form: a non-negative integer of upward steps, then
   // either a `#` or a JSON pointer.
-  "relative-json-pointer": {
-    pattern: "^(?:0|[1-9][0-9]*)(?:#|(?:/(?:[^~/]|~[01])*)*)$",
-    label: "relative-json-pointer",
+  'relative-json-pointer': {
+    pattern: '^(?:0|[1-9][0-9]*)(?:#|(?:/(?:[^~/]|~[01])*)*)$',
+    label: 'relative-json-pointer',
   },
 };
 
@@ -641,7 +639,7 @@ export const STRING_FORMATS: Record<string, { pattern: string; label: string }> 
  * "Is a regular expression" can only be answered by compiling the string, so
  * the validator emits a `try`/`catch` for it rather than a `.test`.
  */
-export const STRING_FORMAT_REGEX = "regex";
+export const STRING_FORMAT_REGEX = 'regex';
 
 /** Integers a JS number holds exactly; beyond this a `number` is already wrong. */
 export const SAFE_INTEGER = 9007199254740991n;

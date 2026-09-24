@@ -1,8 +1,8 @@
-import type { NumberedUnion } from "../../src/index.ts";
+import type { NumberedUnion } from '../../src/index.ts';
 
 export interface Circle {
   /** @fieldNumber 1 */
-  kind: "circle";
+  kind: 'circle';
   /**
    * @fieldNumber 2
    * @format float
@@ -12,7 +12,7 @@ export interface Circle {
 
 export interface Square {
   /** @fieldNumber 1 */
-  kind: "square";
+  kind: 'square';
   /**
    * @fieldNumber 2
    * @format float

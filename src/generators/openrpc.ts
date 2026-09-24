@@ -1,11 +1,7 @@
-import { collectNamedTypes, type TypeIR } from "../ir/types.ts";
-import {
-  emptyService,
-  isOpenRpcMethod,
-  type ServiceIR,
-} from "../ir/service.ts";
-import { irToOpenApiSchema } from "./openapi.ts";
-import { assertValidSpecDocumentSync } from "../validators/jsonSchema.ts";
+import { emptyService, isOpenRpcMethod, type ServiceIR } from '../ir/service.ts';
+import { collectNamedTypes, type TypeIR } from '../ir/types.ts';
+import { assertValidSpecDocumentSync } from '../validators/jsonSchema.ts';
+import { irToOpenApiSchema } from './openapi.ts';
 
 export interface OpenRpcGeneratorOptions {
   info?: {
@@ -25,28 +21,42 @@ export function generateOpenRpcSchemaCode(
 
   const collect = (ir: TypeIR) => {
     for (const [name, namedIR] of collectNamedTypes(ir).entries()) {
-      if (namedIR.kind === "ref") continue;
-      if (!allNamedTypes.has(name)) allNamedTypes.set(name, namedIR);
+      if (namedIR.kind === 'ref') {
+        continue;
+      }
+      if (!allNamedTypes.has(name)) {
+        allNamedTypes.set(name, namedIR);
+      }
     }
   };
 
   for (const { name, ir } of types) {
-    if (!allNamedTypes.has(name)) allNamedTypes.set(name, ir);
+    if (!allNamedTypes.has(name)) {
+      allNamedTypes.set(name, ir);
+    }
   }
-  for (const { ir } of types) collect(ir);
+  for (const { ir } of types) {
+    collect(ir);
+  }
 
   for (const method of service.methods) {
     if (isOpenRpcMethod(method)) {
-      for (const p of method.request.params) collect(p.type);
+      for (const p of method.request.params) {
+        collect(p.type);
+      }
       for (const r of method.responses) {
-        if (r.result) collect(r.result);
-        if (r.error) collect(r.error);
+        if (r.result) {
+          collect(r.result);
+        }
+        if (r.error) {
+          collect(r.error);
+        }
       }
     }
   }
 
   for (const [name, ir] of allNamedTypes.entries()) {
-    schemasObj[name] = irToOpenApiSchema(ir, "3.1", true);
+    schemasObj[name] = irToOpenApiSchema(ir, '3.1', true);
   }
 
   const methodsList: Array<Record<string, unknown>> = [];
@@ -57,18 +67,14 @@ export function generateOpenRpcSchemaCode(
       const pkg = method.address.package ?? service.package;
       const svc = method.address.service ?? service.name;
       const m = method.address.method;
-      const methodName = pkg && svc
-        ? `${pkg}.${svc}.${m}`
-        : svc
-          ? `${svc}.${m}`
-          : m;
+      const methodName = pkg && svc ? `${pkg}.${svc}.${m}` : svc ? `${svc}.${m}` : m;
 
-      if (methodName === "rpc.discover") {
+      if (methodName === 'rpc.discover') {
         hasRpcDiscover = true;
       }
 
       const paramsObj = method.request.params.map((p) => {
-        const paramSchema = irToOpenApiSchema(p.type, "3.1", false);
+        const paramSchema = irToOpenApiSchema(p.type, '3.1', false);
         return {
           name: p.name,
           ...(p.description ? { description: p.description } : {}),
@@ -79,8 +85,8 @@ export function generateOpenRpcSchemaCode(
 
       const response0 = method.responses[0];
       const resultSchema = response0?.result
-        ? irToOpenApiSchema(response0.result, "3.1", false)
-        : { type: "object" };
+        ? irToOpenApiSchema(response0.result, '3.1', false)
+        : { type: 'object' };
 
       methodsList.push({
         name: methodName,
@@ -89,9 +95,9 @@ export function generateOpenRpcSchemaCode(
         ...(method.tags ? { tags: method.tags } : {}),
         ...(method.deprecated ? { deprecated: method.deprecated } : {}),
         params: paramsObj,
-        paramStructure: method.request.paramsByName ? "by-name" : "by-position",
+        paramStructure: method.request.paramsByName ? 'by-name' : 'by-position',
         result: {
-          name: "result",
+          name: 'result',
           schema: resultSchema,
         },
       });
@@ -100,31 +106,31 @@ export function generateOpenRpcSchemaCode(
 
   if (!hasRpcDiscover) {
     methodsList.push({
-      name: "rpc.discover",
-      summary: "Returns OpenRPC schema description",
+      name: 'rpc.discover',
+      summary: 'Returns OpenRPC schema description',
       params: [],
       result: {
-        name: "OpenRPC",
-        schema: { type: "object" },
+        name: 'OpenRPC',
+        schema: { type: 'object' },
       },
     });
   }
 
   const defaultInfo = {
-    title: options.info?.title ?? service.name ?? "OpenRPC API",
-    version: options.info?.version ?? service.version ?? "1.0.0",
+    title: options.info?.title ?? service.name ?? 'OpenRPC API',
+    version: options.info?.version ?? service.version ?? '1.0.0',
     ...(options.info?.description || service.description
       ? { description: options.info?.description ?? service.description }
       : {}),
   };
 
   const sampleDoc = {
-    openrpc: "1.3.0",
+    openrpc: '1.3.0',
     info: defaultInfo,
     methods: methodsList,
-    components: { schemas: schemasObj }
+    components: { schemas: schemasObj },
   };
-  assertValidSpecDocumentSync(sampleDoc, "OpenRPC");
+  assertValidSpecDocumentSync(sampleDoc, 'OpenRPC');
   const buildDocument = [
     `function buildOpenRpcDocument(baseSchema = {}) {`,
     `  const components = baseSchema.components || {};`,
@@ -148,7 +154,7 @@ export function generateOpenRpcSchemaCode(
     `    }`,
     `  };`,
     `}`,
-  ].join("\n");
+  ].join('\n');
 
   return [
     buildDocument,
@@ -156,5 +162,5 @@ export function generateOpenRpcSchemaCode(
     `export function openRPCSchema(baseSchema = {}) {`,
     `  return buildOpenRpcDocument(baseSchema);`,
     `}`,
-  ].join("\n");
+  ].join('\n');
 }

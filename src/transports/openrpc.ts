@@ -1,5 +1,5 @@
 export interface OpenRpcCall {
-  jsonrpc: "2.0";
+  jsonrpc: '2.0';
   id: string | number;
   method: string;
   params: unknown;
@@ -7,7 +7,7 @@ export interface OpenRpcCall {
 }
 
 export interface OpenRpcResult {
-  jsonrpc: "2.0";
+  jsonrpc: '2.0';
   id: string | number;
   result?: unknown;
   error?: {
@@ -27,7 +27,11 @@ export interface WebSocketLike {
   readyState?: number;
   send(data: string | ArrayBuffer | Uint8Array): void;
   close?(): void;
-  addEventListener?(type: string, listener: (ev: unknown) => void, options?: { once?: boolean }): void;
+  addEventListener?(
+    type: string,
+    listener: (ev: unknown) => void,
+    options?: { once?: boolean }
+  ): void;
   onmessage?: ((ev: unknown) => void) | null;
   onopen?: ((ev: unknown) => void) | null;
   onerror?: ((ev: unknown) => void) | null;
@@ -48,26 +52,26 @@ export interface HttpTransportOptions {
   headers?: Record<string, string>;
 }
 export function httpTransport(options: HttpTransportOptions = {}): OpenRpcTransport {
-  const url = options.url ?? "http://localhost/rpc";
+  const url = options.url ?? 'http://localhost/rpc';
   const fetchFn = options.fetch ?? globalThis.fetch;
 
   return {
     async call(callReq: OpenRpcCall): Promise<OpenRpcResult> {
       const headers = {
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
         ...options.headers,
-        ...(callReq.meta ?? {}),
+        ...callReq.meta,
       };
 
       const payload = {
-        jsonrpc: "2.0",
+        jsonrpc: '2.0',
         id: callReq.id,
         method: callReq.method,
         params: callReq.params,
       };
 
       const res = await fetchFn(url, {
-        method: "POST",
+        method: 'POST',
         headers,
         body: JSON.stringify(payload),
       });
@@ -103,11 +107,11 @@ export function webSocketTransport(options: WebSocketTransportOptions): OpenRpcT
     try {
       const evObj = event as { data?: unknown };
       const text =
-        typeof evObj.data === "string"
+        typeof evObj.data === 'string'
           ? evObj.data
           : evObj.data instanceof Uint8Array
             ? new TextDecoder().decode(evObj.data)
-            : typeof evObj.data === "object" && evObj.data !== null && "byteLength" in evObj.data
+            : typeof evObj.data === 'object' && evObj.data !== null && 'byteLength' in evObj.data
               ? new TextDecoder().decode(new Uint8Array(evObj.data as ArrayBuffer))
               : String(evObj.data);
       const data = JSON.parse(text) as OpenRpcResult;
@@ -122,24 +126,28 @@ export function webSocketTransport(options: WebSocketTransportOptions): OpenRpcT
   }
 
   function bindSocket(s: WebSocketLike) {
-    if (typeof s.addEventListener === "function") {
-      s.addEventListener("message", handleMessage);
+    if (typeof s.addEventListener === 'function') {
+      s.addEventListener('message', handleMessage);
     } else {
       s.onmessage = handleMessage;
     }
   }
 
-  if (socket) bindSocket(socket);
+  if (socket) {
+    bindSocket(socket);
+  }
 
   function getSocket(): Promise<WebSocketLike> {
     if (socket && (socket.readyState === 1 || socket.readyState === 0)) {
-      if (socket.readyState === 1) return Promise.resolve(socket);
+      if (socket.readyState === 1) {
+        return Promise.resolve(socket);
+      }
       const { promise, resolve, reject } = Promise.withResolvers<WebSocketLike>();
       const onOpen = () => resolve(socket!);
       const onError = (e: unknown) => reject(e);
-      if (typeof socket.addEventListener === "function") {
-        socket.addEventListener("open", onOpen, { once: true });
-        socket.addEventListener("error", onError, { once: true });
+      if (typeof socket.addEventListener === 'function') {
+        socket.addEventListener('open', onOpen, { once: true });
+        socket.addEventListener('error', onError, { once: true });
       } else {
         socket.onopen = onOpen;
         socket.onerror = onError;
@@ -147,8 +155,11 @@ export function webSocketTransport(options: WebSocketTransportOptions): OpenRpcT
       return promise;
     }
 
-    const WS = (globalThis as unknown as { WebSocket?: new (url: string) => WebSocketLike }).WebSocket;
-    if (!WS) throw new Error("WebSocket implementation not available");
+    const WS = (globalThis as unknown as { WebSocket?: new (url: string) => WebSocketLike })
+      .WebSocket;
+    if (!WS) {
+      throw new Error('WebSocket implementation not available');
+    }
 
     socket = new WS(options.url);
     bindSocket(socket);
@@ -165,7 +176,7 @@ export function webSocketTransport(options: WebSocketTransportOptions): OpenRpcT
       return new Promise((resolve, reject) => {
         pending.set(callReq.id, { resolve, reject });
         const payload = JSON.stringify({
-          jsonrpc: "2.0",
+          jsonrpc: '2.0',
           id: callReq.id,
           method: callReq.method,
           params: callReq.params,
@@ -174,7 +185,7 @@ export function webSocketTransport(options: WebSocketTransportOptions): OpenRpcT
       });
     },
     close() {
-      if (socket && typeof socket.close === "function") {
+      if (socket && typeof socket.close === 'function') {
         socket.close();
       }
       pending.clear();
@@ -195,22 +206,24 @@ export function tcpTransport(options: TcpTransportOptions): OpenRpcTransport {
     string | number,
     { resolve: (res: OpenRpcResult) => void; reject: (err: unknown) => void }
   >();
-  let buffer = "";
+  let buffer = '';
 
   function setupSocket(s: SocketLike) {
-    if (typeof s.on === "function") {
-      s.on("data", (data: unknown) => {
+    if (typeof s.on === 'function') {
+      s.on('data', (data: unknown) => {
         const text =
-          typeof data === "string"
+          typeof data === 'string'
             ? data
             : data instanceof Uint8Array
               ? new TextDecoder().decode(data)
               : String(data);
         buffer += text;
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
         for (const line of lines) {
-          if (!line.trim()) continue;
+          if (!line.trim()) {
+            continue;
+          }
           try {
             const parsed = JSON.parse(line) as OpenRpcResult;
             if (parsed && parsed.id !== undefined && pending.has(parsed.id)) {
@@ -224,24 +237,32 @@ export function tcpTransport(options: TcpTransportOptions): OpenRpcTransport {
     }
   }
 
-  if (conn) setupSocket(conn);
+  if (conn) {
+    setupSocket(conn);
+  }
 
   async function getConn(): Promise<SocketLike> {
-    if (conn) return conn;
+    if (conn) {
+      return conn;
+    }
 
-    const bunObj = (globalThis as unknown as { Bun?: { connect?: (opts: unknown) => Promise<SocketLike> } }).Bun;
-    if (typeof bunObj?.connect === "function") {
+    const bunObj = (
+      globalThis as unknown as { Bun?: { connect?: (opts: unknown) => Promise<SocketLike> } }
+    ).Bun;
+    if (typeof bunObj?.connect === 'function') {
       conn = await bunObj.connect({
-        hostname: options.host ?? "127.0.0.1",
+        hostname: options.host ?? '127.0.0.1',
         port: options.port ?? 8080,
         socket: {
           data(_socket: unknown, data: Uint8Array) {
             const text = new TextDecoder().decode(data);
             buffer += text;
-            const lines = buffer.split("\n");
-            buffer = lines.pop() ?? "";
+            const lines = buffer.split('\n');
+            buffer = lines.pop() ?? '';
             for (const line of lines) {
-              if (!line.trim()) continue;
+              if (!line.trim()) {
+                continue;
+              }
               try {
                 const parsed = JSON.parse(line) as OpenRpcResult;
                 if (parsed && parsed.id !== undefined && pending.has(parsed.id)) {
@@ -257,7 +278,7 @@ export function tcpTransport(options: TcpTransportOptions): OpenRpcTransport {
       return conn;
     }
 
-    throw new Error("[tcpTransport] Bun.connect or socket option required");
+    throw new Error('[tcpTransport] Bun.connect or socket option required');
   }
 
   return {
@@ -265,24 +286,26 @@ export function tcpTransport(options: TcpTransportOptions): OpenRpcTransport {
       const c = await getConn();
       return new Promise((resolve, reject) => {
         pending.set(callReq.id, { resolve, reject });
-        const payload =
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id: callReq.id,
-            method: callReq.method,
-            params: callReq.params,
-          }) + "\n";
+        const payload = `${JSON.stringify({
+          jsonrpc: '2.0',
+          id: callReq.id,
+          method: callReq.method,
+          params: callReq.params,
+        })}\n`;
 
-        if (typeof c.write === "function") {
+        if (typeof c.write === 'function') {
           c.write(payload);
-        } else if (typeof c.send === "function") {
+        } else if (typeof c.send === 'function') {
           c.send(payload);
         }
       });
     },
     close() {
-      if (conn && typeof conn.end === "function") conn.end();
-      else if (conn && typeof conn.close === "function") conn.close();
+      if (conn && typeof conn.end === 'function') {
+        conn.end();
+      } else if (conn && typeof conn.close === 'function') {
+        conn.close();
+      }
       pending.clear();
     },
   };
@@ -307,7 +330,7 @@ export function openRpcClient<T = any>(options: OpenRpcClientOptions = {}): T {
 
   async function executeCall(methodName: string, params: unknown): Promise<unknown> {
     const callReq: OpenRpcCall = {
-      jsonrpc: "2.0",
+      jsonrpc: '2.0',
       id: ++reqId,
       method: methodName,
       params,
@@ -329,11 +352,7 @@ export function openRpcClient<T = any>(options: OpenRpcClientOptions = {}): T {
         new Promise<never>((_, reject) =>
           setTimeout(
             () =>
-              reject(
-                new Error(
-                  `[openRpcClient] Request timed out after ${options.timeoutMs}ms`
-                )
-              ),
+              reject(new Error(`[openRpcClient] Request timed out after ${options.timeoutMs}ms`)),
             options.timeoutMs
           )
         ),
@@ -357,8 +376,12 @@ export function openRpcClient<T = any>(options: OpenRpcClientOptions = {}): T {
     {},
     {
       get(_target, prop: string | symbol) {
-        if (typeof prop !== "string") return undefined;
-        if (prop === "then" || prop === "catch" || prop === "finally") return undefined;
+        if (typeof prop !== 'string') {
+          return undefined;
+        }
+        if (prop === 'then' || prop === 'catch' || prop === 'finally') {
+          return undefined;
+        }
 
         if (serviceProxyCache.has(prop)) {
           return serviceProxyCache.get(prop);
@@ -371,8 +394,12 @@ export function openRpcClient<T = any>(options: OpenRpcClientOptions = {}): T {
           },
           {
             get(_subTarget, subProp: string | symbol) {
-              if (typeof subProp !== "string") return undefined;
-              if (subProp === "then" || subProp === "catch" || subProp === "finally") return undefined;
+              if (typeof subProp !== 'string') {
+                return undefined;
+              }
+              if (subProp === 'then' || subProp === 'catch' || subProp === 'finally') {
+                return undefined;
+              }
               return (...args: unknown[]) => {
                 const params = args.length === 1 ? args[0] : args;
                 return executeCall(`${prop}.${subProp}`, params);

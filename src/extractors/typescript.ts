@@ -1,4 +1,4 @@
-import * as ts from "typescript";
+import * as ts from 'typescript';
 import type {
   Annotated,
   ArrayTypeIR,
@@ -14,8 +14,8 @@ import type {
   TupleTypeIR,
   TypeIR,
   UnionTypeIR,
-} from "../ir/types.ts";
-import { isUserNamedType } from "../ir/types.ts";
+} from '../ir/types.ts';
+import { isUserNamedType } from '../ir/types.ts';
 
 /**
  * Node ids are minted per extraction rather than per process, so extracting one
@@ -33,79 +33,83 @@ function nextId(cache: Map<ts.Type, TypeIR>): string {
   return `t_${id}`;
 }
 
-function displayPartsToString(
-  parts: ts.SymbolDisplayPart[] | string | undefined
-): string {
-  if (!parts) return "";
-  if (typeof parts === "string") return parts;
-  return parts.map((p) => p.text).join("");
+function displayPartsToString(parts: ts.SymbolDisplayPart[] | string | undefined): string {
+  if (!parts) {
+    return '';
+  }
+  if (typeof parts === 'string') {
+    return parts;
+  }
+  return parts.map((p) => p.text).join('');
 }
 /**
  * Runtime classes every target treats as a scalar rather than a struct.
  * Their structural shape is a list of methods, which is never what a schema
  * should describe.
  */
-const WELL_KNOWN_SCALARS: Record<string, "bytes" | "date"> = {
-  Uint8Array: "bytes",
-  Uint8ClampedArray: "bytes",
-  ArrayBuffer: "bytes",
-  SharedArrayBuffer: "bytes",
-  Date: "date",
+const WELL_KNOWN_SCALARS: Record<string, 'bytes' | 'date'> = {
+  Uint8Array: 'bytes',
+  Uint8ClampedArray: 'bytes',
+  ArrayBuffer: 'bytes',
+  SharedArrayBuffer: 'bytes',
+  Date: 'date',
 };
 
 function parseJSDocValue(kind: ConstraintKind, text: string): unknown {
   const trimmed = text.trim();
   switch (kind) {
-    case "min":
-    case "minimum":
-    case "max":
-    case "maximum":
-    case "exclusiveMinimum":
-    case "exclusiveMaximum":
-    case "minLength":
-    case "maxLength":
-    case "minItems":
-    case "maxItems":
-    case "multipleOf": {
+    case 'min':
+    case 'minimum':
+    case 'max':
+    case 'maximum':
+    case 'exclusiveMinimum':
+    case 'exclusiveMaximum':
+    case 'minLength':
+    case 'maxLength':
+    case 'minItems':
+    case 'maxItems':
+    case 'multipleOf': {
       const num = Number(trimmed);
       return Number.isNaN(num) ? trimmed : num;
     }
-    case "uniqueItems": {
-      if (trimmed === "false") return false;
+    case 'uniqueItems': {
+      if (trimmed === 'false') {
+        return false;
+      }
       return true;
     }
-    case "pattern": {
+    case 'pattern': {
       const match = trimmed.match(/^\/(.*)\/([gimsuyv]*)$/);
       if (match) {
         const body = match[1]!;
-        return body.replace(/\\(?=\/)/g, "");
+        return body.replace(/\\(?=\/)/g, '');
       }
       return trimmed;
     }
-    case "format":
+    case 'format':
     default:
       return trimmed;
   }
 }
 
 /** Tags consumed elsewhere; they must not leak into `meta`. */
-const HANDLED_TAGS = new Set(["deprecated", "fieldnumber", "id", "tag", "example", "default"]);
+const HANDLED_TAGS = new Set(['deprecated', 'fieldnumber', 'id', 'tag', 'example', 'default']);
 
 const CONSTRAINT_TAGS: Record<string, ConstraintKind> = {
-  min: "minimum",
-  minimum: "minimum",
-  max: "maximum",
-  maximum: "maximum",
-  exclusiveminimum: "exclusiveMinimum",
-  exclusivemaximum: "exclusiveMaximum",
-  minlength: "minLength",
-  maxlength: "maxLength",
-  pattern: "pattern",
-  format: "format",
-  multipleof: "multipleOf",
-  minitems: "minItems",
-  maxitems: "maxItems",
-  uniqueitems: "uniqueItems",
+  min: 'minimum',
+  minimum: 'minimum',
+  max: 'maximum',
+  maximum: 'maximum',
+  exclusiveminimum: 'exclusiveMinimum',
+  exclusivemaximum: 'exclusiveMaximum',
+  minlength: 'minLength',
+  maxlength: 'maxLength',
+  pattern: 'pattern',
+  format: 'format',
+  multipleof: 'multipleOf',
+  minitems: 'minItems',
+  maxitems: 'maxItems',
+  uniqueitems: 'uniqueItems',
 };
 
 /** `@example { "id": 1 }` should land as an object, not the literal text. */
@@ -155,16 +159,18 @@ export function extractJSDocInfo(
     for (const decl of symbol.declarations) {
       for (const tag of ts.getJSDocTags(decl)) {
         const tagName = tag.tagName.text.toLowerCase();
-        if (tagName !== "fieldnumber" && tagName !== "id" && tagName !== "tag") {
+        if (tagName !== 'fieldnumber' && tagName !== 'id' && tagName !== 'tag') {
           continue;
         }
         const tagText = (
-          typeof tag.comment === "string"
+          typeof tag.comment === 'string'
             ? tag.comment
-            : (tag.comment ?? []).map((part) => part.text).join("")
+            : (tag.comment ?? []).map((part) => part.text).join('')
         ).trim();
         const parsed = parseInt(tagText, 10);
-        if (!Number.isNaN(parsed)) fieldNumber = parsed;
+        if (!Number.isNaN(parsed)) {
+          fieldNumber = parsed;
+        }
       }
     }
   }
@@ -173,23 +179,25 @@ export function extractJSDocInfo(
     const tagName = tag.name.toLowerCase();
     const tagText = displayPartsToString(tag.text).trim();
 
-    if (tagName === "deprecated") {
+    if (tagName === 'deprecated') {
       deprecated = { isDeprecated: true, note: tagText || undefined };
       continue;
     }
 
-    if (tagName === "fieldnumber" || tagName === "id" || tagName === "tag") {
+    if (tagName === 'fieldnumber' || tagName === 'id' || tagName === 'tag') {
       const parsed = parseInt(tagText, 10);
-      if (!Number.isNaN(parsed)) fieldNumber = parsed;
+      if (!Number.isNaN(parsed)) {
+        fieldNumber = parsed;
+      }
       continue;
     }
 
-    if (tagName === "example") {
+    if (tagName === 'example') {
       examples.push(parseAnnotationValue(tagText));
       continue;
     }
 
-    if (tagName === "default") {
+    if (tagName === 'default') {
       defaultValue = parseAnnotationValue(tagText);
       continue;
     }
@@ -205,7 +213,7 @@ export function extractJSDocInfo(
 
     // Anything wiz does not model is preserved rather than discarded.
     if (!HANDLED_TAGS.has(tagName)) {
-      (meta[tag.name] ??= []).push(tagText === "" ? true : tagText);
+      (meta[tag.name] ??= []).push(tagText === '' ? true : tagText);
     }
   }
 
@@ -244,10 +252,10 @@ export function extractTypeIR(
 ): TypeIR {
   const existing = cache.get(type);
   if (existing) {
-    if (existing.kind === "object" || existing.kind === "array" || existing.kind === "tuple") {
+    if (existing.kind === 'object' || existing.kind === 'array' || existing.kind === 'tuple') {
       return {
         id: nextId(cache),
-        kind: "ref",
+        kind: 'ref',
         targetId: existing.id,
         name: existing.name,
       };
@@ -270,7 +278,7 @@ export function extractTypeIR(
   if (wellKnown) {
     const res: TypeIR = {
       id: nextId(cache),
-      kind: "primitive",
+      kind: 'primitive',
       type: wellKnown,
       ...annotations,
       // The class name is not a domain schema name.
@@ -284,8 +292,8 @@ export function extractTypeIR(
   if (type.flags & ts.TypeFlags.Boolean) {
     const res: TypeIR = {
       id: nextId(cache),
-      kind: "primitive",
-      type: "boolean",
+      kind: 'primitive',
+      type: 'boolean',
       ...annotations,
     };
     cache.set(type, res);
@@ -296,8 +304,8 @@ export function extractTypeIR(
   if (type.flags & ts.TypeFlags.String) {
     const res: TypeIR = {
       id: nextId(cache),
-      kind: "primitive",
-      type: "string",
+      kind: 'primitive',
+      type: 'string',
       ...annotations,
     };
     cache.set(type, res);
@@ -308,8 +316,8 @@ export function extractTypeIR(
   if (type.flags & ts.TypeFlags.Number) {
     const res: TypeIR = {
       id: nextId(cache),
-      kind: "primitive",
-      type: "number",
+      kind: 'primitive',
+      type: 'number',
       ...annotations,
     };
     cache.set(type, res);
@@ -320,8 +328,8 @@ export function extractTypeIR(
   if (type.flags & ts.TypeFlags.BigInt) {
     const res: TypeIR = {
       id: nextId(cache),
-      kind: "primitive",
-      type: "bigint",
+      kind: 'primitive',
+      type: 'bigint',
       ...annotations,
     };
     cache.set(type, res);
@@ -330,49 +338,49 @@ export function extractTypeIR(
 
   // Null
   if (type.flags & ts.TypeFlags.Null) {
-    const res: TypeIR = { id: nextId(cache), kind: "primitive", type: "null" };
+    const res: TypeIR = { id: nextId(cache), kind: 'primitive', type: 'null' };
     cache.set(type, res);
     return res;
   }
 
   // Undefined
   if (type.flags & ts.TypeFlags.Undefined) {
-    const res: TypeIR = { id: nextId(cache), kind: "primitive", type: "undefined" };
+    const res: TypeIR = { id: nextId(cache), kind: 'primitive', type: 'undefined' };
     cache.set(type, res);
     return res;
   }
 
   // Symbol
   if (type.flags & (ts.TypeFlags.ESSymbol | ts.TypeFlags.UniqueESSymbol)) {
-    const res: TypeIR = { id: nextId(cache), kind: "primitive", type: "symbol" };
+    const res: TypeIR = { id: nextId(cache), kind: 'primitive', type: 'symbol' };
     cache.set(type, res);
     return res;
   }
 
   // Unknown
   if (type.flags & ts.TypeFlags.Unknown) {
-    const res: TypeIR = { id: nextId(cache), kind: "primitive", type: "unknown" };
+    const res: TypeIR = { id: nextId(cache), kind: 'primitive', type: 'unknown' };
     cache.set(type, res);
     return res;
   }
 
   // Any
   if (type.flags & ts.TypeFlags.Any) {
-    const res: TypeIR = { id: nextId(cache), kind: "primitive", type: "any" };
+    const res: TypeIR = { id: nextId(cache), kind: 'primitive', type: 'any' };
     cache.set(type, res);
     return res;
   }
 
   // Void
   if (type.flags & ts.TypeFlags.Void) {
-    const res: TypeIR = { id: nextId(cache), kind: "primitive", type: "void" };
+    const res: TypeIR = { id: nextId(cache), kind: 'primitive', type: 'void' };
     cache.set(type, res);
     return res;
   }
 
   // Never
   if (type.flags & ts.TypeFlags.Never) {
-    const res: TypeIR = { id: nextId(cache), kind: "primitive", type: "never" };
+    const res: TypeIR = { id: nextId(cache), kind: 'primitive', type: 'never' };
     cache.set(type, res);
     return res;
   }
@@ -381,7 +389,7 @@ export function extractTypeIR(
   if (type.isStringLiteral()) {
     const res: TypeIR = {
       id: nextId(cache),
-      kind: "literal",
+      kind: 'literal',
       value: type.value,
       ...annotations,
     };
@@ -392,7 +400,7 @@ export function extractTypeIR(
   if (type.isNumberLiteral()) {
     const res: TypeIR = {
       id: nextId(cache),
-      kind: "literal",
+      kind: 'literal',
       value: type.value,
       ...annotations,
     };
@@ -401,10 +409,12 @@ export function extractTypeIR(
   }
 
   if (type.flags & ts.TypeFlags.BooleanLiteral) {
-    const isTrue = "intrinsicName" in type && (type as ts.Type & { intrinsicName?: string }).intrinsicName === "true";
+    const isTrue =
+      'intrinsicName' in type &&
+      (type as ts.Type & { intrinsicName?: string }).intrinsicName === 'true';
     const res: TypeIR = {
       id: nextId(cache),
-      kind: "literal",
+      kind: 'literal',
       value: isTrue,
       ...annotations,
     };
@@ -416,8 +426,8 @@ export function extractTypeIR(
     const bigintVal = (type as ts.BigIntLiteralType).value;
     const res: TypeIR = {
       id: nextId(cache),
-      kind: "literal",
-      value: BigInt(`${bigintVal.negative ? "-" : ""}${bigintVal.base10Value}`),
+      kind: 'literal',
+      value: BigInt(`${bigintVal.negative ? '-' : ''}${bigintVal.base10Value}`),
       ...annotations,
     };
     cache.set(type, res);
@@ -425,7 +435,7 @@ export function extractTypeIR(
   }
 
   // Enums
-  if (symbol && (symbol.flags & ts.SymbolFlags.Enum)) {
+  if (symbol && symbol.flags & ts.SymbolFlags.Enum) {
     const members: EnumMemberIR[] = [];
     if (symbol.exports) {
       symbol.exports.forEach((memberSymbol) => {
@@ -442,7 +452,7 @@ export function extractTypeIR(
     }
     const res: TypeIR = {
       id: nextId(cache),
-      kind: "enum",
+      kind: 'enum',
       name: typeName,
       members,
       ...annotations,
@@ -457,8 +467,8 @@ export function extractTypeIR(
     const elemType = typeArgs[0] ?? checker.getAnyType();
     const placeholder: ArrayTypeIR = {
       id: nextId(cache),
-      kind: "array",
-      element: { id: "placeholder", kind: "primitive", type: "any" },
+      kind: 'array',
+      element: { id: 'placeholder', kind: 'primitive', type: 'any' },
       name: typeName,
       ...annotations,
     };
@@ -477,7 +487,7 @@ export function extractTypeIR(
 
     const placeholder: TupleTypeIR = {
       id: nextId(cache),
-      kind: "tuple",
+      kind: 'tuple',
       elements: [],
       name: typeName,
       ...annotations,
@@ -498,118 +508,133 @@ export function extractTypeIR(
   }
 
   // Unions
-function findDiscriminatorProperty(types: TypeIR[]): { propertyName: string } | undefined {
-  const objectTypes = types.filter((t): t is ObjectTypeIR => t.kind === "object");
-  if (objectTypes.length !== types.length || objectTypes.length < 2) {
+  function findDiscriminatorProperty(types: TypeIR[]): { propertyName: string } | undefined {
+    const objectTypes = types.filter((t): t is ObjectTypeIR => t.kind === 'object');
+    if (objectTypes.length !== types.length || objectTypes.length < 2) {
+      return undefined;
+    }
+
+    const firstObj = objectTypes[0]!;
+    const candidateProps = firstObj.properties.filter(
+      (p) => !p.optional && p.type.kind === 'literal'
+    );
+
+    for (const candidate of candidateProps) {
+      const propName = candidate.name;
+      const seenValues = new Set<unknown>();
+      let isValid = true;
+
+      for (const obj of objectTypes) {
+        const matchProp = obj.properties.find((p) => p.name === propName);
+        if (!matchProp || matchProp.optional || matchProp.type.kind !== 'literal') {
+          isValid = false;
+          break;
+        }
+        const litVal = matchProp.type.value;
+        if (seenValues.has(litVal)) {
+          isValid = false;
+          break;
+        }
+        seenValues.add(litVal);
+      }
+
+      if (isValid) {
+        return { propertyName: propName };
+      }
+    }
+
     return undefined;
   }
+  /**
+   * Reads `NumberedUnion<{ 1: A; 2: B }>` off a type node.
+   *
+   * The numbering cannot be recovered from the resolved type: TypeScript resolves
+   * the helper to a plain union and records only the outermost alias, so the map
+   * survives on the declaration alone. One level of naming is followed, which is
+   * what `type Shape = NumberedUnion<...>` plus `shape: Shape` needs.
+   */
+  function numberedUnionEntries(
+    node: ts.TypeNode | undefined,
+    checker: ts.TypeChecker,
+    depth = 0
+  ): Array<{ fieldNumber: number; type: ts.Type }> | undefined {
+    if (!node || depth > 8 || !ts.isTypeReferenceNode(node)) {
+      return undefined;
+    }
 
-  const firstObj = objectTypes[0]!;
-  const candidateProps = firstObj.properties.filter(
-    (p) => !p.optional && p.type.kind === "literal"
-  );
-
-  for (const candidate of candidateProps) {
-    const propName = candidate.name;
-    const seenValues = new Set<unknown>();
-    let isValid = true;
-
-    for (const obj of objectTypes) {
-      const matchProp = obj.properties.find((p) => p.name === propName);
-      if (!matchProp || matchProp.optional || matchProp.type.kind !== "literal") {
-        isValid = false;
-        break;
+    if (node.typeName.getText() !== 'NumberedUnion') {
+      // A named alias standing in for the helper; resolve it and look again.
+      let symbol = checker.getSymbolAtLocation(node.typeName);
+      if (symbol && symbol.flags & ts.SymbolFlags.Alias) {
+        symbol = checker.getAliasedSymbol(symbol);
       }
-      const litVal = matchProp.type.value;
-      if (seenValues.has(litVal)) {
-        isValid = false;
-        break;
+      const declaration = symbol?.declarations?.[0];
+      return declaration && ts.isTypeAliasDeclaration(declaration)
+        ? numberedUnionEntries(declaration.type, checker, depth + 1)
+        : undefined;
+    }
+
+    const map = node.typeArguments?.[0];
+    if (!map || !ts.isTypeLiteralNode(map)) {
+      return undefined;
+    }
+
+    const entries: Array<{ fieldNumber: number; type: ts.Type }> = [];
+    for (const member of map.members) {
+      if (!ts.isPropertySignature(member) || !member.type) {
+        return undefined;
       }
-      seenValues.add(litVal);
+      const fieldNumber = Number(member.name.getText());
+      if (!Number.isInteger(fieldNumber) || fieldNumber < 1) {
+        return undefined;
+      }
+      entries.push({
+        fieldNumber,
+        type: checker.getTypeFromTypeNode(member.type),
+      });
+    }
+    return entries.length > 0 ? entries : undefined;
+  }
+
+  /**
+   * The enum every non-nullable member of `type` belongs to, when there is
+   * exactly one and the union covers nothing else.
+   *
+   * A partial union — `PetStatus.Sold | PetStatus.Pending` written by hand, or an
+   * enum member mixed with a string — is deliberately not an enum: collapsing it
+   * would widen the type to values the declaration excluded.
+   */
+  function sharedEnumSymbol(type: ts.UnionType, checker: ts.TypeChecker): ts.Symbol | undefined {
+    const members = type.types.filter(
+      (member) => !(member.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Null))
+    );
+    if (members.length === 0) {
+      return undefined;
     }
 
-    if (isValid) {
-      return { propertyName: propName };
+    let owner: ts.Symbol | undefined;
+    for (const member of members) {
+      if (!(member.flags & ts.TypeFlags.EnumLiteral)) {
+        return undefined;
+      }
+      const parent = (member.symbol as ts.Symbol & { parent?: ts.Symbol })?.parent;
+      if (!parent || !(parent.flags & ts.SymbolFlags.Enum)) {
+        return undefined;
+      }
+      if (owner && owner !== parent) {
+        return undefined;
+      }
+      owner ??= parent;
     }
-  }
-
-  return undefined;
-}
-/**
- * Reads `NumberedUnion<{ 1: A; 2: B }>` off a type node.
- *
- * The numbering cannot be recovered from the resolved type: TypeScript resolves
- * the helper to a plain union and records only the outermost alias, so the map
- * survives on the declaration alone. One level of naming is followed, which is
- * what `type Shape = NumberedUnion<...>` plus `shape: Shape` needs.
- */
-function numberedUnionEntries(
-  node: ts.TypeNode | undefined,
-  checker: ts.TypeChecker,
-  depth = 0
-): Array<{ fieldNumber: number; type: ts.Type }> | undefined {
-  if (!node || depth > 8 || !ts.isTypeReferenceNode(node)) return undefined;
-
-  if (node.typeName.getText() !== "NumberedUnion") {
-    // A named alias standing in for the helper; resolve it and look again.
-    let symbol = checker.getSymbolAtLocation(node.typeName);
-    if (symbol && symbol.flags & ts.SymbolFlags.Alias) {
-      symbol = checker.getAliasedSymbol(symbol);
+    if (!owner) {
+      return undefined;
     }
-    const declaration = symbol?.declarations?.[0];
-    return declaration && ts.isTypeAliasDeclaration(declaration)
-      ? numberedUnionEntries(declaration.type, checker, depth + 1)
-      : undefined;
+
+    // Every member of the enum must be present, or the union is a subset.
+    const declared = checker.getDeclaredTypeOfSymbol(owner);
+    const declaredCount = declared.isUnion() ? declared.types.length : 1;
+    return members.length === declaredCount ? owner : undefined;
   }
-
-  const map = node.typeArguments?.[0];
-  if (!map || !ts.isTypeLiteralNode(map)) return undefined;
-
-  const entries: Array<{ fieldNumber: number; type: ts.Type }> = [];
-  for (const member of map.members) {
-    if (!ts.isPropertySignature(member) || !member.type) return undefined;
-    const fieldNumber = Number(member.name.getText());
-    if (!Number.isInteger(fieldNumber) || fieldNumber < 1) return undefined;
-    entries.push({
-      fieldNumber,
-      type: checker.getTypeFromTypeNode(member.type),
-    });
-  }
-  return entries.length > 0 ? entries : undefined;
-}
-
-/**
- * The enum every non-nullable member of `type` belongs to, when there is
- * exactly one and the union covers nothing else.
- *
- * A partial union — `PetStatus.Sold | PetStatus.Pending` written by hand, or an
- * enum member mixed with a string — is deliberately not an enum: collapsing it
- * would widen the type to values the declaration excluded.
- */
-function sharedEnumSymbol(
-  type: ts.UnionType,
-  checker: ts.TypeChecker
-): ts.Symbol | undefined {
-  const members = type.types.filter(
-    (member) => !(member.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Null))
-  );
-  if (members.length === 0) return undefined;
-
-  let owner: ts.Symbol | undefined;
-  for (const member of members) {
-    if (!(member.flags & ts.TypeFlags.EnumLiteral)) return undefined;
-    const parent = (member.symbol as ts.Symbol & { parent?: ts.Symbol })?.parent;
-    if (!parent || !(parent.flags & ts.SymbolFlags.Enum)) return undefined;
-    if (owner && owner !== parent) return undefined;
-    owner ??= parent;
-  }
-  if (!owner) return undefined;
-
-  // Every member of the enum must be present, or the union is a subset.
-  const declared = checker.getDeclaredTypeOfSymbol(owner);
-  const declaredCount = declared.isUnion() ? declared.types.length : 1;
-  return members.length === declaredCount ? owner : undefined;
-}
   // `status?: PetStatus` reaches here as `Available | Pending | Sold |
   // undefined`: TypeScript models an enum as the union of its members, and the
   // optional marker hides the enum's own symbol. Decomposing that yields one
@@ -629,11 +654,8 @@ function sharedEnumSymbol(
       }
       const res: UnionTypeIR = {
         id: nextId(cache),
-        kind: "union",
-        types: [
-          enumIR,
-          ...nullable.map((member) => extractTypeIR(member, checker, cache)),
-        ],
+        kind: 'union',
+        types: [enumIR, ...nullable.map((member) => extractTypeIR(member, checker, cache))],
         name: typeName,
         ...annotations,
       };
@@ -645,7 +667,7 @@ function sharedEnumSymbol(
   if (type.isUnion()) {
     const placeholder: UnionTypeIR = {
       id: nextId(cache),
-      kind: "union",
+      kind: 'union',
       types: [],
       name: typeName,
       ...annotations,
@@ -664,7 +686,9 @@ function sharedEnumSymbol(
       extractTypeIR(subType, checker, cache)
     );
     placeholder.types = typesIR;
-    if (numbered) placeholder.fieldNumbers = numbered.map((e) => e.fieldNumber);
+    if (numbered) {
+      placeholder.fieldNumbers = numbered.map((e) => e.fieldNumber);
+    }
     placeholder.discriminator = findDiscriminatorProperty(typesIR);
     return placeholder;
   }
@@ -673,7 +697,7 @@ function sharedEnumSymbol(
   if (type.isIntersection()) {
     const placeholder: IntersectionTypeIR = {
       id: nextId(cache),
-      kind: "intersection",
+      kind: 'intersection',
       types: [],
       name: typeName,
       ...annotations,
@@ -694,13 +718,13 @@ function sharedEnumSymbol(
     const valType = stringIndexType || numberIndexType!;
     const placeholder: RecordTypeIR = {
       id: nextId(cache),
-      kind: "record",
+      kind: 'record',
       keyType: {
         id: nextId(cache),
-        kind: "primitive",
-        type: stringIndexType ? "string" : "number",
+        kind: 'primitive',
+        type: stringIndexType ? 'string' : 'number',
       },
-      valueType: { id: "placeholder", kind: "primitive", type: "any" },
+      valueType: { id: 'placeholder', kind: 'primitive', type: 'any' },
       name: typeName,
       ...annotations,
     };
@@ -714,7 +738,7 @@ function sharedEnumSymbol(
   // Objects & Interfaces
   const objectPlaceholder: ObjectTypeIR = {
     id: nextId(cache),
-    kind: "object",
+    kind: 'object',
     properties: [],
     additionalProperties: stringIndexType ? true : undefined,
     ...annotations,
@@ -728,7 +752,8 @@ function sharedEnumSymbol(
       ? checker.getTypeOfSymbolAtLocation(propSymbol, propDecl)
       : checker.getAnyType();
 
-    const isOptional = (propSymbol.flags & ts.SymbolFlags.Optional) !== 0 ||
+    const isOptional =
+      (propSymbol.flags & ts.SymbolFlags.Optional) !== 0 ||
       (propDecl && ts.isPropertySignature(propDecl) && Boolean(propDecl.questionToken));
 
     let isReadonly = false;
@@ -744,7 +769,7 @@ function sharedEnumSymbol(
     // carrying no alias, so the numbering is recovered from the annotation.
     // The result is deliberately not cached: the numbering belongs to this
     // declaration, while the widened union type is shared.
-    if (propTypeIR.kind === "union" && propTypeIR.fieldNumbers === undefined) {
+    if (propTypeIR.kind === 'union' && propTypeIR.fieldNumbers === undefined) {
       const declaredType = propDecl && ts.isPropertySignature(propDecl) ? propDecl.type : undefined;
       const numbered = numberedUnionEntries(declaredType, checker);
       if (numbered) {

@@ -1,29 +1,29 @@
 // @wiz-ignore
-import { describe, expect, test } from "bun:test";
-import protobuf from "protobufjs";
-import { generateGrpcSchemaCode } from "../src/generators/protobuf.ts";
-import { grpcSchema } from "../src/index.ts";
-import type { ServiceIR } from "../src/ir/service.ts";
-import { silentLogger } from "../src/logger.ts";
-import { transformSource } from "../src/plugin.ts";
-import { evalModule } from "./helpers.ts";
+import { describe, expect, test } from 'bun:test';
+import protobuf from 'protobufjs';
+import { generateGrpcSchemaCode } from '../src/generators/protobuf.ts';
+import { grpcSchema } from '../src/index.ts';
+import type { ServiceIR } from '../src/ir/service.ts';
+import { silentLogger } from '../src/logger.ts';
+import { transformSource } from '../src/plugin.ts';
+import { evalModule } from './helpers.ts';
 
 /** The `.proto` text one `grpcSchema<…>()` callsite compiles to. */
-function protoFor(source: string, indent = "  "): string {
+function protoFor(source: string, indent = '  '): string {
   const res = transformSource({
-    path: "test.ts",
+    path: 'test.ts',
     contents: source,
     logger: silentLogger,
   });
-  expect(res.code).toContain("grpcSchema as __wiz_grpcSchema_");
+  expect(res.code).toContain('grpcSchema as __wiz_grpcSchema_');
 
   const module = Array.from(res.modules.values()).find((m) =>
-    m.files["index.js"]?.includes("export function grpcSchema")
+    m.files['index.js']?.includes('export function grpcSchema')
   );
   expect(module).toBeDefined();
 
   return evalModule<{ grpcSchema: (o?: { indent?: string }) => string }>(
-    module!.files["index.js"]!
+    module!.files['index.js']!
   ).grpcSchema({ indent });
 }
 
@@ -61,59 +61,53 @@ const GREETER = `
   export const proto = grpcSchema<[GreeterService]>();
 `;
 
-describe("grpcSchema stub", () => {
-  test("throws without the plugin, like every other macro", () => {
-    expect(() => grpcSchema()).toThrow("without active Bun plugin");
+describe('grpcSchema stub', () => {
+  test('throws without the plugin, like every other macro', () => {
+    expect(() => grpcSchema()).toThrow('without active Bun plugin');
   });
 });
 
-describe("grpcSchema harvesting", () => {
-  test("a service interface becomes messages and a service block", () => {
+describe('grpcSchema harvesting', () => {
+  test('a service interface becomes messages and a service block', () => {
     const proto = protoFor(GREETER);
 
     expect(proto).toContain('syntax = "proto3";');
-    expect(proto).toContain("package helloworld;");
-    expect(proto).toContain("message HelloRequest {");
-    expect(proto).toContain("string name = 1;");
-    expect(proto).toContain("message HelloReply {");
-    expect(proto).toContain("service Greeter {");
-    expect(proto).toContain("// Greets one caller.");
-    expect(proto).toContain("rpc sayHello (HelloRequest) returns (HelloReply);");
+    expect(proto).toContain('package helloworld;');
+    expect(proto).toContain('message HelloRequest {');
+    expect(proto).toContain('string name = 1;');
+    expect(proto).toContain('message HelloReply {');
+    expect(proto).toContain('service Greeter {');
+    expect(proto).toContain('// Greets one caller.');
+    expect(proto).toContain('rpc sayHello (HelloRequest) returns (HelloReply);');
   });
 
-  test("streaming is read off the signature, on each side", () => {
+  test('streaming is read off the signature, on each side', () => {
     const proto = protoFor(GREETER);
 
     // Server streaming: the return type is the async iterable.
-    expect(proto).toContain(
-      "rpc sayHelloStream (HelloRequest) returns (stream HelloReply);"
-    );
+    expect(proto).toContain('rpc sayHelloStream (HelloRequest) returns (stream HelloReply);');
     // Client streaming: the first parameter is.
-    expect(proto).toContain(
-      "rpc recordHellos (stream HelloRequest) returns (HelloReply);"
-    );
+    expect(proto).toContain('rpc recordHellos (stream HelloRequest) returns (HelloReply);');
     // Bidirectional: both.
-    expect(proto).toContain(
-      "rpc chat (stream HelloRequest) returns (stream HelloReply);"
-    );
+    expect(proto).toContain('rpc chat (stream HelloRequest) returns (stream HelloReply);');
   });
 
-  test("protobuf.js parses the emitted file", () => {
+  test('protobuf.js parses the emitted file', () => {
     const parsed = protobuf.parse(protoFor(GREETER), { keepCase: true });
-    expect(parsed.package).toBe("helloworld");
+    expect(parsed.package).toBe('helloworld');
 
-    const service = parsed.root.lookupService("helloworld.Greeter");
-    const chat = service.methods["chat"]!;
+    const service = parsed.root.lookupService('helloworld.Greeter');
+    const chat = service.methods['chat']!;
     expect(chat.requestStream).toBe(true);
     expect(chat.responseStream).toBe(true);
-    expect(chat.requestType).toBe("HelloRequest");
+    expect(chat.requestType).toBe('HelloRequest');
 
-    const unary = service.methods["sayHello"]!;
+    const unary = service.methods['sayHello']!;
     expect(unary.requestStream).toBeFalsy();
     expect(unary.responseStream).toBeFalsy();
   });
 
-  test("@name renames the rpc and @service the block", () => {
+  test('@name renames the rpc and @service the block', () => {
     const proto = protoFor(`
       import { grpcSchema } from "./src/index.ts";
 
@@ -134,12 +128,12 @@ describe("grpcSchema harvesting", () => {
       export const proto = grpcSchema<[HealthApi]>();
     `);
 
-    expect(proto).toContain("service Health {");
-    expect(proto).toContain("rpc Check (Ping) returns (Ping);");
-    expect(proto).not.toContain("package");
+    expect(proto).toContain('service Health {');
+    expect(proto).toContain('rpc Check (Ping) returns (Ping);');
+    expect(proto).not.toContain('package');
   });
 
-  test("a function signature type is one rpc", () => {
+  test('a function signature type is one rpc', () => {
     const proto = protoFor(`
       import { grpcSchema } from "./src/index.ts";
 
@@ -156,12 +150,12 @@ describe("grpcSchema harvesting", () => {
       export const proto = grpcSchema<[typeof restart]>();
     `);
 
-    expect(proto).toContain("package ops;");
-    expect(proto).toContain("service Admin {");
-    expect(proto).toContain("rpc Restart (Empty) returns (Empty);");
+    expect(proto).toContain('package ops;');
+    expect(proto).toContain('service Admin {');
+    expect(proto).toContain('rpc Restart (Empty) returns (Empty);');
   });
 
-  test("an anonymous or missing payload gets a message of its own", () => {
+  test('an anonymous or missing payload gets a message of its own', () => {
     const proto = protoFor(`
       import { grpcSchema } from "./src/index.ts";
 
@@ -176,15 +170,15 @@ describe("grpcSchema harvesting", () => {
       export const proto = grpcSchema<[Pinger]>();
     `);
 
-    expect(proto).toContain("message PingRequest {");
-    expect(proto).toContain("message PingResponse {");
-    expect(proto).toContain("bool up = 1;");
-    expect(proto).toContain("rpc ping (PingRequest) returns (PingResponse);");
+    expect(proto).toContain('message PingRequest {');
+    expect(proto).toContain('message PingResponse {');
+    expect(proto).toContain('bool up = 1;');
+    expect(proto).toContain('rpc ping (PingRequest) returns (PingResponse);');
     // An empty request stays a message rather than importing Empty.
-    expect(proto).not.toContain("google/protobuf/empty.proto");
+    expect(proto).not.toContain('google/protobuf/empty.proto');
   });
 
-  test("payload type arguments contribute messages without rpcs", () => {
+  test('payload type arguments contribute messages without rpcs', () => {
     const proto = protoFor(`
       import { grpcSchema } from "./src/index.ts";
 
@@ -196,14 +190,14 @@ describe("grpcSchema harvesting", () => {
       export const proto = grpcSchema<[Tick]>();
     `);
 
-    expect(proto).toContain("message Tick {");
-    expect(proto).not.toContain("service");
+    expect(proto).toContain('message Tick {');
+    expect(proto).not.toContain('service');
   });
 
-  test("an object type with no methods warns that it describes no rpc", () => {
+  test('an object type with no methods warns that it describes no rpc', () => {
     const warnings: string[] = [];
     transformSource({
-      path: "test.ts",
+      path: 'test.ts',
       contents: `
         import { grpcSchema } from "./src/index.ts";
 
@@ -229,20 +223,20 @@ describe("grpcSchema harvesting", () => {
     ).toBe(true);
   });
 
-  test("indent is a runtime option, not baked into the module", () => {
-    expect(protoFor(GREETER, "    ")).toContain("    string name = 1;");
+  test('indent is a runtime option, not baked into the module', () => {
+    expect(protoFor(GREETER, '    ')).toContain('    string name = 1;');
   });
 });
 
-describe("generateGrpcSchemaCode", () => {
+describe('generateGrpcSchemaCode', () => {
   const message = (name: string, field: string) => ({
     id: `t_${name}`,
-    kind: "object" as const,
+    kind: 'object' as const,
     name,
     properties: [
       {
         name: field,
-        type: { id: "t_str", kind: "primitive" as const, type: "string" as const },
+        type: { id: 't_str', kind: 'primitive' as const, type: 'string' as const },
         optional: false,
         readonly: false,
         fieldNumber: 1,
@@ -250,24 +244,24 @@ describe("generateGrpcSchemaCode", () => {
     ],
   });
 
-  test("a missing field number blocks generation at the callsite", () => {
+  test('a missing field number blocks generation at the callsite', () => {
     const service: ServiceIR = {
-      kind: "service",
+      kind: 'service',
       methods: [
         {
-          kind: "serviceMethod",
-          protocol: "grpc",
-          address: { protocol: "grpc", service: "Svc", method: "Do" },
+          kind: 'serviceMethod',
+          protocol: 'grpc',
+          address: { protocol: 'grpc', service: 'Svc', method: 'Do' },
           request: {
-            protocol: "grpc",
+            protocol: 'grpc',
             message: {
-              id: "t_req",
-              kind: "object",
-              name: "Req",
+              id: 't_req',
+              kind: 'object',
+              name: 'Req',
               properties: [
                 {
-                  name: "id",
-                  type: { id: "t_str", kind: "primitive", type: "string" },
+                  name: 'id',
+                  type: { id: 't_str', kind: 'primitive', type: 'string' },
                   optional: false,
                   readonly: false,
                 },
@@ -275,92 +269,78 @@ describe("generateGrpcSchemaCode", () => {
             },
             streaming: false,
           },
-          responses: [
-            { protocol: "grpc", message: message("Res", "ok"), streaming: false },
-          ],
+          responses: [{ protocol: 'grpc', message: message('Res', 'ok'), streaming: false }],
         },
       ],
     };
 
-    const mod = evalModule<{ grpcSchema: () => string }>(
-      generateGrpcSchemaCode([], service)
-    );
-    expect(() => mod.grpcSchema()).toThrow("@fieldNumber");
+    const mod = evalModule<{ grpcSchema: () => string }>(generateGrpcSchemaCode([], service));
+    expect(() => mod.grpcSchema()).toThrow('@fieldNumber');
   });
 
-  test("two packages in one file is refused, since proto allows one", () => {
+  test('two packages in one file is refused, since proto allows one', () => {
     const service: ServiceIR = {
-      kind: "service",
+      kind: 'service',
       methods: [
         {
-          kind: "serviceMethod",
-          protocol: "grpc",
-          address: { protocol: "grpc", package: "a", service: "A", method: "Do" },
-          request: { protocol: "grpc", message: message("Req", "id"), streaming: false },
-          responses: [
-            { protocol: "grpc", message: message("Res", "ok"), streaming: false },
-          ],
+          kind: 'serviceMethod',
+          protocol: 'grpc',
+          address: { protocol: 'grpc', package: 'a', service: 'A', method: 'Do' },
+          request: { protocol: 'grpc', message: message('Req', 'id'), streaming: false },
+          responses: [{ protocol: 'grpc', message: message('Res', 'ok'), streaming: false }],
         },
         {
-          kind: "serviceMethod",
-          protocol: "grpc",
-          address: { protocol: "grpc", package: "b", service: "B", method: "Do" },
-          request: { protocol: "grpc", message: message("Req", "id"), streaming: false },
-          responses: [
-            { protocol: "grpc", message: message("Res", "ok"), streaming: false },
-          ],
+          kind: 'serviceMethod',
+          protocol: 'grpc',
+          address: { protocol: 'grpc', package: 'b', service: 'B', method: 'Do' },
+          request: { protocol: 'grpc', message: message('Req', 'id'), streaming: false },
+          responses: [{ protocol: 'grpc', message: message('Res', 'ok'), streaming: false }],
         },
       ],
     };
 
-    const mod = evalModule<{ grpcSchema: () => string }>(
-      generateGrpcSchemaCode([], service)
-    );
-    expect(() => mod.grpcSchema()).toThrow("conflicting proto packages");
+    const mod = evalModule<{ grpcSchema: () => string }>(generateGrpcSchemaCode([], service));
+    expect(() => mod.grpcSchema()).toThrow('conflicting proto packages');
   });
 
-  test("a non-message payload is refused with the slot named", () => {
+  test('a non-message payload is refused with the slot named', () => {
     const service: ServiceIR = {
-      kind: "service",
+      kind: 'service',
       methods: [
         {
-          kind: "serviceMethod",
-          protocol: "grpc",
-          address: { protocol: "grpc", service: "Svc", method: "Count" },
+          kind: 'serviceMethod',
+          protocol: 'grpc',
+          address: { protocol: 'grpc', service: 'Svc', method: 'Count' },
           request: {
-            protocol: "grpc",
-            message: { id: "t_num", kind: "primitive", type: "number" },
+            protocol: 'grpc',
+            message: { id: 't_num', kind: 'primitive', type: 'number' },
             streaming: false,
           },
-          responses: [
-            { protocol: "grpc", message: message("Res", "ok"), streaming: false },
-          ],
+          responses: [{ protocol: 'grpc', message: message('Res', 'ok'), streaming: false }],
         },
       ],
     };
 
-    const mod = evalModule<{ grpcSchema: () => string }>(
-      generateGrpcSchemaCode([], service)
-    );
+    const mod = evalModule<{ grpcSchema: () => string }>(generateGrpcSchemaCode([], service));
     expect(() => mod.grpcSchema()).toThrow("request of rpc 'Svc.Count'");
   });
 
-  test("several rpcs on one service share a block, in order", () => {
+  test('several rpcs on one service share a block, in order', () => {
     const service: ServiceIR = {
-      kind: "service",
-      methods: ["First", "Second"].map((method) => ({
-        kind: "serviceMethod" as const,
-        protocol: "grpc" as const,
-        address: { protocol: "grpc" as const, service: "Svc", method },
+      kind: 'service',
+      methods: ['First', 'Second'].map((method) => ({
+        kind: 'serviceMethod' as const,
+        protocol: 'grpc' as const,
+        address: { protocol: 'grpc' as const, service: 'Svc', method },
         request: {
-          protocol: "grpc" as const,
-          message: message("Req", "id"),
+          protocol: 'grpc' as const,
+          message: message('Req', 'id'),
           streaming: false,
         },
         responses: [
           {
-            protocol: "grpc" as const,
-            message: message("Res", "ok"),
+            protocol: 'grpc' as const,
+            message: message('Res', 'ok'),
             streaming: false,
           },
         ],
@@ -372,22 +352,20 @@ describe("generateGrpcSchemaCode", () => {
     ).grpcSchema();
 
     expect(proto.match(/service Svc \{/g)).toHaveLength(1);
-    expect(proto.indexOf("rpc First")).toBeLessThan(proto.indexOf("rpc Second"));
+    expect(proto.indexOf('rpc First')).toBeLessThan(proto.indexOf('rpc Second'));
   });
 
-  test("a deprecated method carries the option into the rpc body", () => {
+  test('a deprecated method carries the option into the rpc body', () => {
     const service: ServiceIR = {
-      kind: "service",
+      kind: 'service',
       methods: [
         {
-          kind: "serviceMethod",
-          protocol: "grpc",
-          address: { protocol: "grpc", service: "Svc", method: "Old" },
+          kind: 'serviceMethod',
+          protocol: 'grpc',
+          address: { protocol: 'grpc', service: 'Svc', method: 'Old' },
           deprecated: true,
-          request: { protocol: "grpc", message: message("Req", "id"), streaming: false },
-          responses: [
-            { protocol: "grpc", message: message("Res", "ok"), streaming: false },
-          ],
+          request: { protocol: 'grpc', message: message('Req', 'id'), streaming: false },
+          responses: [{ protocol: 'grpc', message: message('Res', 'ok'), streaming: false }],
         },
       ],
     };
@@ -396,10 +374,10 @@ describe("generateGrpcSchemaCode", () => {
       generateGrpcSchemaCode([], service)
     ).grpcSchema();
 
-    expect(proto).toContain("rpc Old (Req) returns (Res) {");
-    expect(proto).toContain("option deprecated = true;");
+    expect(proto).toContain('rpc Old (Req) returns (Res) {');
+    expect(proto).toContain('option deprecated = true;');
     expect(
-      protobuf.parse(proto, { keepCase: true }).root.lookupService("Svc").methods["Old"]
+      protobuf.parse(proto, { keepCase: true }).root.lookupService('Svc').methods['Old']
     ).toBeDefined();
   });
 });

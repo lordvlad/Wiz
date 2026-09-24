@@ -26,7 +26,7 @@ export interface JsonRpcRequest {
 }
 
 export interface JsonRpcResponse {
-  jsonrpc: "2.0";
+  jsonrpc: '2.0';
   id: JsonRpcId;
   result?: unknown;
   error?: {
@@ -51,7 +51,7 @@ export interface OpenRpcHandler {
   handleRequest(request: unknown): Promise<unknown>;
 }
 function safeJsonStringify(val: unknown): string {
-  return JSON.stringify(val, (_k, v) => (typeof v === "bigint" ? String(v) : v));
+  return JSON.stringify(val, (_k, v) => (typeof v === 'bigint' ? String(v) : v));
 }
 
 export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
@@ -65,7 +65,7 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
   // Register methods from options.methods
   if (options.methods) {
     for (const [name, fn] of Object.entries(options.methods)) {
-      if (typeof fn === "function") {
+      if (typeof fn === 'function') {
         registerMethod(name, fn, options.methods);
       }
     }
@@ -77,16 +77,17 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
 
     if (Array.isArray(options.services)) {
       for (const item of options.services) {
-        if (item && typeof item === "object") {
-          const name = item.constructor && item.constructor.name !== "Object"
-            ? item.constructor.name
-            : undefined;
+        if (item && typeof item === 'object') {
+          const name =
+            item.constructor && item.constructor.name !== 'Object'
+              ? item.constructor.name
+              : undefined;
           servicesList.push({ name, instance: item as Record<string, unknown> });
         }
       }
-    } else if (typeof options.services === "object") {
+    } else if (typeof options.services === 'object') {
       for (const [key, item] of Object.entries(options.services)) {
-        if (item && typeof item === "object") {
+        if (item && typeof item === 'object') {
           servicesList.push({ name: key, instance: item as Record<string, unknown> });
         }
       }
@@ -97,14 +98,16 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
 
       // Object properties
       for (const key of Object.keys(instance)) {
-        if (typeof instance[key] === "function") keys.add(key);
+        if (typeof instance[key] === 'function') {
+          keys.add(key);
+        }
       }
 
       // Prototype methods
       let proto = Object.getPrototypeOf(instance);
       while (proto && proto !== Object.prototype) {
         for (const key of Object.getOwnPropertyNames(proto)) {
-          if (key !== "constructor" && typeof instance[key] === "function") {
+          if (key !== 'constructor' && typeof instance[key] === 'function') {
             keys.add(key);
           }
         }
@@ -113,7 +116,7 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
 
       for (const methodName of keys) {
         const member = instance[methodName];
-        if (typeof member === "function") {
+        if (typeof member === 'function') {
           const fn = (member as RpcMethodFunction).bind(instance);
           if (serviceName) {
             registerMethod(`${serviceName}.${methodName}`, fn, instance);
@@ -126,21 +129,21 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
 
   // OpenRPC 1.3 discovery document
   const openRpcDoc = options.doc ?? {
-    openrpc: "1.3.0",
+    openrpc: '1.3.0',
     info: {
-      title: options.info?.title ?? "OpenRPC API",
-      version: options.info?.version ?? "1.0.0",
+      title: options.info?.title ?? 'OpenRPC API',
+      version: options.info?.version ?? '1.0.0',
       ...(options.info?.description ? { description: options.info.description } : {}),
     },
     methods: Array.from(methodTable.keys()).map((name) => ({
       name,
       params: [],
-      result: { name: "result", schema: { type: "object" } },
+      result: { name: 'result', schema: { type: 'object' } },
     })),
   };
 
   // Standard rpc.discover method
-  registerMethod("rpc.discover", () => openRpcDoc, null);
+  registerMethod('rpc.discover', () => openRpcDoc, null);
 
   async function executeSingleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse | null> {
     // JSON-RPC treats an absent and a null id alike: both make the call a
@@ -149,20 +152,24 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
     const id = req.id ?? null;
     const isNotification = id === null;
 
-    if (!req || req.jsonrpc !== "2.0" || typeof req.method !== "string") {
-      if (isNotification) return null;
+    if (!req || req.jsonrpc !== '2.0' || typeof req.method !== 'string') {
+      if (isNotification) {
+        return null;
+      }
       return {
-        jsonrpc: "2.0",
+        jsonrpc: '2.0',
         id,
-        error: { code: -32600, message: "Invalid Request" },
+        error: { code: -32600, message: 'Invalid Request' },
       };
     }
 
     const entry = methodTable.get(req.method);
     if (!entry) {
-      if (isNotification) return null;
+      if (isNotification) {
+        return null;
+      }
       return {
-        jsonrpc: "2.0",
+        jsonrpc: '2.0',
         id,
         error: { code: -32601, message: `Method not found: ${req.method}` },
       };
@@ -172,7 +179,11 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
       let result: unknown;
       if (Array.isArray(req.params)) {
         result = await entry.fn(...req.params);
-      } else if (req.params !== undefined && req.params !== null && typeof req.params === "object") {
+      } else if (
+        req.params !== undefined &&
+        req.params !== null &&
+        typeof req.params === 'object'
+      ) {
         result = await entry.fn(req.params);
       } else if (req.params !== undefined) {
         result = await entry.fn(req.params);
@@ -180,21 +191,25 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
         result = await entry.fn();
       }
 
-      if (isNotification) return null;
+      if (isNotification) {
+        return null;
+      }
       return {
-        jsonrpc: "2.0",
+        jsonrpc: '2.0',
         id,
         result: result ?? null,
       };
     } catch (err: unknown) {
-      if (isNotification) return null;
-      const errObj = err && typeof err === "object" ? (err as Record<string, unknown>) : undefined;
+      if (isNotification) {
+        return null;
+      }
+      const errObj = err && typeof err === 'object' ? (err as Record<string, unknown>) : undefined;
       return {
-        jsonrpc: "2.0",
+        jsonrpc: '2.0',
         id,
         error: {
-          code: typeof errObj?.code === "number" ? errObj.code : -32603,
-          message: typeof errObj?.message === "string" ? errObj.message : "Internal error",
+          code: typeof errObj?.code === 'number' ? errObj.code : -32603,
+          message: typeof errObj?.message === 'string' ? errObj.message : 'Internal error',
           data: errObj?.data,
         },
       };
@@ -205,14 +220,12 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
     if (Array.isArray(request)) {
       if (request.length === 0) {
         return {
-          jsonrpc: "2.0",
+          jsonrpc: '2.0',
           id: null,
-          error: { code: -32600, message: "Invalid Request: empty batch" },
+          error: { code: -32600, message: 'Invalid Request: empty batch' },
         };
       }
-      const responses = await Promise.all(
-        request.map((r) => executeSingleRequest(r))
-      );
+      const responses = await Promise.all(request.map((r) => executeSingleRequest(r)));
       const filtered = responses.filter((r): r is JsonRpcResponse => r !== null);
       return filtered.length > 0 ? filtered : null;
     }
@@ -222,17 +235,17 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
 
   async function fetch(req: Request): Promise<Response> {
     const corsHeaders = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     };
 
-    if (req.method === "OPTIONS") {
+    if (req.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders });
     }
 
-    if (req.method !== "POST") {
-      return new Response("Method Not Allowed", {
+    if (req.method !== 'POST') {
+      return new Response('Method Not Allowed', {
         status: 405,
         headers: corsHeaders,
       });
@@ -244,13 +257,13 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
     } catch {
       return new Response(
         JSON.stringify({
-          jsonrpc: "2.0",
+          jsonrpc: '2.0',
           id: null,
-          error: { code: -32700, message: "Parse error" },
+          error: { code: -32700, message: 'Parse error' },
         }),
         {
           status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         }
       );
     }
@@ -261,13 +274,13 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
     } catch {
       return new Response(
         JSON.stringify({
-          jsonrpc: "2.0",
+          jsonrpc: '2.0',
           id: null,
-          error: { code: -32700, message: "Parse error" },
+          error: { code: -32700, message: 'Parse error' },
         }),
         {
           status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         }
       );
     }
@@ -279,7 +292,7 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
 
     return new Response(safeJsonStringify(response), {
       status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
@@ -288,27 +301,27 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
     async message(ws: WebSocketLike, msg: string | Uint8Array | ArrayBuffer) {
       try {
         let text: string;
-        if (typeof msg === "string") {
+        if (typeof msg === 'string') {
           text = msg;
         } else if (msg instanceof Uint8Array) {
           text = new TextDecoder().decode(msg);
-        } else if (msg && typeof msg === "object" && "byteLength" in msg) {
+        } else if (msg && typeof msg === 'object' && 'byteLength' in msg) {
           text = new TextDecoder().decode(new Uint8Array(msg));
         } else {
           text = String(msg);
         }
         const parsed = JSON.parse(text);
         const res = await handleRequest(parsed);
-        if (res !== null && ws && typeof ws.send === "function") {
+        if (res !== null && ws && typeof ws.send === 'function') {
           ws.send(safeJsonStringify(res));
         }
       } catch {
-        if (ws && typeof ws.send === "function") {
+        if (ws && typeof ws.send === 'function') {
           ws.send(
             JSON.stringify({
-              jsonrpc: "2.0",
+              jsonrpc: '2.0',
               id: null,
-              error: { code: -32700, message: "Parse error" },
+              error: { code: -32700, message: 'Parse error' },
             })
           );
         }
@@ -321,23 +334,26 @@ export function openRPCHandler(options: OpenRpcHandlerOptions): OpenRpcHandler {
     open(_socket: SocketLike) {},
     async data(soc: SocketLike, buf: Uint8Array | string) {
       try {
-        const text = typeof buf === "string" ? buf : new TextDecoder().decode(buf);
-        const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+        const text = typeof buf === 'string' ? buf : new TextDecoder().decode(buf);
+        const lines = text
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean);
         for (const line of lines) {
           try {
             const parsed = JSON.parse(line);
             const res = await handleRequest(parsed);
-            if (res !== null && soc && typeof soc.write === "function") {
-              soc.write(safeJsonStringify(res) + "\n");
+            if (res !== null && soc && typeof soc.write === 'function') {
+              soc.write(`${safeJsonStringify(res)}\n`);
             }
           } catch {
-            if (soc && typeof soc.write === "function") {
+            if (soc && typeof soc.write === 'function') {
               soc.write(
-                JSON.stringify({
-                  jsonrpc: "2.0",
+                `${JSON.stringify({
+                  jsonrpc: '2.0',
                   id: null,
-                  error: { code: -32700, message: "Parse error" },
-                }) + "\n"
+                  error: { code: -32700, message: 'Parse error' },
+                })}\n`
               );
             }
           }

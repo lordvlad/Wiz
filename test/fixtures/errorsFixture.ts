@@ -1,4 +1,4 @@
-import { openapiDocument } from "../../src/index.ts";
+import { openapiDocument } from '../../src/index.ts';
 
 export interface User {
   id: number;
@@ -26,6 +26,6 @@ export interface UserService {
 
 /** Resolved at build time; the test reads it from here. */
 export const document = openapiDocument<[UserService]>({
-  openapi: "3.1.0",
-  info: { title: "Users", version: "1.0.0" },
+  openapi: '3.1.0',
+  info: { title: 'Users', version: '1.0.0' },
 });

@@ -3,21 +3,7 @@ import {
   type ApiComponentsIR,
   type ApiDiagnostic,
   type ApiIR,
-} from "../ir/api.ts";
-import { extractOpenRpcIR } from "./openrpc.ts";
-import { extractAsyncApiIR } from "./asyncapi.ts";
-import type {
-  Annotated,
-  EnumMemberIR,
-  PropertyIR,
-  TypeIR,
-} from "../ir/types.ts";
-import {
-  keywordsToAnnotations,
-  keywordsToConstraints,
-  PRIMITIVE_FORMATS,
-  vendorExtensions,
-} from "../openapiDialect.ts";
+} from '../ir/api.ts';
 import type {
   HttpMethodName,
   HttpResponseIR,
@@ -27,11 +13,20 @@ import type {
   ServiceMethodIR,
   ServiceMethodRequestIR,
   ServiceMethodResponseIR,
-} from "../ir/service.ts";
+} from '../ir/service.ts';
+import type { Annotated, EnumMemberIR, PropertyIR, TypeIR } from '../ir/types.ts';
+import {
+  keywordsToAnnotations,
+  keywordsToConstraints,
+  PRIMITIVE_FORMATS,
+  vendorExtensions,
+} from '../openapiDialect.ts';
+import { extractAsyncApiIR } from './asyncapi.ts';
+import { extractOpenRpcIR } from './openrpc.ts';
 
 export interface ExtractApiOptions {
   /** Overrides sniffing; the file entry point derives it from the extension. */
-  format?: "json" | "jsonc" | "json5" | "yaml";
+  format?: 'json' | 'jsonc' | 'json5' | 'yaml';
   /** Throw on the first diagnostic instead of collecting them. Default false. */
   strict?: boolean;
 }
@@ -44,16 +39,16 @@ function nextId(ctx: Ctx): string {
 type JsonObject = Record<string, unknown>;
 
 function isObject(value: unknown): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** JSON Pointer token escaping, so `/users/{id}` survives inside a pointer. */
 function token(part: string): string {
-  return part.replace(/~/g, "~0").replace(/\//g, "~1");
+  return part.replace(/~/g, '~0').replace(/\//g, '~1');
 }
 
 interface Ctx {
-  version: "3.0" | "3.1";
+  version: '3.0' | '3.1';
   document: JsonObject;
   components: ApiComponentsIR;
   diagnostics: ApiDiagnostic[];
@@ -62,12 +57,7 @@ interface Ctx {
   ids: number;
 }
 
-function diagnose(
-  ctx: Ctx,
-  pointer: string,
-  keyword: string,
-  message: string
-): void {
+function diagnose(ctx: Ctx, pointer: string, keyword: string, message: string): void {
   if (ctx.strict) {
     throw new Error(`[wiz] ${message} at ${pointer}`);
   }
@@ -79,29 +69,31 @@ function diagnose(
  * are dropped, but never silently: each one becomes a diagnostic.
  */
 const UNSUPPORTED_SCHEMA_KEYWORDS = [
-  "not",
-  "if",
-  "then",
-  "else",
-  "patternProperties",
-  "dependentSchemas",
-  "dependentRequired",
-  "minProperties",
-  "maxProperties",
-  "contains",
-  "minContains",
-  "maxContains",
-  "unevaluatedProperties",
-  "unevaluatedItems",
-  "propertyNames",
-  "writeOnly",
-  "xml",
-  "externalDocs",
+  'not',
+  'if',
+  'then',
+  'else',
+  'patternProperties',
+  'dependentSchemas',
+  'dependentRequired',
+  'minProperties',
+  'maxProperties',
+  'contains',
+  'minContains',
+  'maxContains',
+  'unevaluatedProperties',
+  'unevaluatedItems',
+  'propertyNames',
+  'writeOnly',
+  'xml',
+  'externalDocs',
 ] as const;
 
 function reportUnsupported(schema: JsonObject, ctx: Ctx, pointer: string): void {
   for (const keyword of UNSUPPORTED_SCHEMA_KEYWORDS) {
-    if (schema[keyword] === undefined) continue;
+    if (schema[keyword] === undefined) {
+      continue;
+    }
     diagnose(
       ctx,
       `${pointer}/${keyword}`,
@@ -114,32 +106,32 @@ function reportUnsupported(schema: JsonObject, ctx: Ctx, pointer: string): void 
     diagnose(
       ctx,
       `${pointer}/discriminator/mapping`,
-      "discriminator.mapping",
-      "dropped discriminator mapping; the IR records only propertyName"
+      'discriminator.mapping',
+      'dropped discriminator mapping; the IR records only propertyName'
     );
   }
 }
 
 const NUMERIC_KEYWORDS = [
-  "minimum",
-  "maximum",
-  "exclusiveMinimum",
-  "exclusiveMaximum",
-  "multipleOf",
+  'minimum',
+  'maximum',
+  'exclusiveMinimum',
+  'exclusiveMaximum',
+  'multipleOf',
 ] as const;
-const STRING_KEYWORDS = ["minLength", "maxLength", "pattern"] as const;
-const ARRAY_KEYWORDS = ["minItems", "maxItems", "uniqueItems"] as const;
+const STRING_KEYWORDS = ['minLength', 'maxLength', 'pattern'] as const;
+const ARRAY_KEYWORDS = ['minItems', 'maxItems', 'uniqueItems'] as const;
 
 function isNumericType(type: string, raw: JsonObject): boolean {
-  return type === "number" || type === "integer" || raw.format === "int64";
+  return type === 'number' || type === 'integer' || raw.format === 'int64';
 }
 
 function isStringType(type: string): boolean {
-  return type === "string";
+  return type === 'string';
 }
 
 function isArrayType(type: string): boolean {
-  return type === "array";
+  return type === 'array';
 }
 
 function checkMismatchedConstraints(
@@ -148,13 +140,15 @@ function checkMismatchedConstraints(
   ctx: Ctx,
   pointer: string
 ): void {
-  if (!types || types.length === 0) return;
+  if (!types || types.length === 0) {
+    return;
+  }
 
   const anyNumeric = types.some((t) => isNumericType(t, raw));
   const anyString = types.some((t) => isStringType(t));
   const anyArray = types.some((t) => isArrayType(t));
 
-  const typeNameStr = types.join(" | ");
+  const typeNameStr = types.join(' | ');
 
   if (!anyNumeric) {
     for (const kw of NUMERIC_KEYWORDS) {
@@ -195,45 +189,36 @@ function checkMismatchedConstraints(
     }
   }
 }
-function readAnnotations(
-  schema: JsonObject,
-  ctx: Ctx,
-  consumedFormat: boolean
-): Annotated {
+function readAnnotations(schema: JsonObject, ctx: Ctx, consumedFormat: boolean): Annotated {
   const annotated = keywordsToAnnotations(schema);
-  const constraints = keywordsToConstraints(
-    schema,
-    ctx.version,
-    consumedFormat
-  );
-  if (constraints.length > 0) annotated.constraints = constraints;
+  const constraints = keywordsToConstraints(schema, ctx.version, consumedFormat);
+  if (constraints.length > 0) {
+    annotated.constraints = constraints;
+  }
   return annotated;
 }
 
-const SCHEMAS_REF = "#/components/schemas/";
+const SCHEMAS_REF = '#/components/schemas/';
 
 /** Structural keywords that make a sibling of `allOf` worth keeping. */
 const STRUCTURAL_KEYWORDS = [
-  "type",
-  "properties",
-  "required",
-  "additionalProperties",
-  "items",
-  "prefixItems",
-  "enum",
-  "const",
-  "oneOf",
-  "anyOf",
+  'type',
+  'properties',
+  'required',
+  'additionalProperties',
+  'items',
+  'prefixItems',
+  'enum',
+  'const',
+  'oneOf',
+  'anyOf',
 ] as const;
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function enumMembers(values: unknown[]): EnumMemberIR[] {
   return values.map((value, index) => ({
-    name:
-      typeof value === "string" && IDENTIFIER.test(value)
-        ? value
-        : `VALUE_${index}`,
+    name: typeof value === 'string' && IDENTIFIER.test(value) ? value : `VALUE_${index}`,
     value: value as string | number,
   }));
 }
@@ -242,22 +227,18 @@ function enumMembers(values: unknown[]): EnumMemberIR[] {
  * Inverse of `irToOpenApiSchema`. A `$ref` always becomes a `ref` node rather
  * than being inlined, which is what makes recursive schemas cost nothing.
  */
-function schemaToIR(
-  raw: unknown,
-  ctx: Ctx,
-  pointer: string
-): TypeIR {
+function schemaToIR(raw: unknown, ctx: Ctx, pointer: string): TypeIR {
   if (raw === undefined || raw === true) {
-    return { id: nextId(ctx), kind: "primitive", type: "unknown" };
+    return { id: nextId(ctx), kind: 'primitive', type: 'unknown' };
   }
   if (raw === false) {
-    return { id: nextId(ctx), kind: "primitive", type: "never" };
+    return { id: nextId(ctx), kind: 'primitive', type: 'never' };
   }
   if (!isObject(raw)) {
-    return { id: nextId(ctx), kind: "primitive", type: "unknown" };
+    return { id: nextId(ctx), kind: 'primitive', type: 'unknown' };
   }
 
-  if (typeof raw.$ref === "string") {
+  if (typeof raw.$ref === 'string') {
     const ref = raw.$ref;
     if (!ref.startsWith(SCHEMAS_REF) || ref.length === SCHEMAS_REF.length) {
       throw new Error(
@@ -265,57 +246,59 @@ function schemaToIR(
       );
     }
     const name = ref.slice(SCHEMAS_REF.length);
-    return { id: nextId(ctx), kind: "ref", targetId: name, name };
+    return { id: nextId(ctx), kind: 'ref', targetId: name, name };
   }
 
   reportUnsupported(raw, ctx, pointer);
 
   const declared = raw.type;
   const typeNames = Array.isArray(declared)
-    ? declared.filter((t): t is string => typeof t === "string")
-    : typeof declared === "string"
+    ? declared.filter((t): t is string => typeof t === 'string')
+    : typeof declared === 'string'
       ? [declared]
       : undefined;
-  const nonNull = typeNames?.filter((t) => t !== "null");
+  const nonNull = typeNames?.filter((t) => t !== 'null');
 
   const inferredTypes =
     nonNull && nonNull.length > 0
       ? nonNull
       : raw.properties !== undefined || raw.additionalProperties !== undefined
-        ? ["object"]
+        ? ['object']
         : raw.items !== undefined || raw.prefixItems !== undefined
-          ? ["array"]
+          ? ['array']
           : undefined;
 
   checkMismatchedConstraints(raw, inferredTypes, ctx, pointer);
   // bigint/bytes/date, so those formats are part of the type, not a constraint.
   const consumedFormat =
-    Boolean(nonNull?.includes("string")) &&
-    typeof raw.format === "string" &&
+    Boolean(nonNull?.includes('string')) &&
+    typeof raw.format === 'string' &&
     raw.format in PRIMITIVE_FORMATS;
 
   const annotated = readAnnotations(raw, ctx, consumedFormat);
 
   // `type: ["null"]` is the null type itself, not a nullable wrapper.
   if (typeNames !== undefined && nonNull!.length === 0) {
-    return { id: nextId(ctx), ...annotated, kind: "primitive", type: "null" };
+    return { id: nextId(ctx), ...annotated, kind: 'primitive', type: 'null' };
   }
 
   const nullable =
-    (ctx.version === "3.0" && raw.nullable === true) ||
+    (ctx.version === '3.0' && raw.nullable === true) ||
     (typeNames !== undefined && nonNull!.length < typeNames.length);
 
-  if (!nullable) return coreToIR(raw, ctx, pointer, nonNull, annotated);
+  if (!nullable) {
+    return coreToIR(raw, ctx, pointer, nonNull, annotated);
+  }
 
   // The annotations belong on the wrapper: that is where the generator reads
   // them from when it collapses a nullable union back into one schema.
   return {
     id: nextId(ctx),
     ...annotated,
-    kind: "union",
+    kind: 'union',
     types: [
       coreToIR(raw, ctx, pointer, nonNull, {}),
-      { id: nextId(ctx), kind: "primitive", type: "null" },
+      { id: nextId(ctx), kind: 'primitive', type: 'null' },
     ],
   };
 }
@@ -338,13 +321,13 @@ function coreToIR(
     if (STRUCTURAL_KEYWORDS.some((key) => siblings[key] !== undefined)) {
       types.push(schemaToIR(siblings, ctx, pointer));
     }
-    return { ...base, kind: "intersection", types };
+    return { ...base, kind: 'intersection', types };
   }
 
   const variants = Array.isArray(raw.oneOf)
-    ? { key: "oneOf" as const, members: raw.oneOf }
+    ? { key: 'oneOf' as const, members: raw.oneOf }
     : Array.isArray(raw.anyOf)
-      ? { key: "anyOf" as const, members: raw.anyOf }
+      ? { key: 'anyOf' as const, members: raw.anyOf }
       : undefined;
 
   if (variants) {
@@ -353,52 +336,45 @@ function coreToIR(
     );
     const discriminator = raw.discriminator;
     const propertyName =
-      variants.key === "oneOf" &&
+      variants.key === 'oneOf' &&
       isObject(discriminator) &&
-      typeof discriminator.propertyName === "string"
+      typeof discriminator.propertyName === 'string'
         ? discriminator.propertyName
         : undefined;
     return {
       ...base,
-      kind: "union",
+      kind: 'union',
       types,
       ...(propertyName ? { discriminator: { propertyName } } : {}),
     };
   }
 
   const values = Array.isArray(raw.enum) ? raw.enum : undefined;
-  const single =
-    "const" in raw
-      ? raw.const
-      : values && values.length === 1
-        ? values[0]
-        : undefined;
+  const single = 'const' in raw ? raw.const : values && values.length === 1 ? values[0] : undefined;
 
-  if ("const" in raw || (values && values.length === 1)) {
+  if ('const' in raw || (values && values.length === 1)) {
     // The generator spells a bigint literal as a string enum with `format:
     // int64`, so that pairing has to come back as a bigint.
     const value =
-      typeNames?.includes("string") &&
-      raw.format === "int64" &&
-      typeof single === "string"
+      typeNames?.includes('string') && raw.format === 'int64' && typeof single === 'string'
         ? BigInt(single)
         : (single as string | number | boolean | bigint | null);
-    return { ...base, kind: "literal", value };
+    return { ...base, kind: 'literal', value };
   }
 
   if (values && values.length > 1) {
-    const allStrings = values.every((v) => typeof v === "string");
-    const allNumbers = values.every((v) => typeof v === "number");
+    const allStrings = values.every((v) => typeof v === 'string');
+    const allNumbers = values.every((v) => typeof v === 'number');
     if (allStrings || allNumbers) {
-      return { ...base, kind: "enum", members: enumMembers(values) };
+      return { ...base, kind: 'enum', members: enumMembers(values) };
     }
     // A mixed-type enum is not an enum node; it is a union of literals.
     return {
       ...base,
-      kind: "union",
+      kind: 'union',
       types: values.map((value) => ({
         id: nextId(ctx),
-        kind: "literal" as const,
+        kind: 'literal' as const,
         value: value as string | number | boolean | bigint | null,
       })),
     };
@@ -407,10 +383,8 @@ function coreToIR(
   if (typeNames && typeNames.length > 1) {
     return {
       ...base,
-      kind: "union",
-      types: typeNames.map((name) =>
-        typeToIR({ ...raw, type: name }, ctx, pointer, name, {})
-      ),
+      kind: 'union',
+      types: typeNames.map((name) => typeToIR({ ...raw, type: name }, ctx, pointer, name, {})),
     };
   }
 
@@ -428,28 +402,27 @@ function typeToIR(
   const base = prebuilt ?? { id: nextId(ctx), ...annotated };
 
   switch (typeName) {
-    case "string": {
-      const named =
-        typeof raw.format === "string"
-          ? PRIMITIVE_FORMATS[raw.format]
-          : undefined;
-      if (named) return { ...base, kind: "primitive", type: named };
-      // 3.1 defers to JSON Schema's contentEncoding for binary.
-      if (raw.contentEncoding === "base64") {
-        return { ...base, kind: "primitive", type: "bytes" };
+    case 'string': {
+      const named = typeof raw.format === 'string' ? PRIMITIVE_FORMATS[raw.format] : undefined;
+      if (named) {
+        return { ...base, kind: 'primitive', type: named };
       }
-      return { ...base, kind: "primitive", type: "string" };
+      // 3.1 defers to JSON Schema's contentEncoding for binary.
+      if (raw.contentEncoding === 'base64') {
+        return { ...base, kind: 'primitive', type: 'bytes' };
+      }
+      return { ...base, kind: 'primitive', type: 'string' };
     }
-    case "number":
-    case "integer":
-      return { ...base, kind: "primitive", type: "number" };
-    case "boolean":
-      return { ...base, kind: "primitive", type: "boolean" };
-    case "null":
-      return { ...base, kind: "primitive", type: "null" };
-    case "array":
+    case 'number':
+    case 'integer':
+      return { ...base, kind: 'primitive', type: 'number' };
+    case 'boolean':
+      return { ...base, kind: 'primitive', type: 'boolean' };
+    case 'null':
+      return { ...base, kind: 'primitive', type: 'null' };
+    case 'array':
       return arrayToIR(raw, ctx, pointer, base);
-    case "object":
+    case 'object':
       return objectToIR(raw, ctx, pointer, base);
     case undefined: {
       if (raw.properties !== undefined || raw.additionalProperties !== undefined) {
@@ -458,16 +431,11 @@ function typeToIR(
       if (raw.items !== undefined || raw.prefixItems !== undefined) {
         return arrayToIR(raw, ctx, pointer, base);
       }
-      return { ...base, kind: "primitive", type: "unknown" };
+      return { ...base, kind: 'primitive', type: 'unknown' };
     }
     default:
-      diagnose(
-        ctx,
-        `${pointer}/type`,
-        "type",
-        `unknown schema type '${typeName}'`
-      );
-      return { ...base, kind: "primitive", type: "unknown" };
+      diagnose(ctx, `${pointer}/type`, 'type', `unknown schema type '${typeName}'`);
+      return { ...base, kind: 'primitive', type: 'unknown' };
   }
 }
 
@@ -480,21 +448,19 @@ function arrayToIR(
   if (Array.isArray(raw.prefixItems)) {
     return {
       ...base,
-      kind: "tuple",
+      kind: 'tuple',
       elements: raw.prefixItems.map((item, index) => ({
         type: schemaToIR(item, ctx, `${pointer}/prefixItems/${index}`),
         optional: false,
       })),
-      ...(isObject(raw.items)
-        ? { rest: schemaToIR(raw.items, ctx, `${pointer}/items`) }
-        : {}),
+      ...(isObject(raw.items) ? { rest: schemaToIR(raw.items, ctx, `${pointer}/items`) } : {}),
     };
   }
   // 3.0 spells a tuple as an array of item schemas.
   if (Array.isArray(raw.items)) {
     return {
       ...base,
-      kind: "tuple",
+      kind: 'tuple',
       elements: raw.items.map((item, index) => ({
         type: schemaToIR(item, ctx, `${pointer}/items/${index}`),
         optional: false,
@@ -503,7 +469,7 @@ function arrayToIR(
   }
   return {
     ...base,
-    kind: "array",
+    kind: 'array',
     element: schemaToIR(raw.items, ctx, `${pointer}/items`),
   };
 }
@@ -515,7 +481,7 @@ function objectToIR(
   base: { id: string } & Annotated
 ): TypeIR {
   const required = Array.isArray(raw.required)
-    ? raw.required.filter((n): n is string => typeof n === "string")
+    ? raw.required.filter((n): n is string => typeof n === 'string')
     : [];
   const additional = raw.additionalProperties;
 
@@ -524,36 +490,30 @@ function objectToIR(
     if (isObject(additional) || additional === true) {
       return {
         ...base,
-        kind: "record",
-        keyType: { id: nextId(ctx), kind: "primitive", type: "string" },
-        valueType: schemaToIR(
-          additional,
-          ctx,
-          `${pointer}/additionalProperties`
-        ),
+        kind: 'record',
+        keyType: { id: nextId(ctx), kind: 'primitive', type: 'string' },
+        valueType: schemaToIR(additional, ctx, `${pointer}/additionalProperties`),
       };
     }
-    return { ...base, kind: "object", properties: [] };
+    return { ...base, kind: 'object', properties: [] };
   }
 
-  const properties: PropertyIR[] = Object.entries(raw.properties).map(
-    ([name, value]) => ({
-      name,
-      type: schemaToIR(value, ctx, `${pointer}/properties/${token(name)}`),
-      optional: !required.includes(name),
-      readonly: isObject(value) && value.readOnly === true,
-    })
-  );
+  const properties: PropertyIR[] = Object.entries(raw.properties).map(([name, value]) => ({
+    name,
+    type: schemaToIR(value, ctx, `${pointer}/properties/${token(name)}`),
+    optional: !required.includes(name),
+    readonly: isObject(value) && value.readOnly === true,
+  }));
 
   return {
     ...base,
-    kind: "object",
+    kind: 'object',
     properties,
     ...(additional === undefined
       ? {}
       : {
           additionalProperties:
-            typeof additional === "boolean"
+            typeof additional === 'boolean'
               ? additional
               : schemaToIR(additional, ctx, `${pointer}/additionalProperties`),
         }),
@@ -566,14 +526,19 @@ function objectToIR(
  * Parses an OpenAPI document with Bun's own parsers. `Bun.JSONL` is
  * deliberately unused: a document is one value, not a stream of records.
  */
-export function parseApiDocument(
-  text: string,
-  format?: ExtractApiOptions["format"]
-): unknown {
-  if (format === "json") return JSON.parse(text);
-  if (format === "jsonc") return Bun.JSONC.parse(text);
-  if (format === "json5") return Bun.JSON5.parse(text);
-  if (format === "yaml") return Bun.YAML.parse(text);
+export function parseApiDocument(text: string, format?: ExtractApiOptions['format']): unknown {
+  if (format === 'json') {
+    return JSON.parse(text);
+  }
+  if (format === 'jsonc') {
+    return Bun.JSONC.parse(text);
+  }
+  if (format === 'json5') {
+    return Bun.JSON5.parse(text);
+  }
+  if (format === 'yaml') {
+    return Bun.YAML.parse(text);
+  }
 
   for (const parse of [JSON.parse, Bun.JSONC.parse, Bun.JSON5.parse]) {
     try {
@@ -587,26 +552,28 @@ export function parseApiDocument(
   return Bun.YAML.parse(text);
 }
 
-const EXTENSION_FORMATS: Record<string, ExtractApiOptions["format"]> = {
-  json: "json",
-  jsonc: "jsonc",
-  json5: "json5",
-  yaml: "yaml",
-  yml: "yaml",
+const EXTENSION_FORMATS: Record<string, ExtractApiOptions['format']> = {
+  json: 'json',
+  jsonc: 'jsonc',
+  json5: 'json5',
+  yaml: 'yaml',
+  yml: 'yaml',
 };
 
 const COMPONENT_SECTIONS = [
-  "parameters",
-  "headers",
-  "requestBodies",
-  "responses",
-  "securitySchemes",
+  'parameters',
+  'headers',
+  'requestBodies',
+  'responses',
+  'securitySchemes',
 ] as const;
 type ComponentSection = (typeof COMPONENT_SECTIONS)[number];
 
 function componentSection(ctx: Ctx, section: ComponentSection): JsonObject {
   const components = ctx.document.components;
-  if (!isObject(components)) return {};
+  if (!isObject(components)) {
+    return {};
+  }
   const entry = components[section];
   return isObject(entry) ? entry : {};
 }
@@ -632,8 +599,12 @@ function componentDefinition(
     seen.add(current);
 
     const raw = entries[current];
-    if (!isObject(raw)) return undefined;
-    if (typeof raw.$ref !== "string") return raw;
+    if (!isObject(raw)) {
+      return undefined;
+    }
+    if (typeof raw.$ref !== 'string') {
+      return raw;
+    }
 
     const prefix = `#/components/${section}/`;
     if (!raw.$ref.startsWith(prefix)) {
@@ -645,61 +616,64 @@ function componentDefinition(
   }
 }
 
-const PARAMETER_LOCATIONS = ["path", "query", "header", "cookie"] as const;
+const PARAMETER_LOCATIONS = ['path', 'query', 'header', 'cookie'] as const;
 
 function parameterToIR(
   raw: JsonObject,
   ctx: Ctx,
   pointer: string,
-  fallback: { name?: string; in?: ParameterIR["in"] } = {}
+  fallback: { name?: string; in?: ParameterIR['in'] } = {}
 ): ParameterIR | undefined {
   // The IR holds one type per parameter, not one per media type.
   if (raw.schema === undefined && raw.content !== undefined) {
     diagnose(
       ctx,
       `${pointer}/content`,
-      "content",
-      "skipped parameter declared with `content` instead of `schema`"
+      'content',
+      'skipped parameter declared with `content` instead of `schema`'
     );
     return undefined;
   }
 
-  const name = typeof raw.name === "string" ? raw.name : fallback.name;
+  const name = typeof raw.name === 'string' ? raw.name : fallback.name;
   if (name === undefined) {
-    diagnose(ctx, pointer, "name", "skipped parameter without a name");
+    diagnose(ctx, pointer, 'name', 'skipped parameter without a name');
     return undefined;
   }
 
   const location =
-    typeof raw.in === "string" &&
-    (PARAMETER_LOCATIONS as readonly string[]).includes(raw.in)
-      ? (raw.in as ParameterIR["in"])
+    typeof raw.in === 'string' && (PARAMETER_LOCATIONS as readonly string[]).includes(raw.in)
+      ? (raw.in as ParameterIR['in'])
       : fallback.in;
   if (location === undefined) {
-    diagnose(ctx, pointer, "in", `skipped parameter '${name}' without a valid \`in\``);
+    diagnose(ctx, pointer, 'in', `skipped parameter '${name}' without a valid \`in\``);
     return undefined;
   }
 
   const parameter: ParameterIR = {
     name,
     in: location,
-    required: location === "path" ? true : raw.required === true,
+    required: location === 'path' ? true : raw.required === true,
     type: schemaToIR(raw.schema, ctx, `${pointer}/schema`),
   };
-  if (typeof raw.description === "string") {
+  if (typeof raw.description === 'string') {
     parameter.description = raw.description;
   }
-  if (raw.deprecated === true) parameter.deprecated = true;
-  if (typeof raw.style === "string") parameter.style = raw.style;
-  if (typeof raw.explode === "boolean") parameter.explode = raw.explode;
+  if (raw.deprecated === true) {
+    parameter.deprecated = true;
+  }
+  if (typeof raw.style === 'string') {
+    parameter.style = raw.style;
+  }
+  if (typeof raw.explode === 'boolean') {
+    parameter.explode = raw.explode;
+  }
   return parameter;
 }
-function bodiesFor(
-  content: unknown,
-  ctx: Ctx,
-  pointer: string
-): ServiceMethodBodyIR[] {
-  if (!isObject(content)) return [];
+function bodiesFor(content: unknown, ctx: Ctx, pointer: string): ServiceMethodBodyIR[] {
+  if (!isObject(content)) {
+    return [];
+  }
   return Object.entries(content).map(([mimetype, media]) => ({
     mimetype,
     content: schemaToIR(
@@ -710,23 +684,25 @@ function bodiesFor(
   }));
 }
 
-function headersFor(
-  raw: unknown,
-  ctx: Ctx,
-  pointer: string
-): ParameterIR[] {
-  if (!isObject(raw)) return [];
+function headersFor(raw: unknown, ctx: Ctx, pointer: string): ParameterIR[] {
+  if (!isObject(raw)) {
+    return [];
+  }
   const headers: ParameterIR[] = [];
   for (const [name, value] of Object.entries(raw)) {
-    if (!isObject(value)) continue;
+    if (!isObject(value)) {
+      continue;
+    }
     const at = `${pointer}/${token(name)}`;
     const resolved = resolveHeader(name, value, ctx, at);
-    if (resolved) headers.push(resolved);
+    if (resolved) {
+      headers.push(resolved);
+    }
   }
   return headers;
 }
 
-const HEADERS_REF = "#/components/headers/";
+const HEADERS_REF = '#/components/headers/';
 
 function resolveHeader(
   name: string,
@@ -734,7 +710,7 @@ function resolveHeader(
   ctx: Ctx,
   pointer: string
 ): ParameterIR | undefined {
-  if (typeof raw.$ref === "string") {
+  if (typeof raw.$ref === 'string') {
     if (!raw.$ref.startsWith(HEADERS_REF)) {
       throw new Error(
         `[wiz] unsupported $ref '${raw.$ref}' at ${pointer}; a header may only reference ${HEADERS_REF}*`
@@ -743,83 +719,103 @@ function resolveHeader(
     const component = raw.$ref.slice(HEADERS_REF.length);
     const registered = ctx.components.headers.get(component);
     if (!registered) {
-      throw new Error(
-        `[wiz] unresolved $ref '${raw.$ref}' at ${pointer}; no such component`
-      );
+      throw new Error(`[wiz] unresolved $ref '${raw.$ref}' at ${pointer}; no such component`);
     }
     // The registry entry is shared; only the use site records the name.
     return { ...registered, name, component };
   }
-  return parameterToIR(raw, ctx, pointer, { name, in: "header" });
+  return parameterToIR(raw, ctx, pointer, { name, in: 'header' });
 }
 
 function responseToIR(
   raw: JsonObject,
   ctx: Ctx,
   pointer: string,
-  status: number | "default"
+  status: number | 'default'
 ): HttpResponseIR {
-  const response: HttpResponseIR = { protocol: "http", status };
-  if (typeof raw.description === "string") {
+  const response: HttpResponseIR = { protocol: 'http', status };
+  if (typeof raw.description === 'string') {
     response.description = raw.description;
   }
   const bodies = bodiesFor(raw.content, ctx, `${pointer}/content`);
-  if (bodies.length > 0) response.body = bodies;
+  if (bodies.length > 0) {
+    response.body = bodies;
+  }
   const headers = headersFor(raw.headers, ctx, `${pointer}/headers`);
-  if (headers.length > 0) response.headers = headers;
+  if (headers.length > 0) {
+    response.headers = headers;
+  }
   const extensions = vendorExtensions(raw);
-  if (extensions) response.extensions = extensions;
+  if (extensions) {
+    response.extensions = extensions;
+  }
   return response;
 }
 
 function buildComponents(ctx: Ctx): void {
-  for (const name of Object.keys(componentSection(ctx, "parameters"))) {
+  for (const name of Object.keys(componentSection(ctx, 'parameters'))) {
     const pointer = `#/components/parameters/${token(name)}`;
-    const raw = componentDefinition(ctx, "parameters", name);
-    if (!raw) continue;
+    const raw = componentDefinition(ctx, 'parameters', name);
+    if (!raw) {
+      continue;
+    }
     const parameter = parameterToIR(raw, ctx, pointer);
-    if (parameter) ctx.components.parameters.set(name, parameter);
+    if (parameter) {
+      ctx.components.parameters.set(name, parameter);
+    }
   }
 
-  for (const name of Object.keys(componentSection(ctx, "headers"))) {
+  for (const name of Object.keys(componentSection(ctx, 'headers'))) {
     const pointer = `#/components/headers/${token(name)}`;
-    const raw = componentDefinition(ctx, "headers", name);
-    if (!raw) continue;
-    const header = parameterToIR(raw, ctx, pointer, { name, in: "header" });
-    if (header) ctx.components.headers.set(name, header);
+    const raw = componentDefinition(ctx, 'headers', name);
+    if (!raw) {
+      continue;
+    }
+    const header = parameterToIR(raw, ctx, pointer, { name, in: 'header' });
+    if (header) {
+      ctx.components.headers.set(name, header);
+    }
   }
 
-  for (const name of Object.keys(componentSection(ctx, "requestBodies"))) {
+  for (const name of Object.keys(componentSection(ctx, 'requestBodies'))) {
     const pointer = `#/components/requestBodies/${token(name)}`;
-    const raw = componentDefinition(ctx, "requestBodies", name);
-    if (!raw) continue;
+    const raw = componentDefinition(ctx, 'requestBodies', name);
+    if (!raw) {
+      continue;
+    }
     ctx.components.requestBodies.set(name, {
       bodies: bodiesFor(raw.content, ctx, `${pointer}/content`),
       required: raw.required === true,
     });
   }
 
-  for (const name of Object.keys(componentSection(ctx, "responses"))) {
+  for (const name of Object.keys(componentSection(ctx, 'responses'))) {
     const pointer = `#/components/responses/${token(name)}`;
-    const raw = componentDefinition(ctx, "responses", name);
-    if (!raw) continue;
+    const raw = componentDefinition(ctx, 'responses', name);
+    if (!raw) {
+      continue;
+    }
     // A response component has no status of its own; the use site holds it.
-    ctx.components.responses.set(name, responseToIR(raw, ctx, pointer, "default"));
+    ctx.components.responses.set(name, responseToIR(raw, ctx, pointer, 'default'));
   }
 
-  for (const name of Object.keys(componentSection(ctx, "securitySchemes"))) {
-    const raw = componentDefinition(ctx, "securitySchemes", name);
-    if (!raw || !isObject(raw)) continue;
-    const type = typeof raw.type === "string" ? (raw.type as any) : "http";
+  for (const name of Object.keys(componentSection(ctx, 'securitySchemes'))) {
+    const raw = componentDefinition(ctx, 'securitySchemes', name);
+    if (!raw || !isObject(raw)) {
+      continue;
+    }
+    const type = typeof raw.type === 'string' ? (raw.type as any) : 'http';
     ctx.components.securitySchemes.set(name, {
       type,
-      ...(typeof raw.description === "string" ? { description: raw.description } : {}),
-      ...(typeof raw.name === "string" ? { name: raw.name } : {}),
-      ...(typeof raw.in === "string" ? { in: raw.in as any } : {}),
-      ...(typeof raw.scheme === "string" ? { scheme: raw.scheme } : {}),
-      ...(typeof raw.bearerFormat === "string" ? { bearerFormat: raw.bearerFormat } : {}),
+      ...(typeof raw.description === 'string' ? { description: raw.description } : {}),
+      ...(typeof raw.name === 'string' ? { name: raw.name } : {}),
+      ...(typeof raw.in === 'string' ? { in: raw.in as any } : {}),
+      ...(typeof raw.scheme === 'string' ? { scheme: raw.scheme } : {}),
+      ...(typeof raw.bearerFormat === 'string' ? { bearerFormat: raw.bearerFormat } : {}),
       ...(isObject(raw.flows) ? { flows: raw.flows as any } : {}),
-      ...(typeof raw.openIdConnectUrl === "string" ? { openIdConnectUrl: raw.openIdConnectUrl } : {}),
+      ...(typeof raw.openIdConnectUrl === 'string'
+        ? { openIdConnectUrl: raw.openIdConnectUrl }
+        : {}),
     });
   }
 }
@@ -827,26 +823,22 @@ function buildComponents(ctx: Ctx): void {
 /* -------------------------------------------------------------------- paths */
 
 const OPERATION_KEYS: Record<string, HttpMethodName> = {
-  get: "GET",
-  put: "PUT",
-  post: "POST",
-  delete: "DELETE",
-  options: "OPTIONS",
-  head: "HEAD",
-  patch: "PATCH",
-  trace: "TRACE",
+  get: 'GET',
+  put: 'PUT',
+  post: 'POST',
+  delete: 'DELETE',
+  options: 'OPTIONS',
+  head: 'HEAD',
+  patch: 'PATCH',
+  trace: 'TRACE',
 };
 
-const PARAMETERS_REF = "#/components/parameters/";
-const REQUEST_BODIES_REF = "#/components/requestBodies/";
-const RESPONSES_REF = "#/components/responses/";
+const PARAMETERS_REF = '#/components/parameters/';
+const REQUEST_BODIES_REF = '#/components/requestBodies/';
+const RESPONSES_REF = '#/components/responses/';
 
-function resolveParameter(
-  raw: JsonObject,
-  ctx: Ctx,
-  pointer: string
-): ParameterIR | undefined {
-  if (typeof raw.$ref === "string") {
+function resolveParameter(raw: JsonObject, ctx: Ctx, pointer: string): ParameterIR | undefined {
+  if (typeof raw.$ref === 'string') {
     if (!raw.$ref.startsWith(PARAMETERS_REF)) {
       throw new Error(
         `[wiz] unsupported $ref '${raw.$ref}' at ${pointer}; a parameter may only reference ${PARAMETERS_REF}*`
@@ -855,9 +847,7 @@ function resolveParameter(
     const component = raw.$ref.slice(PARAMETERS_REF.length);
     const registered = ctx.components.parameters.get(component);
     if (!registered) {
-      throw new Error(
-        `[wiz] unresolved $ref '${raw.$ref}' at ${pointer}; no such component`
-      );
+      throw new Error(`[wiz] unresolved $ref '${raw.$ref}' at ${pointer}; no such component`);
     }
     return { ...registered, component };
   }
@@ -870,13 +860,19 @@ function collectParameters(
   pointer: string,
   into: Map<string, ParameterIR>
 ): void {
-  if (!Array.isArray(raw)) return;
+  if (!Array.isArray(raw)) {
+    return;
+  }
   raw.forEach((entry, index) => {
-    if (!isObject(entry)) return;
+    if (!isObject(entry)) {
+      return;
+    }
     const parameter = resolveParameter(entry, ctx, `${pointer}/${index}`);
     // An operation parameter replaces a path-item one of the same name and
     // location, and keeps the path-item's position in the merged order.
-    if (parameter) into.set(`${parameter.in}\u0000${parameter.name}`, parameter);
+    if (parameter) {
+      into.set(`${parameter.in}\u0000${parameter.name}`, parameter);
+    }
   });
 }
 
@@ -887,21 +883,18 @@ function requestToIR(
   pathPointer: string,
   pointer: string
 ): ServiceMethodRequestIR {
-  const request: ServiceMethodRequestIR = { protocol: "http" };
+  const request: ServiceMethodRequestIR = { protocol: 'http' };
 
   const merged = new Map<string, ParameterIR>();
-  collectParameters(
-    pathItem.parameters,
-    ctx,
-    `${pathPointer}/parameters`,
-    merged
-  );
+  collectParameters(pathItem.parameters, ctx, `${pathPointer}/parameters`, merged);
   collectParameters(operation.parameters, ctx, `${pointer}/parameters`, merged);
-  if (merged.size > 0) request.parameters = [...merged.values()];
+  if (merged.size > 0) {
+    request.parameters = [...merged.values()];
+  }
 
   const body = operation.requestBody;
   if (isObject(body)) {
-    if (typeof body.$ref === "string") {
+    if (typeof body.$ref === 'string') {
       if (!body.$ref.startsWith(REQUEST_BODIES_REF)) {
         throw new Error(
           `[wiz] unsupported $ref '${body.$ref}' at ${pointer}/requestBody; a request body may only reference ${REQUEST_BODIES_REF}*`
@@ -914,16 +907,16 @@ function requestToIR(
           `[wiz] unresolved $ref '${body.$ref}' at ${pointer}/requestBody; no such component`
         );
       }
-      if (registered.bodies.length > 0) request.body = registered.bodies;
+      if (registered.bodies.length > 0) {
+        request.body = registered.bodies;
+      }
       request.bodyRequired = registered.required;
       request.bodyComponent = component;
     } else {
-      const bodies = bodiesFor(
-        body.content,
-        ctx,
-        `${pointer}/requestBody/content`
-      );
-      if (bodies.length > 0) request.body = bodies;
+      const bodies = bodiesFor(body.content, ctx, `${pointer}/requestBody/content`);
+      if (bodies.length > 0) {
+        request.body = bodies;
+      }
       // OpenAPI's own default; the generator's output default is separate.
       request.bodyRequired = body.required === true;
     }
@@ -938,30 +931,29 @@ function responsesToIR(
   pointer: string
 ): ServiceMethodResponseIR[] {
   const raw = operation.responses;
-  if (!isObject(raw)) return [];
+  if (!isObject(raw)) {
+    return [];
+  }
 
   const responses: ServiceMethodResponseIR[] = [];
   for (const [key, value] of Object.entries(raw)) {
-    if (!isObject(value)) continue;
+    if (!isObject(value)) {
+      continue;
+    }
     const at = `${pointer}/responses/${token(key)}`;
 
-    let status: number | "default";
-    if (key === "default") {
-      status = "default";
+    let status: number | 'default';
+    if (key === 'default') {
+      status = 'default';
     } else if (/^\d{3}$/.test(key)) {
       status = Number(key);
     } else {
       // `status: number | "default"` cannot hold a range.
-      diagnose(
-        ctx,
-        at,
-        key,
-        `skipped response with range status key '${key}'`
-      );
+      diagnose(ctx, at, key, `skipped response with range status key '${key}'`);
       continue;
     }
 
-    if (typeof value.$ref === "string") {
+    if (typeof value.$ref === 'string') {
       if (!value.$ref.startsWith(RESPONSES_REF)) {
         throw new Error(
           `[wiz] unsupported $ref '${value.$ref}' at ${at}; a response may only reference ${RESPONSES_REF}*`
@@ -970,9 +962,7 @@ function responsesToIR(
       const component = value.$ref.slice(RESPONSES_REF.length);
       const registered = ctx.components.responses.get(component);
       if (!registered) {
-        throw new Error(
-          `[wiz] unresolved $ref '${value.$ref}' at ${at}; no such component`
-        );
+        throw new Error(`[wiz] unresolved $ref '${value.$ref}' at ${at}; no such component`);
       }
       responses.push({ ...registered, status, component });
       continue;
@@ -988,71 +978,76 @@ function responsesToIR(
  * `webhooks` produce no diagnostic: `ServiceIR` deliberately excludes them.
  */
 function pathsToService(ctx: Ctx): ServiceIR {
-  const service: ServiceIR = { kind: "service", methods: [] };
+  const service: ServiceIR = { kind: 'service', methods: [] };
   const seenOperationIds = new Set<string>();
 
   const info = ctx.document.info;
   if (isObject(info)) {
-    if (typeof info.title === "string") service.name = info.title;
-    if (typeof info.version === "string") service.version = info.version;
-    if (typeof info.description === "string") {
+    if (typeof info.title === 'string') {
+      service.name = info.title;
+    }
+    if (typeof info.version === 'string') {
+      service.version = info.version;
+    }
+    if (typeof info.description === 'string') {
       service.description = info.description;
     }
   }
-  if (typeof ctx.document["x-package"] === "string") {
-    service.package = ctx.document["x-package"] as string;
+  if (typeof ctx.document['x-package'] === 'string') {
+    service.package = ctx.document['x-package'] as string;
   }
-  if (typeof ctx.document["x-service"] === "string") {
-    service.name = ctx.document["x-service"] as string;
+  if (typeof ctx.document['x-service'] === 'string') {
+    service.name = ctx.document['x-service'] as string;
   }
 
   const paths = ctx.document.paths;
-  if (!isObject(paths)) return service;
+  if (!isObject(paths)) {
+    return service;
+  }
 
   for (const [path, pathItem] of Object.entries(paths)) {
-    if (!isObject(pathItem)) continue;
+    if (!isObject(pathItem)) {
+      continue;
+    }
     const pathPointer = `#/paths/${token(path)}`;
 
     for (const [key, operation] of Object.entries(pathItem)) {
       const method = OPERATION_KEYS[key];
-      if (!method || !isObject(operation)) continue;
+      if (!method || !isObject(operation)) {
+        continue;
+      }
       const pointer = `${pathPointer}/${key}`;
 
       const irMethod: ServiceMethodIR = {
-        kind: "serviceMethod",
-        protocol: "http",
+        kind: 'serviceMethod',
+        protocol: 'http',
         // The path key is already OpenAPI template form.
-        address: { protocol: "http", method, path },
+        address: { protocol: 'http', method, path },
         request: requestToIR(operation, pathItem, ctx, pathPointer, pointer),
         responses: responsesToIR(operation, ctx, pointer),
       };
 
-      if (typeof operation.operationId === "string") {
+      if (typeof operation.operationId === 'string') {
         const opId = operation.operationId;
         if (seenOperationIds.has(opId)) {
-          diagnose(
-            ctx,
-            `${pointer}/operationId`,
-            "operationId",
-            `duplicate operationId '${opId}'`
-          );
+          diagnose(ctx, `${pointer}/operationId`, 'operationId', `duplicate operationId '${opId}'`);
         } else {
           seenOperationIds.add(opId);
         }
         irMethod.operationId = opId;
       }
-      if (typeof operation.summary === "string") {
+      if (typeof operation.summary === 'string') {
         irMethod.summary = operation.summary;
       }
-      if (typeof operation.description === "string") {
+      if (typeof operation.description === 'string') {
         irMethod.description = operation.description;
       }
       if (Array.isArray(operation.tags)) {
-        irMethod.tags = operation.tags.filter(
-          (t): t is string => typeof t === "string"
-        );
+        irMethod.tags = operation.tags.filter((t): t is string => typeof t === 'string');
       }
-      if (operation.deprecated === true) irMethod.deprecated = true;
+      if (operation.deprecated === true) {
+        irMethod.deprecated = true;
+      }
 
       service.methods.push(irMethod);
     }
@@ -1063,29 +1058,30 @@ function pathsToService(ctx: Ctx): ServiceIR {
 
 /* ----------------------------------------------------------------- entry */
 
-function detectVersion(document: JsonObject): "3.0" | "3.1" {
+function detectVersion(document: JsonObject): '3.0' | '3.1' {
   if (document.swagger !== undefined) {
     throw new Error(
       `[wiz] unsupported OpenAPI version '${String(document.swagger)}'; 3.0 and 3.1 are supported`
     );
   }
   const declared = document.openapi;
-  if (typeof declared === "string") {
-    if (declared.startsWith("3.0")) return "3.0";
-    if (declared.startsWith("3.1")) return "3.1";
+  if (typeof declared === 'string') {
+    if (declared.startsWith('3.0')) {
+      return '3.0';
+    }
+    if (declared.startsWith('3.1')) {
+      return '3.1';
+    }
   }
   throw new Error(
     `[wiz] unsupported OpenAPI version '${String(declared)}'; 3.0 and 3.1 are supported`
   );
 }
 
-export function extractApiIR(
-  text: string,
-  options: ExtractApiOptions = {}
-): ApiIR {
+export function extractApiIR(text: string, options: ExtractApiOptions = {}): ApiIR {
   const parsed = parseApiDocument(text, options.format);
   if (!isObject(parsed)) {
-    throw new Error("[wiz] OpenAPI document must be an object");
+    throw new Error('[wiz] OpenAPI document must be an object');
   }
   // The dialect is whichever root field the document declares. Each front end
   // re-parses the text rather than the parsed object, which costs one parse
@@ -1096,7 +1092,6 @@ export function extractApiIR(
   if (parsed.asyncapi !== undefined) {
     return extractAsyncApiIR(text, options);
   }
-
 
   const ctx: Ctx = {
     version: detectVersion(parsed),
@@ -1115,15 +1110,12 @@ export function extractApiIR(
   const schemas = isObject(components) ? components.schemas : undefined;
   if (isObject(schemas)) {
     for (const [name, schema] of Object.entries(schemas)) {
-      types.set(
-        name,
-        schemaToIR(schema, ctx, `#/components/schemas/${token(name)}`)
-      );
+      types.set(name, schemaToIR(schema, ctx, `#/components/schemas/${token(name)}`));
     }
   }
 
   return {
-    kind: "api",
+    kind: 'api',
     version: ctx.version,
     types,
     components: ctx.components,
@@ -1136,7 +1128,7 @@ export async function extractApiIRFromFile(
   path: string,
   options: ExtractApiOptions = {}
 ): Promise<ApiIR> {
-  const extension = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
+  const extension = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
   const format = options.format ?? EXTENSION_FORMATS[extension];
   return extractApiIR(await Bun.file(path).text(), { ...options, format });
 }

@@ -1,25 +1,25 @@
-import { normalizeTypeIR, type TypeIR } from "./types.ts";
+import { normalizeTypeIR, type TypeIR } from './types.ts';
 
 /**
  * Transport a service method speaks. Every address/request/response carries it
  * so those pieces stay self-describing when passed around on their own, and
  * `ServiceMethodIR` repeats it so a whole method narrows in one check.
  */
-export type Protocol = "http" | "grpc" | "openrpc" | "mcp" | "asyncapi";
+export type Protocol = 'http' | 'grpc' | 'openrpc' | 'mcp' | 'asyncapi';
 
 export type HttpMethodName =
-  | "GET"
-  | "POST"
-  | "PUT"
-  | "PATCH"
-  | "DELETE"
-  | "HEAD"
-  | "OPTIONS"
-  | "TRACE";
+  | 'GET'
+  | 'POST'
+  | 'PUT'
+  | 'PATCH'
+  | 'DELETE'
+  | 'HEAD'
+  | 'OPTIONS'
+  | 'TRACE';
 
 /** Where a method lives. The part that differs most between protocols. */
 export interface HttpAddressIR {
-  protocol: "http";
+  protocol: 'http';
   method: HttpMethodName;
   /** OpenAPI template form: `/users/{id}`, never `/users/:id`. */
   path: string;
@@ -34,7 +34,7 @@ export interface HttpAddressIR {
  * so the three parts are held apart instead of pre-joined into a string.
  */
 export interface GrpcAddressIR {
-  protocol: "grpc";
+  protocol: 'grpc';
   /** Proto package; absent for a file that declares none. */
   package?: string;
   /** The service the rpc was declared in. One file can declare several. */
@@ -43,13 +43,13 @@ export interface GrpcAddressIR {
   method: string;
 }
 export interface OpenRpcAddressIR {
-  protocol: "openrpc";
+  protocol: 'openrpc';
   package?: string;
   service?: string;
   method: string;
 }
 export interface McpAddressIR {
-  protocol: "mcp";
+  protocol: 'mcp';
   package?: string;
   service?: string;
   method?: string;
@@ -62,7 +62,7 @@ export interface McpAddressIR {
  * application takes on it, which is all the protocol puts on the wire.
  */
 export interface AsyncApiAddressIR {
-  protocol: "asyncapi";
+  protocol: 'asyncapi';
   package?: string;
   service?: string;
   channel: string;
@@ -88,7 +88,7 @@ export interface ServiceMethodBodyIR {
 /** One parameter or response header, with the component name it came from. */
 export interface ParameterIR {
   name: string;
-  in: "path" | "query" | "header" | "cookie" | "rpc";
+  in: 'path' | 'query' | 'header' | 'cookie' | 'rpc';
   /** Path parameters are always required, per the OpenAPI spec. */
   required: boolean;
   type: TypeIR;
@@ -103,7 +103,7 @@ export interface ParameterIR {
 }
 
 export interface HttpRequestIR {
-  protocol: "http";
+  protocol: 'http';
   /** Path, query, header and cookie parameters in document order. */
   parameters?: ParameterIR[];
   body?: ServiceMethodBodyIR[];
@@ -119,21 +119,21 @@ export interface HttpRequestIR {
  * request side, which makes the caller send many of them.
  */
 export interface GrpcRequestIR {
-  protocol: "grpc";
+  protocol: 'grpc';
   message: TypeIR;
   streaming: boolean;
 }
 export interface OpenRpcRequestIR {
-  protocol: "openrpc";
+  protocol: 'openrpc';
   params: ParameterIR[];
   paramsByName?: boolean;
 }
 export interface McpRequestIR {
-  protocol: "mcp";
+  protocol: 'mcp';
   input: TypeIR;
 }
 export interface AsyncApiRequestIR {
-  protocol: "asyncapi";
+  protocol: 'asyncapi';
   body?: ServiceMethodBodyIR[];
 }
 
@@ -144,11 +144,10 @@ export type ServiceMethodRequestIR =
   | McpRequestIR
   | AsyncApiRequestIR;
 
-
 export interface HttpResponseIR {
-  protocol: "http";
+  protocol: 'http';
   /** `"default"` maps to the OpenAPI catch-all response. */
-  status: number | "default";
+  status: number | 'default';
   description?: string;
   body?: ServiceMethodBodyIR[];
   headers?: ParameterIR[];
@@ -171,21 +170,21 @@ export interface HttpResponseIR {
  * exactly one of these, streaming or not.
  */
 export interface GrpcResponseIR {
-  protocol: "grpc";
+  protocol: 'grpc';
   message: TypeIR;
   streaming: boolean;
 }
 export interface OpenRpcResponseIR {
-  protocol: "openrpc";
+  protocol: 'openrpc';
   result: TypeIR;
   error?: TypeIR;
 }
 export interface McpResponseIR {
-  protocol: "mcp";
+  protocol: 'mcp';
   output?: TypeIR;
 }
 export interface AsyncApiResponseIR {
-  protocol: "asyncapi";
+  protocol: 'asyncapi';
   body?: ServiceMethodBodyIR[];
 }
 
@@ -196,14 +195,13 @@ export type ServiceMethodResponseIR =
   | McpResponseIR
   | AsyncApiResponseIR;
 
-
 /**
  * A single callable endpoint. Responses are a list rather than a TypeScript
  * union: a method genuinely has several of them at once (200 and 404 and 500),
  * so they must all be held, not chosen between.
  */
 export interface ServiceMethodIR {
-  kind: "serviceMethod";
+  kind: 'serviceMethod';
   protocol: Protocol;
   address: ServiceMethodAddressIR;
   request: ServiceMethodRequestIR;
@@ -232,30 +230,30 @@ export interface ServiceMethodIR {
  * discriminant: address, request and responses all follow from it.
  */
 export interface HttpServiceMethodIR extends ServiceMethodIR {
-  protocol: "http";
+  protocol: 'http';
   address: HttpAddressIR;
   request: HttpRequestIR;
   responses: HttpResponseIR[];
 }
 
 export interface GrpcServiceMethodIR extends ServiceMethodIR {
-  protocol: "grpc";
+  protocol: 'grpc';
   address: GrpcAddressIR;
   request: GrpcRequestIR;
   responses: GrpcResponseIR[];
 }
 export interface OpenRpcServiceMethodIR extends ServiceMethodIR {
-  protocol: "openrpc";
+  protocol: 'openrpc';
   address: OpenRpcAddressIR;
   request: OpenRpcRequestIR;
   responses: OpenRpcResponseIR[];
 }
 export interface McpToolAnnotationsIR {
-  audience?: Array<"user" | "assistant">;
+  audience?: Array<'user' | 'assistant'>;
   priority?: number;
 }
 export interface McpServiceMethodIR extends ServiceMethodIR {
-  protocol: "mcp";
+  protocol: 'mcp';
   address: McpAddressIR;
   title?: string;
   annotations?: McpToolAnnotationsIR;
@@ -263,40 +261,28 @@ export interface McpServiceMethodIR extends ServiceMethodIR {
   responses: McpResponseIR[];
 }
 export interface AsyncApiServiceMethodIR extends ServiceMethodIR {
-  protocol: "asyncapi";
+  protocol: 'asyncapi';
   address: AsyncApiAddressIR;
   request: AsyncApiRequestIR;
   responses: AsyncApiResponseIR[];
 }
 
-
-export function isHttpMethod(
-  method: ServiceMethodIR
-): method is HttpServiceMethodIR {
-  return method.protocol === "http";
+export function isHttpMethod(method: ServiceMethodIR): method is HttpServiceMethodIR {
+  return method.protocol === 'http';
 }
 
-export function isGrpcMethod(
-  method: ServiceMethodIR
-): method is GrpcServiceMethodIR {
-  return method.protocol === "grpc";
+export function isGrpcMethod(method: ServiceMethodIR): method is GrpcServiceMethodIR {
+  return method.protocol === 'grpc';
 }
-export function isOpenRpcMethod(
-  method: ServiceMethodIR
-): method is OpenRpcServiceMethodIR {
-  return method.protocol === "openrpc";
+export function isOpenRpcMethod(method: ServiceMethodIR): method is OpenRpcServiceMethodIR {
+  return method.protocol === 'openrpc';
 }
-export function isMcpMethod(
-  method: ServiceMethodIR
-): method is McpServiceMethodIR {
-  return method.protocol === "mcp";
+export function isMcpMethod(method: ServiceMethodIR): method is McpServiceMethodIR {
+  return method.protocol === 'mcp';
 }
-export function isAsyncApiMethod(
-  method: ServiceMethodIR
-): method is AsyncApiServiceMethodIR {
-  return method.protocol === "asyncapi";
+export function isAsyncApiMethod(method: ServiceMethodIR): method is AsyncApiServiceMethodIR {
+  return method.protocol === 'asyncapi';
 }
-
 
 /**
  * A collection of methods plus the identity shared by all of them.
@@ -307,7 +293,7 @@ export function isAsyncApiMethod(
  * compile time, which is also what a gRPC or GraphQL emitter would need.
  */
 export interface ServiceIR {
-  kind: "service";
+  kind: 'service';
   name?: string;
   package?: string;
   version?: string;
@@ -316,7 +302,7 @@ export interface ServiceIR {
 }
 
 export function emptyService(): ServiceIR {
-  return { kind: "service", methods: [] };
+  return { kind: 'service', methods: [] };
 }
 
 /**
@@ -354,7 +340,7 @@ export function normalizeServiceMethod(method: ServiceMethodIR): unknown {
   // protocol's fields is how two different methods hash alike.
   if (isGrpcMethod(method)) {
     const streamed = method.responses.find(
-      (candidate): candidate is GrpcResponseIR => candidate.protocol === "grpc"
+      (candidate): candidate is GrpcResponseIR => candidate.protocol === 'grpc'
     );
 
     return {
@@ -369,15 +355,12 @@ export function normalizeServiceMethod(method: ServiceMethodIR): unknown {
         c: normalizeTypeIR(method.request.message, true),
         s: method.request.streaming,
       },
-      rs: streamed
-        ? { c: normalizeTypeIR(streamed.message, true), s: streamed.streaming }
-        : null,
+      rs: streamed ? { c: normalizeTypeIR(streamed.message, true), s: streamed.streaming } : null,
     };
   }
   if (isOpenRpcMethod(method)) {
     const openRpcResp = method.responses.find(
-      (candidate): candidate is OpenRpcResponseIR =>
-        candidate.protocol === "openrpc"
+      (candidate): candidate is OpenRpcResponseIR => candidate.protocol === 'openrpc'
     );
     return {
       a: method.address,
@@ -394,16 +377,14 @@ export function normalizeServiceMethod(method: ServiceMethodIR): unknown {
       rs: openRpcResp
         ? {
             res: normalizeTypeIR(openRpcResp.result, true),
-            err: openRpcResp.error
-              ? normalizeTypeIR(openRpcResp.error, true)
-              : null,
+            err: openRpcResp.error ? normalizeTypeIR(openRpcResp.error, true) : null,
           }
         : null,
     };
   }
   if (isMcpMethod(method)) {
     const mcpResp = method.responses.find(
-      (candidate): candidate is McpResponseIR => candidate.protocol === "mcp"
+      (candidate): candidate is McpResponseIR => candidate.protocol === 'mcp'
     );
     return {
       a: method.address,

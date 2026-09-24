@@ -1,22 +1,28 @@
-import { collectNamedTypes, type Annotated, type Constraint, type TypeIR } from "../types.ts";
-import { INTEGER_FORMATS, SAFE_INTEGER } from "../types.ts";
-import { assertValidSpecDocumentSync } from "../validators/jsonSchema.ts";
+import { collectNamedTypes, type Annotated, type Constraint, type TypeIR } from '../types.ts';
+import { INTEGER_FORMATS, SAFE_INTEGER } from '../types.ts';
+import { assertValidSpecDocumentSync } from '../validators/jsonSchema.ts';
 
 function applyConstraints(schema: Record<string, unknown>, constraints?: Constraint[]) {
-  if (!constraints) return;
+  if (!constraints) {
+    return;
+  }
   for (const c of constraints) {
     schema[c.kind] = c.value;
 
     // A width is a range, so say so. `format` alone is an annotation a
     // validator may ignore, which is how an out-of-range value slips through
     // to a codec that then narrows it.
-    if (c.kind === "format" && typeof c.value === "string") {
+    if (c.kind === 'format' && typeof c.value === 'string') {
       const range = INTEGER_FORMATS[c.value];
       if (range) {
         // Bounds a JSON number cannot state exactly are left out rather than
         // rounded: an approximate bound would reject or admit the wrong values.
-        if (range.min >= -SAFE_INTEGER) schema.minimum = Number(range.min);
-        if (range.max <= SAFE_INTEGER) schema.maximum = Number(range.max);
+        if (range.min >= -SAFE_INTEGER) {
+          schema.minimum = Number(range.min);
+        }
+        if (range.max <= SAFE_INTEGER) {
+          schema.maximum = Number(range.max);
+        }
       }
     }
   }
@@ -28,13 +34,17 @@ function applyConstraints(schema: Record<string, unknown>, constraints?: Constra
  * emitted: arbitrary JSDoc tags are not JSON Schema keywords.
  */
 function applyAnnotations(schema: Record<string, unknown>, node: Annotated) {
-  if (node.default !== undefined) schema.default = node.default;
-  if (node.examples && node.examples.length > 0) schema.examples = node.examples;
+  if (node.default !== undefined) {
+    schema.default = node.default;
+  }
+  if (node.examples && node.examples.length > 0) {
+    schema.examples = node.examples;
+  }
 }
 
 export function irToJsonSchema(
   ir: TypeIR,
-  draft: "draft-2020-12" | "draft-07"
+  draft: 'draft-2020-12' | 'draft-07'
 ): Record<string, unknown> {
   const schema: Record<string, unknown> = {};
 
@@ -43,10 +53,10 @@ export function irToJsonSchema(
   }
 
   if (ir.deprecated?.isDeprecated) {
-    if (draft === "draft-2020-12") {
+    if (draft === 'draft-2020-12') {
       schema.deprecated = true;
     } else {
-      const note = ir.deprecated.note ? `: ${ir.deprecated.note}` : "";
+      const note = ir.deprecated.note ? `: ${ir.deprecated.note}` : '';
       schema.description = schema.description
         ? `[DEPRECATED${note}] ${schema.description}`
         : `[DEPRECATED${note}]`;
@@ -57,61 +67,61 @@ export function irToJsonSchema(
   applyAnnotations(schema, ir);
 
   switch (ir.kind) {
-    case "primitive": {
+    case 'primitive': {
       switch (ir.type) {
-        case "string":
-          schema.type = "string";
+        case 'string':
+          schema.type = 'string';
           break;
-        case "number":
-          schema.type = "number";
+        case 'number':
+          schema.type = 'number';
           break;
-        case "boolean":
-          schema.type = "boolean";
+        case 'boolean':
+          schema.type = 'boolean';
           break;
-        case "bigint":
+        case 'bigint':
           // JSON numbers are doubles in practice, and `JSON.stringify` refuses
           // BigInt outright, so a 64-bit integer can only travel as a string.
           // This is the same choice proto3's canonical JSON mapping makes.
-          schema.type = "string";
-          schema.format = "int64";
-          schema.pattern = "^-?\\d+$";
+          schema.type = 'string';
+          schema.format = 'int64';
+          schema.pattern = '^-?\\d+$';
           break;
-        case "bytes":
+        case 'bytes':
           // Binary has no JSON representation; base64 is the conventional one.
-          schema.type = "string";
-          if (draft === "draft-2020-12") {
-            schema.contentEncoding = "base64";
+          schema.type = 'string';
+          if (draft === 'draft-2020-12') {
+            schema.contentEncoding = 'base64';
           } else {
-            schema.format = "byte";
+            schema.format = 'byte';
           }
           break;
-        case "date":
-          schema.type = "string";
-          schema.format = "date-time";
+        case 'date':
+          schema.type = 'string';
+          schema.format = 'date-time';
           break;
-        case "null":
-          schema.type = "null";
+        case 'null':
+          schema.type = 'null';
           break;
-        case "undefined":
-        case "void":
-        case "never":
+        case 'undefined':
+        case 'void':
+        case 'never':
           schema.not = {};
           break;
-        case "unknown":
-        case "any":
+        case 'unknown':
+        case 'any':
           break;
-        case "symbol":
-          schema.type = "string";
-          schema.title = "symbol";
+        case 'symbol':
+          schema.type = 'string';
+          schema.title = 'symbol';
           break;
       }
       break;
     }
 
-    case "literal": {
-      if (typeof ir.value === "bigint") {
-        schema.type = "string";
-        schema.format = "int64";
+    case 'literal': {
+      if (typeof ir.value === 'bigint') {
+        schema.type = 'string';
+        schema.format = 'int64';
         schema.const = ir.value.toString();
       } else {
         schema.const = ir.value;
@@ -119,13 +129,13 @@ export function irToJsonSchema(
       break;
     }
 
-    case "enum": {
+    case 'enum': {
       schema.enum = ir.members.map((m) => m.value);
       break;
     }
 
-    case "object": {
-      schema.type = "object";
+    case 'object': {
+      schema.type = 'object';
       const propertiesSchema: Record<string, unknown> = {};
       const required: string[] = [];
 
@@ -135,10 +145,10 @@ export function irToJsonSchema(
           propSchema.description = prop.description;
         }
         if (prop.deprecated?.isDeprecated) {
-          if (draft === "draft-2020-12") {
+          if (draft === 'draft-2020-12') {
             propSchema.deprecated = true;
           } else {
-            const note = prop.deprecated.note ? `: ${prop.deprecated.note}` : "";
+            const note = prop.deprecated.note ? `: ${prop.deprecated.note}` : '';
             propSchema.description = propSchema.description
               ? `[DEPRECATED${note}] ${propSchema.description}`
               : `[DEPRECATED${note}]`;
@@ -159,7 +169,7 @@ export function irToJsonSchema(
       }
 
       if (ir.additionalProperties !== undefined) {
-        if (typeof ir.additionalProperties === "boolean") {
+        if (typeof ir.additionalProperties === 'boolean') {
           schema.additionalProperties = ir.additionalProperties;
         } else {
           schema.additionalProperties = irToJsonSchema(ir.additionalProperties, draft);
@@ -168,17 +178,19 @@ export function irToJsonSchema(
       break;
     }
 
-    case "array": {
-      schema.type = "array";
+    case 'array': {
+      schema.type = 'array';
       schema.items = irToJsonSchema(ir.element, draft);
       break;
     }
 
-    case "tuple": {
-      schema.type = "array";
+    case 'tuple': {
+      schema.type = 'array';
       const requiredItems = ir.elements.findIndex((element) => element.optional);
-      if (requiredItems >= 0) schema.minItems = requiredItems;
-      if (draft === "draft-2020-12") {
+      if (requiredItems >= 0) {
+        schema.minItems = requiredItems;
+      }
+      if (draft === 'draft-2020-12') {
         if (ir.elements.length > 0) {
           schema.prefixItems = ir.elements.map((e) => irToJsonSchema(e.type, draft));
         }
@@ -202,23 +214,19 @@ export function irToJsonSchema(
       break;
     }
 
-    case "union": {
+    case 'union': {
       // Optional properties surface as `T | undefined`. Absence is already
       // encoded by omission from `required`, so an `undefined` member would
       // only contribute a vacuous `{ "not": {} }` branch.
       const present = ir.types.filter(
-        (t) =>
-          !(
-            t.kind === "primitive" &&
-            (t.type === "undefined" || t.type === "void")
-          )
+        (t) => !(t.kind === 'primitive' && (t.type === 'undefined' || t.type === 'void'))
       );
 
       if (present.length === 1) {
         return { ...schema, ...irToJsonSchema(present[0]!, draft) };
       }
 
-      if (present.length > 0 && present.every((t) => t.kind === "literal")) {
+      if (present.length > 0 && present.every((t) => t.kind === 'literal')) {
         schema.enum = present.map((t) => (t as { value: unknown }).value);
       } else if (ir.discriminator) {
         schema.oneOf = present.map((t) => irToJsonSchema(t, draft));
@@ -229,19 +237,20 @@ export function irToJsonSchema(
       break;
     }
 
-    case "intersection": {
+    case 'intersection': {
       schema.allOf = ir.types.map((t) => irToJsonSchema(t, draft));
       break;
     }
 
-    case "record": {
-      schema.type = "object";
+    case 'record': {
+      schema.type = 'object';
       schema.additionalProperties = irToJsonSchema(ir.valueType, draft);
       break;
     }
 
-    case "ref": {
-      schema.$ref = draft === "draft-2020-12" ? `#/$defs/${ir.targetId}` : `#/definitions/${ir.targetId}`;
+    case 'ref': {
+      schema.$ref =
+        draft === 'draft-2020-12' ? `#/$defs/${ir.targetId}` : `#/definitions/${ir.targetId}`;
       break;
     }
   }
@@ -251,78 +260,84 @@ export function irToJsonSchema(
 
 function collectDefsForSchema(
   ir: TypeIR,
-  draft: "draft-2020-12" | "draft-07"
+  draft: 'draft-2020-12' | 'draft-07'
 ): Record<string, unknown> | undefined {
   const defs: Record<string, unknown> = {};
   for (const [name, namedIR] of collectNamedTypes(ir)) {
-    if (namedIR.kind === "ref") continue;
-    if (name === ir.name && ir.kind !== "ref") continue;
+    if (namedIR.kind === 'ref') {
+      continue;
+    }
+    if (name === ir.name && ir.kind !== 'ref') {
+      continue;
+    }
     defs[name] = irToJsonSchema(namedIR, draft);
   }
   return Object.keys(defs).length > 0 ? defs : undefined;
 }
 
 export function generateSchemaCode(ir: TypeIR): string {
-  const defs2020 = collectDefsForSchema(ir, "draft-2020-12");
+  const defs2020 = collectDefsForSchema(ir, 'draft-2020-12');
   const schema2020 = {
-    $schema: "https://json-schema.org/draft/2020-12/schema",
-    ...irToJsonSchema(ir, "draft-2020-12"),
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    ...irToJsonSchema(ir, 'draft-2020-12'),
     ...(defs2020 ? { $defs: defs2020 } : {}),
   };
 
-  const defs07 = collectDefsForSchema(ir, "draft-07");
+  const defs07 = collectDefsForSchema(ir, 'draft-07');
   const schema07 = {
-    $schema: "http://json-schema.org/draft-07/schema#",
-    ...irToJsonSchema(ir, "draft-07"),
+    $schema: 'http://json-schema.org/draft-07/schema#',
+    ...irToJsonSchema(ir, 'draft-07'),
     ...(defs07 ? { definitions: defs07 } : {}),
   };
-  assertValidSpecDocumentSync(schema2020, "JSON Schema Draft 2020-12");
-  assertValidSpecDocumentSync(schema07, "JSON Schema Draft 07");
+  assertValidSpecDocumentSync(schema2020, 'JSON Schema Draft 2020-12');
+  assertValidSpecDocumentSync(schema07, 'JSON Schema Draft 07');
 
   return [
     `export const jsonSchema_draft2020 = ${JSON.stringify(schema2020, null, 2)};`,
     `export const jsonSchema_draft07 = ${JSON.stringify(schema07, null, 2)};`,
     `export const schema_draft2020 = jsonSchema_draft2020;`,
     `export const schema_draft07 = jsonSchema_draft07;`,
-  ].join("\n");
+  ].join('\n');
 }
 
-export function generateJsonSchemasCode(
-  types: Array<{ name: string; ir: TypeIR }>
-): string {
+export function generateJsonSchemasCode(types: Array<{ name: string; ir: TypeIR }>): string {
   const allNamedTypes = new Map<string, TypeIR>();
   for (const { name, ir } of types) {
-    if (name && ir.kind !== "ref") allNamedTypes.set(name, ir);
+    if (name && ir.kind !== 'ref') {
+      allNamedTypes.set(name, ir);
+    }
     for (const [tName, tIR] of collectNamedTypes(ir)) {
-      if (tIR.kind !== "ref") allNamedTypes.set(tName, tIR);
+      if (tIR.kind !== 'ref') {
+        allNamedTypes.set(tName, tIR);
+      }
     }
   }
 
   const defs2020: Record<string, unknown> = {};
   for (const [name, namedIR] of allNamedTypes) {
-    defs2020[name] = irToJsonSchema(namedIR, "draft-2020-12");
+    defs2020[name] = irToJsonSchema(namedIR, 'draft-2020-12');
   }
 
   const defs07: Record<string, unknown> = {};
   for (const [name, namedIR] of allNamedTypes) {
-    defs07[name] = irToJsonSchema(namedIR, "draft-07");
+    defs07[name] = irToJsonSchema(namedIR, 'draft-07');
   }
 
   const schemas2020 = {
-    $schema: "https://json-schema.org/draft/2020-12/schema",
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
     $defs: defs2020,
   };
 
   const schemas07 = {
-    $schema: "http://json-schema.org/draft-07/schema#",
+    $schema: 'http://json-schema.org/draft-07/schema#',
     definitions: defs07,
   };
 
-  assertValidSpecDocumentSync(schemas2020, "JSON Schema Draft 2020-12");
-  assertValidSpecDocumentSync(schemas07, "JSON Schema Draft 07");
+  assertValidSpecDocumentSync(schemas2020, 'JSON Schema Draft 2020-12');
+  assertValidSpecDocumentSync(schemas07, 'JSON Schema Draft 07');
 
   return [
     `export const jsonSchemas_draft2020 = ${JSON.stringify(schemas2020, null, 2)};`,
     `export const jsonSchemas_draft07 = ${JSON.stringify(schemas07, null, 2)};`,
-  ].join("\n");
+  ].join('\n');
 }

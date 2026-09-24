@@ -1,13 +1,7 @@
-import {
-  generate,
-  type GeneratedFiles,
-} from "./generators/generator.ts";
-import {
-  virtualGenerator,
-  type VirtualModuleOptions,
-} from "./generators/virtualGenerator.ts";
-import { normalizeServiceMethod } from "./ir/service.ts";
-import { fnv1a, normalizeTypeIR, type TypeIR } from "./types.ts";
+import { generate, type GeneratedFiles } from './generators/generator.ts';
+import { virtualGenerator, type VirtualModuleOptions } from './generators/virtualGenerator.ts';
+import { normalizeServiceMethod } from './ir/service.ts';
+import { fnv1a, normalizeTypeIR, type TypeIR } from './types.ts';
 
 export interface RegisteredType {
   /**
@@ -24,9 +18,7 @@ export interface RegisteredType {
 
 const TypeRegistry = new Map<string, RegisteredType>();
 
-function namedTypesKey(
-  types: Array<{ name: string; ir: TypeIR }> | undefined
-): unknown {
+function namedTypesKey(types: Array<{ name: string; ir: TypeIR }> | undefined): unknown {
   // Names are part of a schema payload's identity: they become
   // `components.schemas` keys, `$ref` targets and message names, so two
   // payloads differing only in a nested name are two modules.
@@ -74,7 +66,9 @@ export function registerType(
   const key = options ? `${typeHash}_${payloadKey(options)}` : typeHash;
 
   const existing = TypeRegistry.get(key);
-  if (existing) return existing;
+  if (existing) {
+    return existing;
+  }
 
   const registered: RegisteredType = {
     key,

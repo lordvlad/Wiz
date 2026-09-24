@@ -1,11 +1,11 @@
 // @wiz-ignore
-import { describe, expect, test } from "bun:test";
-import { generateValidatorCode } from "../src/generators/validator.ts";
-import type { ValidationError } from "../src/types.ts";
-import { evalModule, getIRForSource } from "./helpers.ts";
+import { describe, expect, test } from 'bun:test';
+import { generateValidatorCode } from '../src/generators/validator.ts';
+import type { ValidationError } from '../src/types.ts';
+import { evalModule, getIRForSource } from './helpers.ts';
 
-describe("Runtime JS Validator Generator", () => {
-  test("validates objects, primitives, and JSDoc constraints with exact error shapes", () => {
+describe('Runtime JS Validator Generator', () => {
+  test('validates objects, primitives, and JSDoc constraints with exact error shapes', () => {
     const ir = getIRForSource(
       `
       export interface Article {
@@ -21,7 +21,7 @@ describe("Runtime JS Validator Generator", () => {
         tags?: string[];
       }
     `,
-      "Article"
+      'Article'
     );
 
     const code = generateValidatorCode(ir);
@@ -32,35 +32,35 @@ describe("Runtime JS Validator Generator", () => {
 
     // Valid object
     const valid = {
-      id: "a1",
-      title: "Hello World",
+      id: 'a1',
+      title: 'Hello World',
       views: 42,
-      tags: ["news"],
+      tags: ['news'],
     };
     expect(mod.is(valid)).toBe(true);
     expect(mod.validate(valid)).toEqual([]);
 
     // Invalid object
     const invalid = {
-      title: "Hi", // minLength 5 failed
+      title: 'Hi', // minLength 5 failed
       views: -5, // minimum 0 failed
     };
     expect(mod.is(invalid)).toBe(false);
     const errors = mod.validate(invalid);
     expect(errors.length).toBeGreaterThanOrEqual(3);
 
-    const idErr = errors.find((e) => e.path === "id")!;
-    expect(idErr.message).toBe("Required property is missing");
-    expect(idErr.constraint).toBe("required");
+    const idErr = errors.find((e) => e.path === 'id')!;
+    expect(idErr.message).toBe('Required property is missing');
+    expect(idErr.constraint).toBe('required');
 
-    const titleErr = errors.find((e) => e.path === "title")!;
-    expect(titleErr.constraint).toBe("minLength");
+    const titleErr = errors.find((e) => e.path === 'title')!;
+    expect(titleErr.constraint).toBe('minLength');
 
-    const viewsErr = errors.find((e) => e.path === "views")!;
-    expect(viewsErr.constraint).toBe("minimum");
+    const viewsErr = errors.find((e) => e.path === 'views')!;
+    expect(viewsErr.constraint).toBe('minimum');
   });
 
-  test("validates Enums, Tuples, Records, and Unions", () => {
+  test('validates Enums, Tuples, Records, and Unions', () => {
     const ir = getIRForSource(
       `
       export enum Role { Admin = 1, User = 2 }
@@ -75,7 +75,7 @@ describe("Runtime JS Validator Generator", () => {
         scores: number[];
       }
     `,
-      "Profile"
+      'Profile'
     );
 
     const code = generateValidatorCode(ir);
@@ -96,7 +96,7 @@ describe("Runtime JS Validator Generator", () => {
     };
     expect(mod.is(invalid)).toBe(false);
     const errors = mod.validate(invalid);
-    expect(errors.some((e) => e.constraint === "maxItems")).toBe(true);
-    expect(errors.some((e) => e.constraint === "uniqueItems")).toBe(true);
+    expect(errors.some((e) => e.constraint === 'maxItems')).toBe(true);
+    expect(errors.some((e) => e.constraint === 'uniqueItems')).toBe(true);
   });
 });

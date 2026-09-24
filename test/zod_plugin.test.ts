@@ -1,10 +1,10 @@
+import { beforeEach, describe, expect, test } from 'bun:test';
 // @wiz-ignore
-import { plugin } from "bun";
-import { beforeEach, describe, expect, test } from "bun:test";
-import { transformSource, wizPlugin } from "../src/plugin.ts";
-import { clearTypeRegistry } from "../src/registry.ts";
-import { VIRTUAL_ENTRY } from "../src/generators/virtualGenerator.ts";
-import { silentLogger } from "../src/logger.ts";
+import { plugin } from 'bun';
+import { VIRTUAL_ENTRY } from '../src/generators/virtualGenerator.ts';
+import { silentLogger } from '../src/logger.ts';
+import { transformSource, wizPlugin } from '../src/plugin.ts';
+import { clearTypeRegistry } from '../src/registry.ts';
 
 plugin(wizPlugin());
 
@@ -19,15 +19,15 @@ const SOURCE = `
   export const schema = zodSchema<User>();
 `;
 
-const transform = (contents = SOURCE, path = "zod.ts") =>
+const transform = (contents = SOURCE, path = 'zod.ts') =>
   transformSource({ path, contents, logger: silentLogger });
 
 beforeEach(() => {
   clearTypeRegistry();
 });
 
-describe("the zodSchema callsite", () => {
-  test("becomes a call carrying the loader, so zod resolves where the file is", () => {
+describe('the zodSchema callsite', () => {
+  test('becomes a call carrying the loader, so zod resolves where the file is', () => {
     const { code } = transform();
 
     expect(code).toContain('from "./wiz-virtual/');
@@ -36,11 +36,11 @@ describe("the zodSchema callsite", () => {
     expect(code).toMatch(/__wiz_zodSchema_\w+\(\(\) => import\("zod"\)\)/);
   });
 
-  test("the module carries the zod section", () => {
+  test('the module carries the zod section', () => {
     const { modules } = transform();
-    const emitted = [...modules.values()].map((m) => m.files[VIRTUAL_ENTRY] ?? "");
+    const emitted = [...modules.values()].map((m) => m.files[VIRTUAL_ENTRY] ?? '');
 
-    expect(emitted.some((code) => code.includes("export const zodSchema"))).toBe(true);
+    expect(emitted.some((code) => code.includes('export const zodSchema'))).toBe(true);
   });
 
   test("wanting zod is part of the module's identity", () => {
@@ -56,15 +56,15 @@ describe("the zodSchema callsite", () => {
     expect(modules.size).toBe(2);
 
     const withZod = [...modules.values()].filter((m) =>
-      (m.files[VIRTUAL_ENTRY] ?? "").includes("export const zodSchema")
+      (m.files[VIRTUAL_ENTRY] ?? '').includes('export const zodSchema')
     );
     expect(withZod).toHaveLength(1);
   });
 });
 
-describe("through the real plugin", () => {
+describe('through the real plugin', () => {
   test("the emitted schema validates against the caller's own zod", async () => {
-    const mod = (await import("./fixtures/zodFixture.ts")) as {
+    const mod = (await import('./fixtures/zodFixture.ts')) as {
       userZod: Promise<{
         parse(value: unknown): unknown;
         safeParse(value: unknown): { success: boolean };
@@ -72,14 +72,14 @@ describe("through the real plugin", () => {
     };
     const schema = await mod.userZod;
 
-    expect(schema.parse({ id: "ab", tags: ["x"], kind: "a" })).toEqual({
-      id: "ab",
-      tags: ["x"],
-      kind: "a",
+    expect(schema.parse({ id: 'ab', tags: ['x'], kind: 'a' })).toEqual({
+      id: 'ab',
+      tags: ['x'],
+      kind: 'a',
     });
     // `@minLength 2` came from the JSDoc, through the IR, into the schema.
-    expect(schema.safeParse({ id: "a", tags: [], kind: "a" }).success).toBe(false);
-    expect(schema.safeParse({ id: "ab", tags: [], kind: "z" }).success).toBe(false);
-    expect(schema.safeParse({ id: "ab", tags: [], kind: "b", age: 3 }).success).toBe(true);
+    expect(schema.safeParse({ id: 'a', tags: [], kind: 'a' }).success).toBe(false);
+    expect(schema.safeParse({ id: 'ab', tags: [], kind: 'z' }).success).toBe(false);
+    expect(schema.safeParse({ id: 'ab', tags: [], kind: 'b', age: 3 }).success).toBe(true);
   });
 });

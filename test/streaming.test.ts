@@ -1,29 +1,29 @@
-import { describe, expect, test } from "bun:test";
-import { generate } from "../src/generators/generator.ts";
-import { tsClientGenerator } from "../src/generators/tsClient.ts";
-import { extractApiIR } from "../src/extractors/openapi.ts";
-import { silentLogger } from "../src/logger.ts";
+import { describe, expect, test } from 'bun:test';
+import { extractApiIR } from '../src/extractors/openapi.ts';
+import { generate } from '../src/generators/generator.ts';
+import { tsClientGenerator } from '../src/generators/tsClient.ts';
+import { silentLogger } from '../src/logger.ts';
 
-describe("HTTP Streaming and Server-Sent Events", () => {
-  test("generates async generator for text/event-stream responses", async () => {
+describe('HTTP Streaming and Server-Sent Events', () => {
+  test('generates async generator for text/event-stream responses', async () => {
     const doc = JSON.stringify({
-      openapi: "3.1.0",
-      info: { title: "StreamService", version: "1.0.0" },
+      openapi: '3.1.0',
+      info: { title: 'StreamService', version: '1.0.0' },
       paths: {
-        "/events": {
+        '/events': {
           get: {
-            operationId: "getEvents",
+            operationId: 'getEvents',
             responses: {
-              "200": {
-                description: "Event stream",
+              '200': {
+                description: 'Event stream',
                 content: {
-                  "text/event-stream": {
+                  'text/event-stream': {
                     schema: {
-                      type: "object",
-                      required: ["id", "data"],
+                      type: 'object',
+                      required: ['id', 'data'],
                       properties: {
-                        id: { type: "string" },
-                        data: { type: "string" },
+                        id: { type: 'string' },
+                        data: { type: 'string' },
                       },
                     },
                   },
@@ -35,33 +35,33 @@ describe("HTTP Streaming and Server-Sent Events", () => {
       },
     });
 
-    const ir = extractApiIR(doc, { format: "json" });
+    const ir = extractApiIR(doc, { format: 'json' });
     const files = generate(ir, tsClientGenerator, {}, silentLogger);
 
-    const apiSource = files["api.ts"]!;
-    expect(apiSource).toContain("async *getEvents(");
-    expect(apiSource).toContain("sendStream(config,");
-    expect(apiSource).toContain("AsyncIterable<GetEventsResult>");
+    const apiSource = files['api.ts']!;
+    expect(apiSource).toContain('async *getEvents(');
+    expect(apiSource).toContain('sendStream(config,');
+    expect(apiSource).toContain('AsyncIterable<GetEventsResult>');
   });
 
-  test("yields SSE stream events correctly at runtime", async () => {
+  test('yields SSE stream events correctly at runtime', async () => {
     const doc = JSON.stringify({
-      openapi: "3.1.0",
-      info: { title: "StreamService", version: "1.0.0" },
+      openapi: '3.1.0',
+      info: { title: 'StreamService', version: '1.0.0' },
       paths: {
-        "/events": {
+        '/events': {
           get: {
-            operationId: "getEvents",
+            operationId: 'getEvents',
             responses: {
-              "200": {
-                description: "Event stream",
+              '200': {
+                description: 'Event stream',
                 content: {
-                  "text/event-stream": {
+                  'text/event-stream': {
                     schema: {
-                      type: "object",
-                      required: ["count"],
+                      type: 'object',
+                      required: ['count'],
                       properties: {
-                        count: { type: "number" },
+                        count: { type: 'number' },
                       },
                     },
                   },
@@ -73,7 +73,7 @@ describe("HTTP Streaming and Server-Sent Events", () => {
       },
     });
 
-    const ir = extractApiIR(doc, { format: "json" });
+    const ir = extractApiIR(doc, { format: 'json' });
     const files = generate(ir, tsClientGenerator, {}, silentLogger);
 
     const ssePayload = 'data: {"count": 1}\n\ndata: {"count": 2}\n\ndata: [DONE]\n\n';
@@ -87,17 +87,17 @@ describe("HTTP Streaming and Server-Sent Events", () => {
         }),
         {
           status: 200,
-          headers: { "content-type": "text/event-stream" },
+          headers: { 'content-type': 'text/event-stream' },
         }
       );
 
     // Dynamic import to test generated in-memory client module
     const mod = await import(
-      `data:text/javascript;base64,${Buffer.from(files["api.ts"]!).toString("base64")}`
+      `data:text/javascript;base64,${Buffer.from(files['api.ts']!).toString('base64')}`
     );
 
     const client = mod.createClient({
-      baseUrl: "https://api.example.com",
+      baseUrl: 'https://api.example.com',
       transport: customFetch,
     });
 

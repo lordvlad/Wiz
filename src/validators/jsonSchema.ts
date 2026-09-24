@@ -1,27 +1,17 @@
-import openRpc13Schema from "../../schemas/openrpc-1.3.json";
-import asyncApi26Schema from "../../schemas/asyncapi-2.6.json";
-import asyncApi30Schema from "../../schemas/asyncapi-3.0.json";
-import openApi30Schema from "../../schemas/openapi-3.0.json";
-import openApi31Schema from "../../schemas/openapi-3.1.json";
-import mcpSchema from "../../schemas/mcp-2024-11-05.json";
-
-import { generateValidationBlock } from "../generators/validator.ts";
-import type { TypeIR } from "../ir/types.ts";
+import asyncApi26Schema from '../../schemas/asyncapi-2.6.json';
+import asyncApi30Schema from '../../schemas/asyncapi-3.0.json';
+import mcpSchema from '../../schemas/mcp-2024-11-05.json';
+import openApi30Schema from '../../schemas/openapi-3.0.json';
+import openApi31Schema from '../../schemas/openapi-3.1.json';
+import openRpc13Schema from '../../schemas/openrpc-1.3.json';
+import { generateValidationBlock } from '../generators/validator.ts';
+import type { TypeIR } from '../ir/types.ts';
 
 function isObject(val: unknown): val is Record<string, unknown> {
-  return typeof val === "object" && val !== null && !Array.isArray(val);
+  return typeof val === 'object' && val !== null && !Array.isArray(val);
 }
 
-const HTTP_METHODS = [
-  "get",
-  "put",
-  "post",
-  "delete",
-  "options",
-  "head",
-  "patch",
-  "trace",
-];
+const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'];
 
 function metaSchemaToTypeIR(rootSchema: Record<string, unknown>): TypeIR {
   const namedTypes = new Map<string, TypeIR>();
@@ -34,23 +24,26 @@ function metaSchemaToTypeIR(rootSchema: Record<string, unknown>): TypeIR {
   };
 
   function parseNode(node: unknown, visited = new Set<unknown>()): TypeIR {
-    if (node === undefined || node === true)
-      return { id: nextId(), kind: "primitive", type: "unknown" };
-    if (node === false)
-      return { id: nextId(), kind: "primitive", type: "never" };
-    if (!isObject(node))
-      return { id: nextId(), kind: "primitive", type: "unknown" };
+    if (node === undefined || node === true) {
+      return { id: nextId(), kind: 'primitive', type: 'unknown' };
+    }
+    if (node === false) {
+      return { id: nextId(), kind: 'primitive', type: 'never' };
+    }
+    if (!isObject(node)) {
+      return { id: nextId(), kind: 'primitive', type: 'unknown' };
+    }
 
-    if (typeof node.$ref === "string") {
+    if (typeof node.$ref === 'string') {
       const refStr = String(node.$ref);
       let targetName: string | null = null;
-      if (refStr.startsWith("#/definitions/")) {
-        targetName = refStr.slice("#/definitions/".length);
-      } else if (refStr.startsWith("#/$defs/")) {
-        targetName = refStr.slice("#/$defs/".length);
-      } else if (refStr.includes("/") && !refStr.startsWith("http")) {
-        const parts = refStr.split("/");
-        targetName = parts[parts.length - 1]!.replace(".json", "");
+      if (refStr.startsWith('#/definitions/')) {
+        targetName = refStr.slice('#/definitions/'.length);
+      } else if (refStr.startsWith('#/$defs/')) {
+        targetName = refStr.slice('#/$defs/'.length);
+      } else if (refStr.includes('/') && !refStr.startsWith('http')) {
+        const parts = refStr.split('/');
+        targetName = parts[parts.length - 1]!.replace('.json', '');
       }
 
       if (targetName) {
@@ -59,7 +52,7 @@ function metaSchemaToTypeIR(rootSchema: Record<string, unknown>): TypeIR {
           if (targetDef) {
             const placeholder: TypeIR = {
               id: targetName,
-              kind: "ref",
+              kind: 'ref',
               targetId: targetName,
               name: targetName,
             };
@@ -68,22 +61,28 @@ function metaSchemaToTypeIR(rootSchema: Record<string, unknown>): TypeIR {
             namedTypes.set(targetName, parsedTarget);
           }
         }
-        return { id: nextId(), kind: "ref", targetId: targetName, name: targetName };
+        return { id: nextId(), kind: 'ref', targetId: targetName, name: targetName };
       }
-      return { id: nextId(), kind: "primitive", type: "unknown" };
+      return { id: nextId(), kind: 'primitive', type: 'unknown' };
     }
     if (Array.isArray(node.enum) && node.enum.length > 0) {
       const values = node.enum as Array<string | number | boolean | null>;
       return {
         id: nextId(),
-        kind: "union",
-        types: values.map((v) => ({ id: nextId(), kind: "literal", value: v })),
+        kind: 'union',
+        types: values.map((v) => ({ id: nextId(), kind: 'literal', value: v })),
       };
     }
-    if ("const" in node && (typeof node.const === "string" || typeof node.const === "number" || typeof node.const === "boolean" || node.const === null)) {
+    if (
+      'const' in node &&
+      (typeof node.const === 'string' ||
+        typeof node.const === 'number' ||
+        typeof node.const === 'boolean' ||
+        node.const === null)
+    ) {
       return {
         id: nextId(),
-        kind: "literal",
+        kind: 'literal',
         value: node.const,
       };
     }
@@ -91,38 +90,42 @@ function metaSchemaToTypeIR(rootSchema: Record<string, unknown>): TypeIR {
     if (Array.isArray(node.oneOf) && node.oneOf.length > 0) {
       return {
         id: nextId(),
-        kind: "union",
+        kind: 'union',
         types: node.oneOf.map((s) => parseNode(s, visited)),
       };
     }
     if (Array.isArray(node.anyOf) && node.anyOf.length > 0) {
       return {
         id: nextId(),
-        kind: "union",
+        kind: 'union',
         types: node.anyOf.map((s) => parseNode(s, visited)),
       };
     }
 
-    if (node.type === "string")
-      return { id: nextId(), kind: "primitive", type: "string" };
-    if (node.type === "number" || node.type === "integer")
-      return { id: nextId(), kind: "primitive", type: "number" };
-    if (node.type === "boolean")
-      return { id: nextId(), kind: "primitive", type: "boolean" };
-    if (node.type === "null")
-      return { id: nextId(), kind: "primitive", type: "null" };
+    if (node.type === 'string') {
+      return { id: nextId(), kind: 'primitive', type: 'string' };
+    }
+    if (node.type === 'number' || node.type === 'integer') {
+      return { id: nextId(), kind: 'primitive', type: 'number' };
+    }
+    if (node.type === 'boolean') {
+      return { id: nextId(), kind: 'primitive', type: 'boolean' };
+    }
+    if (node.type === 'null') {
+      return { id: nextId(), kind: 'primitive', type: 'null' };
+    }
 
-    if (node.type === "array" || Array.isArray(node.items) || isObject(node.items)) {
+    if (node.type === 'array' || Array.isArray(node.items) || isObject(node.items)) {
       const itemNode = isObject(node.items) ? node.items : {};
       return {
         id: nextId(),
-        kind: "array",
+        kind: 'array',
         element: parseNode(itemNode, visited),
       };
     }
 
     if (
-      node.type === "object" ||
+      node.type === 'object' ||
       isObject(node.properties) ||
       isObject(node.patternProperties) ||
       isObject(node.additionalProperties) ||
@@ -148,7 +151,7 @@ function metaSchemaToTypeIR(rootSchema: Record<string, unknown>): TypeIR {
 
       if (isObject(node.patternProperties)) {
         for (const [pat, patSchema] of Object.entries(node.patternProperties)) {
-          if (pat.includes("get|put|post")) {
+          if (pat.includes('get|put|post')) {
             for (const m of HTTP_METHODS) {
               properties.push({
                 name: m,
@@ -164,7 +167,7 @@ function metaSchemaToTypeIR(rootSchema: Record<string, unknown>): TypeIR {
       let recordValueType: TypeIR | null = null;
       if (isObject(node.patternProperties)) {
         const patterns = Object.entries(node.patternProperties).filter(
-          ([k]) => !k.startsWith("^x-") && !k.includes("get|put|post")
+          ([k]) => !k.startsWith('^x-') && !k.includes('get|put|post')
         );
         if (patterns.length > 0) {
           const first = patterns[0]![1];
@@ -177,8 +180,8 @@ function metaSchemaToTypeIR(rootSchema: Record<string, unknown>): TypeIR {
       if (recordValueType && properties.length === 0) {
         return {
           id: nextId(),
-          kind: "record",
-          keyType: { id: nextId(), kind: "primitive", type: "string" },
+          kind: 'record',
+          keyType: { id: nextId(), kind: 'primitive', type: 'string' },
           valueType: recordValueType,
         };
       }
@@ -186,17 +189,17 @@ function metaSchemaToTypeIR(rootSchema: Record<string, unknown>): TypeIR {
       if (recordValueType && properties.length > 0) {
         return {
           id: nextId(),
-          kind: "intersection",
+          kind: 'intersection',
           types: [
             {
               id: nextId(),
-              kind: "object",
+              kind: 'object',
               properties,
             },
             {
               id: nextId(),
-              kind: "record",
-              keyType: { id: nextId(), kind: "primitive", type: "string" },
+              kind: 'record',
+              keyType: { id: nextId(), kind: 'primitive', type: 'string' },
               valueType: recordValueType,
             },
           ],
@@ -205,12 +208,12 @@ function metaSchemaToTypeIR(rootSchema: Record<string, unknown>): TypeIR {
 
       return {
         id: nextId(),
-        kind: "object",
+        kind: 'object',
         properties,
       };
     }
 
-    return { id: nextId(), kind: "primitive", type: "unknown" };
+    return { id: nextId(), kind: 'primitive', type: 'unknown' };
   }
 
   for (const [defName, defSchema] of Object.entries(defs)) {
@@ -220,15 +223,16 @@ function metaSchemaToTypeIR(rootSchema: Record<string, unknown>): TypeIR {
   }
 
   function inlineRefs(ir: TypeIR, inlining = new Set<string>()): TypeIR {
-    if (ir.kind === "ref" && ir.targetId && namedTypes.has(ir.targetId)) {
-      if (inlining.has(ir.targetId))
-        return { id: nextId(), kind: "primitive", type: "unknown" };
+    if (ir.kind === 'ref' && ir.targetId && namedTypes.has(ir.targetId)) {
+      if (inlining.has(ir.targetId)) {
+        return { id: nextId(), kind: 'primitive', type: 'unknown' };
+      }
       const nextInlining = new Set(inlining);
       nextInlining.add(ir.targetId);
       const target = namedTypes.get(ir.targetId)!;
       return inlineRefs(target, nextInlining);
     }
-    if (ir.kind === "object") {
+    if (ir.kind === 'object') {
       return {
         ...ir,
         properties: ir.properties.map((p) => ({
@@ -237,19 +241,19 @@ function metaSchemaToTypeIR(rootSchema: Record<string, unknown>): TypeIR {
         })),
       };
     }
-    if (ir.kind === "array") {
+    if (ir.kind === 'array') {
       return {
         ...ir,
         element: inlineRefs(ir.element, inlining),
       };
     }
-    if (ir.kind === "record") {
+    if (ir.kind === 'record') {
       return {
         ...ir,
         valueType: inlineRefs(ir.valueType, inlining),
       };
     }
-    if (ir.kind === "union" || ir.kind === "intersection") {
+    if (ir.kind === 'union' || ir.kind === 'intersection') {
       return {
         ...ir,
         types: ir.types.map((t) => inlineRefs(t, inlining)),
@@ -266,9 +270,9 @@ function buildValidatorFunction(
   metaSchema: Record<string, unknown>
 ): (data: unknown) => Array<{ path: string; message: string }> {
   const ir = metaSchemaToTypeIR(metaSchema);
-  const validationBody = generateValidationBlock(ir, "arg", "path", 0);
+  const validationBody = generateValidationBlock(ir, 'arg', 'path', 0);
   const fn = new Function(
-    "arg",
+    'arg',
     `"use strict";
     const path = "";
     const __prune = false;
@@ -295,37 +299,28 @@ const validateAsyncApi30 = buildValidatorFunction(
   asyncApi30Schema as unknown as Record<string, unknown>
 );
 const validateMcp = buildValidatorFunction({
-  $ref: "#/definitions/ListToolsResult",
+  $ref: '#/definitions/ListToolsResult',
   definitions: (mcpSchema as unknown as Record<string, Record<string, unknown>>).definitions,
 });
 
-
-const JSON_SCHEMA_TYPES = [
-  "string",
-  "number",
-  "integer",
-  "boolean",
-  "object",
-  "array",
-  "null",
-];
+const JSON_SCHEMA_TYPES = ['string', 'number', 'integer', 'boolean', 'object', 'array', 'null'];
 
 const jsonSchemaMeta: Record<string, unknown> = {
-  type: "object",
+  type: 'object',
   properties: {
-    $schema: { type: "string" },
+    $schema: { type: 'string' },
     type: {
       oneOf: [
-        { type: "string", enum: JSON_SCHEMA_TYPES },
-        { type: "array", items: { type: "string", enum: JSON_SCHEMA_TYPES } },
+        { type: 'string', enum: JSON_SCHEMA_TYPES },
+        { type: 'array', items: { type: 'string', enum: JSON_SCHEMA_TYPES } },
       ],
     },
-    properties: { type: "object" },
-    required: { type: "array", items: { type: "string" } },
+    properties: { type: 'object' },
+    required: { type: 'array', items: { type: 'string' } },
     items: {},
-    prefixItems: { type: "array" },
-    $defs: { type: "object" },
-    definitions: { type: "object" },
+    prefixItems: { type: 'array' },
+    $defs: { type: 'object' },
+    definitions: { type: 'object' },
   },
 };
 const validateJsonSchema = buildValidatorFunction(jsonSchemaMeta);
@@ -335,10 +330,10 @@ export interface ValidationResult {
   errors?: string[];
 }
 
-function formatErrors(
-  errs: Array<{ path: string; message: string }>
-): ValidationResult {
-  if (errs.length === 0) return { valid: true };
+function formatErrors(errs: Array<{ path: string; message: string }>): ValidationResult {
+  if (errs.length === 0) {
+    return { valid: true };
+  }
   return {
     valid: false,
     errors: errs.map((e) => (e.path ? `${e.path}: ${e.message}` : e.message)),
@@ -348,44 +343,41 @@ function formatErrors(
 /**
  * Synchronously validates a spec document object against schema definitions.
  */
-export function validateSpecDocumentSync(
-  doc: unknown,
-  schemaHint?: string
-): ValidationResult {
+export function validateSpecDocumentSync(doc: unknown, schemaHint?: string): ValidationResult {
   if (!isObject(doc)) {
     return {
       valid: false,
-      errors: ["Document is not an object"],
+      errors: ['Document is not an object'],
     };
   }
 
-  if (schemaHint === "mcp") {
+  if (schemaHint === 'mcp') {
     return formatErrors(validateMcp(doc));
   }
 
   // Schema sniffing heuristics...
-  if ("openapi" in doc) {
+  if ('openapi' in doc) {
     const ver = String(doc.openapi);
-    if (ver.startsWith("3.1")) {
+    if (ver.startsWith('3.1')) {
       return formatErrors(validateOpenApi31(doc));
     }
     return formatErrors(validateOpenApi30(doc));
-  } else if ("openrpc" in doc) {
+  } else if ('openrpc' in doc) {
     return formatErrors(validateOpenRpc13(doc));
-  } else if ("asyncapi" in doc) {
+  } else if ('asyncapi' in doc) {
     const ver = String(doc.asyncapi);
-    if (ver.startsWith("3.")) {
+    if (ver.startsWith('3.')) {
       return formatErrors(validateAsyncApi30(doc));
     }
     return formatErrors(validateAsyncApi26(doc));
-  } else if ("$schema" in doc) {
+  } else if ('$schema' in doc) {
     // It looks like a raw JSON Schema. We validate using a basic schema-for-schemas.
     return formatErrors(validateJsonSchema(doc));
   }
 
   return {
     valid: false,
-    errors: ["Unrecognised spec document"],
+    errors: ['Unrecognised spec document'],
   };
 }
 
@@ -404,12 +396,14 @@ export async function validateSpecDocument(
  */
 export function assertValidSpecDocumentSync(
   doc: unknown,
-  contextName = "Spec",
+  contextName = 'Spec',
   schemaHint?: string
 ): void {
   const result = validateSpecDocumentSync(doc, schemaHint);
   if (!result.valid) {
-    throw new Error(`[wiz] Generated ${contextName} document is invalid: ${(result.errors ?? []).join("; ")}`);
+    throw new Error(
+      `[wiz] Generated ${contextName} document is invalid: ${(result.errors ?? []).join('; ')}`
+    );
   }
 }
 
@@ -418,9 +412,8 @@ export function assertValidSpecDocumentSync(
  */
 export async function assertValidSpecDocument(
   doc: unknown,
-  contextName = "Spec",
+  contextName = 'Spec',
   schemaHint?: string
 ): Promise<void> {
   assertValidSpecDocumentSync(doc, contextName, schemaHint);
 }
-

@@ -1,7 +1,7 @@
-import { toSnakeCase, type TypeIR } from "../types.ts";
-import { irToJsonSchema } from "./schema.ts";
-import { emptyService, isMcpMethod, type ServiceIR } from "../ir/service.ts";
-import { assertValidSpecDocumentSync } from "../validators/jsonSchema.ts";
+import { emptyService, isMcpMethod, type ServiceIR } from '../ir/service.ts';
+import { toSnakeCase, type TypeIR } from '../types.ts';
+import { assertValidSpecDocumentSync } from '../validators/jsonSchema.ts';
+import { irToJsonSchema } from './schema.ts';
 
 export interface McpGeneratorOptions {
   validate?: boolean;
@@ -13,14 +13,14 @@ export interface McpGeneratorOptions {
 }
 
 export function irToMcpInputSchema(ir: TypeIR): Record<string, unknown> {
-  const schema = irToJsonSchema(ir, "draft-2020-12");
-  if (schema.type !== "object") {
+  const schema = irToJsonSchema(ir, 'draft-2020-12');
+  if (schema.type !== 'object') {
     return {
-      type: "object",
+      type: 'object',
       properties: {
         value: schema,
       },
-      required: ["value"],
+      required: ['value'],
     };
   }
   return schema;
@@ -33,7 +33,7 @@ export interface McpToolSpec {
   inputSchema: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
   annotations?: {
-    audience?: Array<"user" | "assistant">;
+    audience?: Array<'user' | 'assistant'>;
     priority?: number;
   };
 }
@@ -56,7 +56,7 @@ export function generateMcpSchemaCode(
       const rawName = method.address.name;
       const name = hasOverride
         ? rawName
-        : rawName.includes(".")
+        : rawName.includes('.')
           ? rawName
           : pkg && svc
             ? `${pkg}.${svc}.${toSnakeCase(mName)}`
@@ -66,7 +66,7 @@ export function generateMcpSchemaCode(
       if (!toolNames.has(name)) {
         const inputSchema = irToMcpInputSchema(method.request.input);
         const outputResp = method.responses[0]?.output;
-        const outputSchema = outputResp ? irToJsonSchema(outputResp, "draft-2020-12") : undefined;
+        const outputSchema = outputResp ? irToJsonSchema(outputResp, 'draft-2020-12') : undefined;
 
         const toolSpec: McpToolSpec = {
           name,
@@ -97,7 +97,7 @@ export function generateMcpSchemaCode(
 
   if (options.validate !== false) {
     const sampleDoc = { tools: toolsList };
-    assertValidSpecDocumentSync(sampleDoc, "MCP", "mcp");
+    assertValidSpecDocumentSync(sampleDoc, 'MCP', 'mcp');
   }
 
   const buildDocument = [
@@ -112,7 +112,7 @@ export function generateMcpSchemaCode(
     `    tools: Array.from(toolsMap.values()),`,
     `  };`,
     `}`,
-  ].join("\n");
+  ].join('\n');
 
   return [
     buildDocument,
@@ -120,5 +120,5 @@ export function generateMcpSchemaCode(
     `export function mcpSchema(baseSchema = {}) {`,
     `  return buildMcpDocument(baseSchema);`,
     `}`,
-  ].join("\n");
+  ].join('\n');
 }

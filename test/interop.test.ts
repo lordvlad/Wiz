@@ -1,8 +1,8 @@
 // @wiz-ignore
-import { describe, expect, test } from "bun:test";
-import protobuf from "protobufjs";
-import { generateProtobufCode, generateProtobufSchemaCode } from "../src/generators/protobuf.ts";
-import { evalModule, getIRForSource } from "./helpers.ts";
+import { describe, expect, test } from 'bun:test';
+import protobuf from 'protobufjs';
+import { generateProtobufCode, generateProtobufSchemaCode } from '../src/generators/protobuf.ts';
+import { evalModule, getIRForSource } from './helpers.ts';
 
 /**
  * Interop against protobuf.js.
@@ -18,7 +18,7 @@ interface Codec {
 }
 
 /** wiz's codec, its `.proto` text, and protobuf.js's view of that text. */
-function pair(source: string, root = "M") {
+function pair(source: string, root = 'M') {
   const ir = getIRForSource(source, root);
   const codec = evalModule<Codec>(generateProtobufCode(ir));
   const proto = evalModule<{ protobufSchema: (o?: any) => string }>(
@@ -45,8 +45,8 @@ const asPlain = (type: protobuf.Type, bytes: Uint8Array) =>
     objects: false,
   });
 
-describe("protobuf.js reads what wiz writes", () => {
-  test("scalars, with the widths @format selects", () => {
+describe('protobuf.js reads what wiz writes', () => {
+  test('scalars, with the widths @format selects', () => {
     const { codec, type } = pair(`
       export interface M {
         /** @fieldNumber 1 */
@@ -68,11 +68,11 @@ describe("protobuf.js reads what wiz writes", () => {
       }
     `);
 
-    const value = { text: "hi", count: -7, ratio: 3.14, approx: 0.5, flag: true };
+    const value = { text: 'hi', count: -7, ratio: 3.14, approx: 0.5, flag: true };
     expect(asPlain(type, wizEncode(codec, value))).toEqual(value);
   });
 
-  test("optional fields, which used to travel as JSON text", () => {
+  test('optional fields, which used to travel as JSON text', () => {
     const { codec, type } = pair(`
       export interface M {
         /**
@@ -85,12 +85,12 @@ describe("protobuf.js reads what wiz writes", () => {
       }
     `);
 
-    expect(asPlain(type, wizEncode(codec, { n: 5, s: "hi" }))).toEqual({ n: 5, s: "hi" });
+    expect(asPlain(type, wizEncode(codec, { n: 5, s: 'hi' }))).toEqual({ n: 5, s: 'hi' });
     expect(asPlain(type, wizEncode(codec, { n: 5 }))).toEqual({ n: 5 });
     expect(asPlain(type, wizEncode(codec, {}))).toEqual({});
   });
 
-  test("64-bit integers keep their full range", () => {
+  test('64-bit integers keep their full range', () => {
     const { codec, type } = pair(`
       export interface M {
         /**
@@ -108,12 +108,12 @@ describe("protobuf.js reads what wiz writes", () => {
 
     const value = { big: 9007199254740993n, negative: -9007199254740993n };
     expect(asPlain(type, wizEncode(codec, value))).toEqual({
-      big: "9007199254740993",
-      negative: "-9007199254740993",
+      big: '9007199254740993',
+      negative: '-9007199254740993',
     });
   });
 
-  test("embedded messages, not JSON in a string field", () => {
+  test('embedded messages, not JSON in a string field', () => {
     const { codec, type } = pair(`
       export interface Inner {
         /** @fieldNumber 1 */
@@ -130,11 +130,11 @@ describe("protobuf.js reads what wiz writes", () => {
       }
     `);
 
-    const value = { inner: { a: "hi", b: 3 } };
+    const value = { inner: { a: 'hi', b: 3 } };
     expect(asPlain(type, wizEncode(codec, value))).toEqual(value);
   });
 
-  test("repeated messages", () => {
+  test('repeated messages', () => {
     const { codec, type } = pair(`
       export interface Inner {
         /** @fieldNumber 1 */
@@ -146,11 +146,11 @@ describe("protobuf.js reads what wiz writes", () => {
       }
     `);
 
-    const value = { items: [{ a: "one" }, { a: "two" }] };
+    const value = { items: [{ a: 'one' }, { a: 'two' }] };
     expect(asPlain(type, wizEncode(codec, value))).toEqual(value);
   });
 
-  test("packed repeated scalars", () => {
+  test('packed repeated scalars', () => {
     const { codec, type } = pair(`
       export interface M {
         /**
@@ -163,11 +163,11 @@ describe("protobuf.js reads what wiz writes", () => {
       }
     `);
 
-    const value = { nums: [1, 2, 300], tags: ["a", "b"] };
+    const value = { nums: [1, 2, 300], tags: ['a', 'b'] };
     expect(asPlain(type, wizEncode(codec, value))).toEqual(value);
   });
 
-  test("maps", () => {
+  test('maps', () => {
     const { codec, type } = pair(`
       export interface M {
         /**
@@ -182,7 +182,7 @@ describe("protobuf.js reads what wiz writes", () => {
     expect(asPlain(type, wizEncode(codec, value))).toEqual(value);
   });
 
-  test("bytes and instants", () => {
+  test('bytes and instants', () => {
     const { codec, type } = pair(`
       export interface M {
         /** @fieldNumber 1 */
@@ -192,13 +192,13 @@ describe("protobuf.js reads what wiz writes", () => {
       }
     `);
 
-    const at = new Date("2024-03-01T12:00:00.000Z");
+    const at = new Date('2024-03-01T12:00:00.000Z');
     const decoded = asPlain(type, wizEncode(codec, { blob: new Uint8Array([1, 2, 250]), at }));
     expect(decoded.blob).toEqual([1, 2, 250]);
     expect(decoded.at).toBe(String(at.getTime()));
   });
 
-  test("a oneof, with only the selected variant present", () => {
+  test('a oneof, with only the selected variant present', () => {
     const { codec, type } = pair(`
       type NumberedUnion<T extends Record<number, unknown>> = T[keyof T];
       export interface Circle {
@@ -227,30 +227,36 @@ describe("protobuf.js reads what wiz writes", () => {
       }
     `);
 
-    const circle = asPlain(type, wizEncode(codec, {
-      title: "a",
-      shape: { kind: "circle", radius: 2 },
-    }));
-    expect(circle).toEqual({ title: "a", circle: { kind: "circle", radius: 2 } });
+    const circle = asPlain(
+      type,
+      wizEncode(codec, {
+        title: 'a',
+        shape: { kind: 'circle', radius: 2 },
+      })
+    );
+    expect(circle).toEqual({ title: 'a', circle: { kind: 'circle', radius: 2 } });
     // protobuf.js exposes which arm is set; it must be the circle.
     expect(type.oneofs?.shape).toBeDefined();
 
-    const square = asPlain(type, wizEncode(codec, {
-      title: "b",
-      shape: { kind: "square", side: 5 },
-    }));
-    expect(square).toEqual({ title: "b", square: { kind: "square", side: 5 } });
+    const square = asPlain(
+      type,
+      wizEncode(codec, {
+        title: 'b',
+        shape: { kind: 'square', side: 5 },
+      })
+    );
+    expect(square).toEqual({ title: 'b', square: { kind: 'square', side: 5 } });
   });
 });
 
-describe("wiz reads what protobuf.js writes", () => {
+describe('wiz reads what protobuf.js writes', () => {
   const roundtrip = (source: string, value: Record<string, unknown>) => {
     const { codec, type } = pair(source);
     const bytes = type.encode(type.fromObject(value)).finish();
     return codec.decodeProto(new Uint8Array(bytes));
   };
 
-  test("scalars", () => {
+  test('scalars', () => {
     const source = `
       export interface M {
         /** @fieldNumber 1 */
@@ -266,15 +272,15 @@ describe("wiz reads what protobuf.js writes", () => {
         flag: boolean;
       }
     `;
-    expect(roundtrip(source, { text: "hi", count: -7, ratio: 3.14, flag: true })).toEqual({
-      text: "hi",
+    expect(roundtrip(source, { text: 'hi', count: -7, ratio: 3.14, flag: true })).toEqual({
+      text: 'hi',
       count: -7,
       ratio: 3.14,
       flag: true,
     });
   });
 
-  test("nested and repeated messages", () => {
+  test('nested and repeated messages', () => {
     const source = `
       export interface Inner {
         /** @fieldNumber 1 */
@@ -287,13 +293,13 @@ describe("wiz reads what protobuf.js writes", () => {
         items: Inner[];
       }
     `;
-    expect(roundtrip(source, { inner: { a: "x" }, items: [{ a: "y" }, { a: "z" }] })).toEqual({
-      inner: { a: "x" },
-      items: [{ a: "y" }, { a: "z" }],
+    expect(roundtrip(source, { inner: { a: 'x' }, items: [{ a: 'y' }, { a: 'z' }] })).toEqual({
+      inner: { a: 'x' },
+      items: [{ a: 'y' }, { a: 'z' }],
     });
   });
 
-  test("packed repeated scalars written by a conformant encoder", () => {
+  test('packed repeated scalars written by a conformant encoder', () => {
     const source = `
       export interface M {
         /**
@@ -306,7 +312,7 @@ describe("wiz reads what protobuf.js writes", () => {
     expect(roundtrip(source, { nums: [1, 2, 300] })).toEqual({ nums: [1, 2, 300] });
   });
 
-  test("maps", () => {
+  test('maps', () => {
     const source = `
       export interface M {
         /**
@@ -319,7 +325,7 @@ describe("wiz reads what protobuf.js writes", () => {
     expect(roundtrip(source, { counts: { a: 1, b: 22 } })).toEqual({ counts: { a: 1, b: 22 } });
   });
 
-  test("a oneof arm chosen by the other implementation", () => {
+  test('a oneof arm chosen by the other implementation', () => {
     const source = `
       type NumberedUnion<T extends Record<number, unknown>> = T[keyof T];
       export interface Circle {
@@ -345,8 +351,8 @@ describe("wiz reads what protobuf.js writes", () => {
         shape: Shape;
       }
     `;
-    expect(roundtrip(source, { square: { kind: "square", side: 5 } })).toEqual({
-      shape: { kind: "square", side: 5 },
+    expect(roundtrip(source, { square: { kind: 'square', side: 5 } })).toEqual({
+      shape: { kind: 'square', side: 5 },
     });
   });
 });

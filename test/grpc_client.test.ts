@@ -1,16 +1,16 @@
 // @wiz-ignore
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import protobuf from "protobufjs";
-import ts from "typescript";
-import { extractProtoIR } from "../src/extractors/proto.ts";
-import { generate } from "../src/generators/generator.ts";
-import { tsClientGenerator } from "../src/generators/tsClient.ts";
-import { silentLogger } from "../src/logger.ts";
-import { isGrpcMethod } from "../src/ir/service.ts";
-import type { ApiIR } from "../src/ir/api.ts";
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import protobuf from 'protobufjs';
+import ts from 'typescript';
+import { extractProtoIR } from '../src/extractors/proto.ts';
+import { generate } from '../src/generators/generator.ts';
+import { tsClientGenerator } from '../src/generators/tsClient.ts';
+import type { ApiIR } from '../src/ir/api.ts';
+import { isGrpcMethod } from '../src/ir/service.ts';
+import { silentLogger } from '../src/logger.ts';
 
 /**
  * The whole gRPC path, from `.proto` to a running client, checked against
@@ -66,18 +66,18 @@ beforeAll(() => {
   root = protobuf.parse(PROTO).root;
 });
 
-describe("proto ingestion agrees with protobufjs", () => {
-  test("the same messages are declared, under the same names", () => {
+describe('proto ingestion agrees with protobufjs', () => {
+  test('the same messages are declared, under the same names', () => {
     const ours = [...ir.types.keys()].filter((name) => {
       const found = ir.types.get(name);
-      return found?.kind === "object";
+      return found?.kind === 'object';
     });
 
     const theirs: string[] = [];
     const walk = (parent: protobuf.NamespaceBase) => {
       for (const nested of parent.nestedArray) {
         if (nested instanceof protobuf.Type) {
-          theirs.push(nested.fullName.replace(/^\./, ""));
+          theirs.push(nested.fullName.replace(/^\./, ''));
           walk(nested);
         } else if (nested instanceof protobuf.Namespace) {
           walk(nested);
@@ -89,9 +89,11 @@ describe("proto ingestion agrees with protobufjs", () => {
     expect(ours.sort()).toEqual(theirs.sort());
   });
 
-  test("field numbers, repetition and optionality match", () => {
+  test('field numbers, repetition and optionality match', () => {
     for (const [name, type] of ir.types) {
-      if (type.kind !== "object") continue;
+      if (type.kind !== 'object') {
+        continue;
+      }
       const theirs = root.lookupType(name);
 
       for (const property of type.properties) {
@@ -99,16 +101,20 @@ describe("proto ingestion agrees with protobufjs", () => {
         expect(field, `${name}.${property.name} exists`).toBeDefined();
         expect(property.fieldNumber).toBe(field!.id);
         // A map is repeated on the wire too, so only plain lists are compared.
-        if (field!.repeated) expect(property.type.kind).toBe("array");
-        if (field!.map) expect(property.type.kind).toBe("record");
+        if (field!.repeated) {
+          expect(property.type.kind).toBe('array');
+        }
+        if (field!.map) {
+          expect(property.type.kind).toBe('record');
+        }
       }
 
       expect(type.properties.length).toBe(Object.keys(theirs.fields).length);
     }
   });
 
-  test("every rpc matches, streaming flags included", () => {
-    const theirs = root.lookupService("pets.v1.Pets");
+  test('every rpc matches, streaming flags included', () => {
+    const theirs = root.lookupService('pets.v1.Pets');
     const ours = ir.service.methods.filter(isGrpcMethod);
 
     expect(ours.map((method) => method.address.method).sort()).toEqual(
@@ -121,39 +127,41 @@ describe("proto ingestion agrees with protobufjs", () => {
       expect(method.request.streaming).toBe(mirror.requestStream === true);
       expect(method.responses[0]!.streaming).toBe(mirror.responseStream === true);
       expect(method.request.message.name).toBe(
-        mirror.resolvedRequestType!.fullName.replace(/^\./, "")
+        mirror.resolvedRequestType!.fullName.replace(/^\./, '')
       );
       expect(method.responses[0]!.message.name).toBe(
-        mirror.resolvedResponseType!.fullName.replace(/^\./, "")
+        mirror.resolvedResponseType!.fullName.replace(/^\./, '')
       );
-      expect(method.address.package).toBe("pets.v1");
-      expect(method.address.service).toBe("Pets");
+      expect(method.address.package).toBe('pets.v1');
+      expect(method.address.service).toBe('Pets');
     }
   });
 
-  test("widths protobufjs cannot express in TypeScript are carried as constraints", () => {
-    const pet = ir.types.get("pets.v1.Pet");
-    if (pet?.kind !== "object") throw new Error("expected Pet");
+  test('widths protobufjs cannot express in TypeScript are carried as constraints', () => {
+    const pet = ir.types.get('pets.v1.Pet');
+    if (pet?.kind !== 'object') {
+      throw new Error('expected Pet');
+    }
 
     const format = (field: string) => {
       const property = pet.properties.find((candidate) => candidate.name === field);
-      return property?.type.constraints?.find((c) => c.kind === "format")?.value;
+      return property?.type.constraints?.find((c) => c.kind === 'format')?.value;
     };
 
-    expect(format("age")).toBe("int32");
-    expect(format("microchip")).toBe("int64");
+    expect(format('age')).toBe('int32');
+    expect(format('microchip')).toBe('int64');
     // A doc comment is the description, which is what reaches the model file.
-    expect(pet.description).toBe("A pet on file.");
+    expect(pet.description).toBe('A pet on file.');
   });
 });
 
-describe("emitted gRPC client", () => {
+describe('emitted gRPC client', () => {
   let directory: string;
   let apiPath: string;
 
   beforeAll(async () => {
-    directory = await mkdtemp(join(tmpdir(), "wiz-grpc-"));
-    apiPath = join(directory, "api.ts");
+    directory = await mkdtemp(join(tmpdir(), 'wiz-grpc-'));
+    apiPath = join(directory, 'api.ts');
     for (const [name, contents] of Object.entries(files)) {
       await Bun.write(join(directory, name), contents);
     }
@@ -162,54 +170,43 @@ describe("emitted gRPC client", () => {
   afterAll(async () => {
     await rm(directory, { recursive: true, force: true });
   });
-  test("the codec and the HTTP/2 transport are emitted alongside the api", () => {
-    expect(Object.keys(files).sort()).toEqual([
-      "api.ts",
-      "codec.ts",
-      "model.ts",
-      "transport.ts",
-    ]);
-    expect(files["api.ts"]).toContain('from "./codec.ts";');
-    expect(files["codec.ts"]).toContain("export function encodePets_v1_Pet(");
-    expect(files["codec.ts"]).toContain("export function decodePets_v1_Pet(");
+  test('the codec and the HTTP/2 transport are emitted alongside the api', () => {
+    expect(Object.keys(files).sort()).toEqual(['api.ts', 'codec.ts', 'model.ts', 'transport.ts']);
+    expect(files['api.ts']).toContain('from "./codec.ts";');
+    expect(files['codec.ts']).toContain('export function encodePets_v1_Pet(');
+    expect(files['codec.ts']).toContain('export function decodePets_v1_Pet(');
     // The transport is the only file that may mention node.
-    expect(files["transport.ts"]).toContain('import http2 from "node:http2";');
-    expect(files["api.ts"]).not.toContain("node:http2");
+    expect(files['transport.ts']).toContain('import http2 from "node:http2";');
+    expect(files['api.ts']).not.toContain('node:http2');
   });
 
-  test("all four streaming directions are emitted with the shape callers expect", () => {
-    const source = files["api.ts"]!;
+  test('all four streaming directions are emitted with the shape callers expect', () => {
+    const source = files['api.ts']!;
 
     // Proto names are fully qualified, so the model identifier is too, and each
     // direction's request and result carry a name of their own.
-    expect(source).toContain("export type GetPetOptions = pets_v1_GetPetRequest;");
-    expect(source).toContain("export type GetPetResult = pets_v1_Pet;");
+    expect(source).toContain('export type GetPetOptions = pets_v1_GetPetRequest;');
+    expect(source).toContain('export type GetPetResult = pets_v1_Pet;');
     expect(source).toContain(
-      "getPet(request: GetPetOptions, options?: GrpcCallOptions): Promise<GetPetResult>;"
+      'getPet(request: GetPetOptions, options?: GrpcCallOptions): Promise<GetPetResult>;'
     );
     // A server stream resolves to nothing: the result is the iterable itself.
+    expect(source).toContain('export type WatchPetsResult = AsyncIterable<pets_v1_Pet>;');
     expect(source).toContain(
-      "export type WatchPetsResult = AsyncIterable<pets_v1_Pet>;"
-    );
-    expect(source).toContain(
-      "watchPets(request: WatchPetsOptions, options?: GrpcCallOptions): WatchPetsResult;"
+      'watchPets(request: WatchPetsOptions, options?: GrpcCallOptions): WatchPetsResult;'
     );
     // Streaming in takes a stream in, whichever transport ends up carrying it.
+    expect(source).toContain('export type UploadOptions = AsyncIterable<pets_v1_Note>;');
     expect(source).toContain(
-      "export type UploadOptions = AsyncIterable<pets_v1_Note>;"
+      'upload(requests: UploadOptions, options?: GrpcCallOptions): Promise<UploadResult>;'
     );
-    expect(source).toContain(
-      "upload(requests: UploadOptions, options?: GrpcCallOptions): Promise<UploadResult>;"
-    );
-    expect(source).toContain("export type ChatOptions = AsyncIterable<pets_v1_Note>;");
-    expect(source).toContain("export type ChatResult = AsyncIterable<pets_v1_Note>;");
-    expect(source).toContain(
-      "chat(requests: ChatOptions, options?: GrpcCallOptions): ChatResult;"
-    );
+    expect(source).toContain('export type ChatOptions = AsyncIterable<pets_v1_Note>;');
+    expect(source).toContain('export type ChatResult = AsyncIterable<pets_v1_Note>;');
+    expect(source).toContain('chat(requests: ChatOptions, options?: GrpcCallOptions): ChatResult;');
   });
 
-  test("the emitted api typechecks under strict TypeScript", () => {
-    const program = ts.createProgram([apiPath, join(directory, "transport.ts")], {
+  test('the emitted api typechecks under strict TypeScript', () => {
+    const program = ts.createProgram([apiPath, join(directory, 'transport.ts')], {
       strict: true,
       noEmit: true,
       target: ts.ScriptTarget.ESNext,
@@ -217,16 +214,14 @@ describe("emitted gRPC client", () => {
       moduleResolution: ts.ModuleResolutionKind.Bundler,
       allowImportingTsExtensions: true,
       skipLibCheck: true,
-      lib: ["lib.esnext.d.ts", "lib.dom.d.ts"],
-      types: ["bun"],
+      lib: ['lib.esnext.d.ts', 'lib.dom.d.ts'],
+      types: ['bun'],
     });
 
     const diagnostics = [
       ...program.getSyntacticDiagnostics(),
       ...program.getSemanticDiagnostics(),
-    ].map((diagnostic) =>
-      ts.flattenDiagnosticMessageText(diagnostic.messageText, " ")
-    );
+    ].map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, ' '));
 
     expect(diagnostics).toEqual([]);
   });
@@ -288,20 +283,14 @@ describe("emitted gRPC client", () => {
     return out;
   };
 
-  const trailer = (status = 0, message = ""): Uint8Array =>
-    frame(
-      new TextEncoder().encode(`grpc-status: ${status}\r\ngrpc-message: ${message}\r\n`),
-      true
-    );
+  const trailer = (status = 0, message = ''): Uint8Array =>
+    frame(new TextEncoder().encode(`grpc-status: ${status}\r\ngrpc-message: ${message}\r\n`), true);
 
-  const load = async (
-    respond: (sent: Sent) => Response,
-    sent: Sent[]
-  ): Promise<ClientModule> => {
+  const load = async (respond: (sent: Sent) => Response, sent: Sent[]): Promise<ClientModule> => {
     // A generated module is an external boundary; its shape is asserted once.
     const client = (await import(apiPath)) as unknown as ClientModule;
     client.configure({
-      baseUrl: "https://grpc.test",
+      baseUrl: 'https://grpc.test',
       transport: async (url, init) => {
         const call = { url, method: init.method, headers: init.headers, body: init.body };
         sent.push(call);
@@ -310,25 +299,25 @@ describe("emitted gRPC client", () => {
       interceptors: {
         grpc: [
           (call, next) =>
-            next({ ...call, headers: { ...call.headers, authorization: "Bearer token" } }),
+            next({ ...call, headers: { ...call.headers, authorization: 'Bearer token' } }),
         ],
       },
     });
     return client;
   };
 
-  test("a unary call frames the request protobufjs can read, and reads its reply", async () => {
-    const petType = root.lookupType("pets.v1.Pet");
-    const requestType = root.lookupType("pets.v1.GetPetRequest");
+  test('a unary call frames the request protobufjs can read, and reads its reply', async () => {
+    const petType = root.lookupType('pets.v1.Pet');
+    const requestType = root.lookupType('pets.v1.GetPetRequest');
     const pet = {
-      id: "p1",
-      name: "Rex",
-      tags: ["good", "dog"],
+      id: 'p1',
+      name: 'Rex',
+      tags: ['good', 'dog'],
       age: 4,
-      microchip: "900000000000001",
+      microchip: '900000000000001',
       photo: new Uint8Array([1, 2, 3]),
       kind: 2,
-      labels: { room: "kitchen" },
+      labels: { room: 'kitchen' },
     };
 
     const sent: Sent[] = [];
@@ -336,36 +325,34 @@ describe("emitted gRPC client", () => {
       () =>
         new Response(concat(frame(petType.encode(pet).finish()), trailer()), {
           status: 200,
-          headers: { "content-type": "application/grpc-web+proto" },
+          headers: { 'content-type': 'application/grpc-web+proto' },
         }),
       sent
     );
 
-    const received = await client.getPet({ id: "p1" });
+    const received = await client.getPet({ id: 'p1' });
 
     // Our reader against protobufjs's writer.
-    expect(received.id).toBe("p1");
-    expect(received.tags).toEqual(["good", "dog"]);
+    expect(received.id).toBe('p1');
+    expect(received.tags).toEqual(['good', 'dog']);
     expect(received.age).toBe(4);
     expect(received.microchip).toBe(900000000000001n);
     expect(received.photo).toEqual(new Uint8Array([1, 2, 3]));
-    expect(received.labels).toEqual({ room: "kitchen" });
+    expect(received.labels).toEqual({ room: 'kitchen' });
 
     // Our writer against protobufjs's reader, taken off the framed request.
     const call = sent[0]!;
-    expect(call.url).toBe("https://grpc.test/pets.v1.Pets/GetPet");
-    expect(call.method).toBe("POST");
-    expect(call.headers["content-type"]).toBe("application/grpc-web+proto");
-    expect(call.headers["x-grpc-web"]).toBe("1");
+    expect(call.url).toBe('https://grpc.test/pets.v1.Pets/GetPet');
+    expect(call.method).toBe('POST');
+    expect(call.headers['content-type']).toBe('application/grpc-web+proto');
+    expect(call.headers['x-grpc-web']).toBe('1');
     // The chain applies to gRPC exactly as it does to HTTP.
-    expect(call.headers.authorization).toBe("Bearer token");
+    expect(call.headers.authorization).toBe('Bearer token');
 
     const body = call.body as Uint8Array;
     expect(body[0]).toBe(0);
-    expect(new DataView(body.buffer, body.byteOffset).getUint32(1, false)).toBe(
-      body.length - 5
-    );
-    expect(requestType.decode(body.subarray(5)).toJSON()).toEqual({ id: "p1" });
+    expect(new DataView(body.buffer, body.byteOffset).getUint32(1, false)).toBe(body.length - 5);
+    expect(requestType.decode(body.subarray(5)).toJSON()).toEqual({ id: 'p1' });
   });
 
   /**
@@ -375,10 +362,10 @@ describe("emitted gRPC client", () => {
    * how an interceptor sees a failure at all - it arrives as a throw from the
    * stream, not as a rejected result.
    */
-  test("a gRPC interceptor can retry a failed unary call", async () => {
-    const petType = root.lookupType("pets.v1.Pet");
-    const requestType = root.lookupType("pets.v1.GetPetRequest");
-    const webHeaders = { "content-type": "application/grpc-web+proto" };
+  test('a gRPC interceptor can retry a failed unary call', async () => {
+    const petType = root.lookupType('pets.v1.Pet');
+    const requestType = root.lookupType('pets.v1.GetPetRequest');
+    const webHeaders = { 'content-type': 'application/grpc-web+proto' };
 
     // The module-level client is only how the module is imported here; the
     // retrying client below answers its own calls.
@@ -389,13 +376,13 @@ describe("emitted gRPC client", () => {
 
     const sent: Sent[] = [];
     const retrying = client.createClient({
-      baseUrl: "https://grpc.test",
+      baseUrl: 'https://grpc.test',
       transport: async (url, init) => {
         sent.push({ url, method: init.method, headers: init.headers, body: init.body });
         return sent.length === 1
-          ? new Response(trailer(14, "try again"), { status: 200, headers: webHeaders })
+          ? new Response(trailer(14, 'try again'), { status: 200, headers: webHeaders })
           : new Response(
-              concat(frame(petType.encode({ id: "p1", name: "Rex" }).finish()), trailer()),
+              concat(frame(petType.encode({ id: 'p1', name: 'Rex' }).finish()), trailer()),
               { status: 200, headers: webHeaders }
             );
       },
@@ -420,14 +407,14 @@ describe("emitted gRPC client", () => {
       },
     });
 
-    const received = await retrying.getPet({ id: "p1" });
+    const received = await retrying.getPet({ id: 'p1' });
 
-    expect(received.name).toBe("Rex");
+    expect(received.name).toBe('Rex');
     expect(sent).toHaveLength(2);
     // The same request, sent twice: the array was iterated again.
     for (const call of sent) {
       expect(requestType.decode((call.body as Uint8Array).subarray(5)).toJSON()).toEqual({
-        id: "p1",
+        id: 'p1',
       });
     }
   });
@@ -444,14 +431,14 @@ describe("emitted gRPC client", () => {
   };
 
   const gzipped = async (payload: Uint8Array): Promise<Uint8Array> => {
-    const stream = new Blob([payload]).stream().pipeThrough(new CompressionStream("gzip"));
+    const stream = new Blob([payload]).stream().pipeThrough(new CompressionStream('gzip'));
     return new Uint8Array(await new Response(stream).arrayBuffer());
   };
 
-  test("a compressed reply is decompressed with the encoding the server named", async () => {
-    const petType = root.lookupType("pets.v1.Pet");
+  test('a compressed reply is decompressed with the encoding the server named', async () => {
+    const petType = root.lookupType('pets.v1.Pet');
     const body = concat(
-      compressedFrame(await gzipped(petType.encode({ id: "z", name: "Zip" }).finish())),
+      compressedFrame(await gzipped(petType.encode({ id: 'z', name: 'Zip' }).finish())),
       trailer()
     );
 
@@ -461,40 +448,42 @@ describe("emitted gRPC client", () => {
         new Response(body, {
           status: 200,
           headers: {
-            "content-type": "application/grpc-web+proto",
-            "grpc-encoding": "gzip",
+            'content-type': 'application/grpc-web+proto',
+            'grpc-encoding': 'gzip',
           },
         }),
       sent
     );
 
-    expect(await client.getPet({ id: "z" })).toMatchObject({ id: "z", name: "Zip" });
+    expect(await client.getPet({ id: 'z' })).toMatchObject({ id: 'z', name: 'Zip' });
     // Every call advertises what it can read, so a server may compress at will.
-    expect(sent[0]!.headers["grpc-accept-encoding"]).toBe("gzip, deflate, identity");
+    expect(sent[0]!.headers['grpc-accept-encoding']).toBe('gzip, deflate, identity');
   });
 
-  test("a frame flagged compressed with no encoding named is refused", async () => {
+  test('a frame flagged compressed with no encoding named is refused', async () => {
     const sent: Sent[] = [];
     const client = await load(
       () =>
         new Response(concat(compressedFrame(new Uint8Array([1, 2, 3])), trailer()), {
           status: 200,
-          headers: { "content-type": "application/grpc-web+proto" },
+          headers: { 'content-type': 'application/grpc-web+proto' },
         }),
       sent
     );
 
-    const failure = await client.getPet({ id: "x" }).catch((error: unknown) => error);
-    if (!(failure instanceof client.GrpcError)) throw new Error("expected GrpcError");
+    const failure = await client.getPet({ id: 'x' }).catch((error: unknown) => error);
+    if (!(failure instanceof client.GrpcError)) {
+      throw new Error('expected GrpcError');
+    }
     expect(failure.code).toBe(12);
     expect(failure.details).toContain("'identity'");
   });
 
-  test("a server stream yields each frame as it arrives", async () => {
-    const petType = root.lookupType("pets.v1.Pet");
+  test('a server stream yields each frame as it arrives', async () => {
+    const petType = root.lookupType('pets.v1.Pet');
     const bodies = [
-      frame(petType.encode({ id: "a", name: "A" }).finish()),
-      frame(petType.encode({ id: "b", name: "B" }).finish()),
+      frame(petType.encode({ id: 'a', name: 'A' }).finish()),
+      frame(petType.encode({ id: 'b', name: 'B' }).finish()),
       trailer(),
     ];
 
@@ -512,53 +501,57 @@ describe("emitted gRPC client", () => {
               controller.close();
             },
           }),
-          { status: 200, headers: { "content-type": "application/grpc-web+proto" } }
+          { status: 200, headers: { 'content-type': 'application/grpc-web+proto' } }
         ),
       sent
     );
 
     const ids: unknown[] = [];
-    for await (const pet of client.watchPets({ id: "all" })) ids.push(pet.id);
+    for await (const pet of client.watchPets({ id: 'all' })) {
+      ids.push(pet.id);
+    }
 
-    expect(ids).toEqual(["a", "b"]);
+    expect(ids).toEqual(['a', 'b']);
   });
 
-  test("a non-zero status becomes a GrpcError carrying code and message", async () => {
+  test('a non-zero status becomes a GrpcError carrying code and message', async () => {
     const sent: Sent[] = [];
     const client = await load(
       () =>
-        new Response(trailer(5, "no such pet"), {
+        new Response(trailer(5, 'no such pet'), {
           status: 200,
-          headers: { "content-type": "application/grpc-web+proto" },
+          headers: { 'content-type': 'application/grpc-web+proto' },
         }),
       sent
     );
 
-    const failure = await client
-      .getPet({ id: "missing" })
-      .catch((error: unknown) => error);
+    const failure = await client.getPet({ id: 'missing' }).catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(client.GrpcError);
-    if (!(failure instanceof client.GrpcError)) throw new Error("expected GrpcError");
+    if (!(failure instanceof client.GrpcError)) {
+      throw new Error('expected GrpcError');
+    }
     expect(failure.code).toBe(5);
-    expect(failure.details).toBe("no such pet");
+    expect(failure.details).toBe('no such pet');
   });
 
-  test("a trailers-only failure is read from the headers", async () => {
+  test('a trailers-only failure is read from the headers', async () => {
     const sent: Sent[] = [];
     const client = await load(
       () =>
         new Response(null, {
           status: 200,
-          headers: { "grpc-status": "7", "grpc-message": "denied" },
+          headers: { 'grpc-status': '7', 'grpc-message': 'denied' },
         }),
       sent
     );
 
-    const failure = await client.getPet({ id: "x" }).catch((error: unknown) => error);
-    if (!(failure instanceof client.GrpcError)) throw new Error("expected GrpcError");
+    const failure = await client.getPet({ id: 'x' }).catch((error: unknown) => error);
+    if (!(failure instanceof client.GrpcError)) {
+      throw new Error('expected GrpcError');
+    }
     expect(failure.code).toBe(7);
-    expect(failure.details).toBe("denied");
+    expect(failure.details).toBe('denied');
   });
 
   /**
@@ -567,19 +560,21 @@ describe("emitted gRPC client", () => {
    * transport, not to the generated method, because a client can be
    * reconfigured onto the HTTP/2 one and the same method then works.
    */
-  test("streaming a request refuses on the fetch transport, naming the fix", async () => {
+  test('streaming a request refuses on the fetch transport, naming the fix', async () => {
     const sent: Sent[] = [];
     const client = await load(() => new Response(null), sent);
 
     async function* notes(): AsyncGenerator<{ text: string }> {
-      yield { text: "one" };
-      yield { text: "two" };
+      yield { text: 'one' };
+      yield { text: 'two' };
     }
 
     const failure = await client.upload(notes()).catch((error: unknown) => error);
-    if (!(failure instanceof client.GrpcError)) throw new Error("expected GrpcError");
+    if (!(failure instanceof client.GrpcError)) {
+      throw new Error('expected GrpcError');
+    }
     // 12 is UNIMPLEMENTED, which is what this transport is for this call.
     expect(failure.code).toBe(12);
-    expect(failure.details).toContain("createHttp2Transport()");
+    expect(failure.details).toContain('createHttp2Transport()');
   });
 });

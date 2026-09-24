@@ -1,4 +1,10 @@
 import {
+  emptyService,
+  isGrpcMethod,
+  type GrpcServiceMethodIR,
+  type ServiceIR,
+} from '../ir/service.ts';
+import {
   collectNamedTypes,
   declaredFormat,
   flattenObjectProperties,
@@ -8,14 +14,8 @@ import {
   type PropertyIR,
   type TypeIR,
   type UnionTypeIR,
-} from "../types.ts";
-import {
-  emptyService,
-  isGrpcMethod,
-  type GrpcServiceMethodIR,
-  type ServiceIR,
-} from "../ir/service.ts";
-import { generateTypeCheckExpression } from "./validator.ts";
+} from '../types.ts';
+import { generateTypeCheckExpression } from './validator.ts';
 
 /**
  * How a numeric field travels. protobuf has three encodings, and picking the
@@ -33,7 +33,7 @@ interface ProtoNumeric {
 
 const PROTO_NUMERICS: Record<string, ProtoNumeric> = {
   int32: {
-    proto: "int32",
+    proto: 'int32',
     wire: 0,
     write: (t) => `o += writeVarint(buf, o, ${t});`,
     // A negative int32 arrives sign-extended across ten bytes, well past what
@@ -41,68 +41,68 @@ const PROTO_NUMERICS: Record<string, ProtoNumeric> = {
     read: `let res; [res, o] = readVarint64(buf, o); res = Number(BigInt.asIntN(32, res));`,
   },
   int64: {
-    proto: "int64",
+    proto: 'int64',
     wire: 0,
     write: (t) => `o += writeVarint64(buf, o, ${t});`,
     read: `let res; [res, o] = readVarint64(buf, o);`,
   },
   uint32: {
-    proto: "uint32",
+    proto: 'uint32',
     wire: 0,
     write: (t) => `o += writeVarint(buf, o, ${t});`,
     read: `let res; [res, o] = readVarint(buf, o);`,
   },
   uint64: {
-    proto: "uint64",
+    proto: 'uint64',
     wire: 0,
     write: (t) => `o += writeVarint64(buf, o, ${t});`,
     read: `let res; [res, o] = readVarint64(buf, o);`,
   },
   // sint uses zig-zag, which is what makes small negatives cheap.
   sint32: {
-    proto: "sint32",
+    proto: 'sint32',
     wire: 0,
     write: (t) => `o += writeZigZag(buf, o, ${t});`,
     read: `let res; [res, o] = readZigZag(buf, o);`,
   },
   sint64: {
-    proto: "sint64",
+    proto: 'sint64',
     wire: 0,
     write: (t) => `o += writeZigZag(buf, o, ${t});`,
     read: `let res; [res, o] = readZigZag(buf, o);`,
   },
   fixed32: {
-    proto: "fixed32",
+    proto: 'fixed32',
     wire: 5,
     write: (t) => `view.setUint32(o, Number(${t}), true); o += 4;`,
     read: `const res = view.getUint32(o, true); o += 4;`,
   },
   sfixed32: {
-    proto: "sfixed32",
+    proto: 'sfixed32',
     wire: 5,
     write: (t) => `view.setInt32(o, Number(${t}), true); o += 4;`,
     read: `const res = view.getInt32(o, true); o += 4;`,
   },
   fixed64: {
-    proto: "fixed64",
+    proto: 'fixed64',
     wire: 1,
     write: (t) => `view.setBigUint64(o, BigInt(${t}), true); o += 8;`,
     read: `const res = view.getBigUint64(o, true); o += 8;`,
   },
   sfixed64: {
-    proto: "sfixed64",
+    proto: 'sfixed64',
     wire: 1,
     write: (t) => `view.setBigInt64(o, BigInt(${t}), true); o += 8;`,
     read: `const res = view.getBigInt64(o, true); o += 8;`,
   },
   float: {
-    proto: "float",
+    proto: 'float',
     wire: 5,
     write: (t) => `view.setFloat32(o, Number(${t}), true); o += 4;`,
     read: `const res = view.getFloat32(o, true); o += 4;`,
   },
   double: {
-    proto: "double",
+    proto: 'double',
     wire: 1,
     write: (t) => `view.setFloat64(o, Number(${t}), true); o += 8;`,
     read: `const res = view.getFloat64(o, true); o += 8;`,
@@ -111,51 +111,51 @@ const PROTO_NUMERICS: Record<string, ProtoNumeric> = {
   // widths travel in the smallest type that holds them. The declared range is
   // still enforced by the validator, so nothing widens silently.
   int8: {
-    proto: "int32",
+    proto: 'int32',
     wire: 0,
     write: (t) => `o += writeVarint(buf, o, ${t});`,
     read: `let res; [res, o] = readVarint64(buf, o); res = Number(BigInt.asIntN(32, res));`,
   },
   int16: {
-    proto: "int32",
+    proto: 'int32',
     wire: 0,
     write: (t) => `o += writeVarint(buf, o, ${t});`,
     read: `let res; [res, o] = readVarint64(buf, o); res = Number(BigInt.asIntN(32, res));`,
   },
   uint8: {
-    proto: "uint32",
+    proto: 'uint32',
     wire: 0,
     write: (t) => `o += writeVarint(buf, o, ${t});`,
     read: `let res; [res, o] = readVarint(buf, o);`,
   },
   uint16: {
-    proto: "uint32",
+    proto: 'uint32',
     wire: 0,
     write: (t) => `o += writeVarint(buf, o, ${t});`,
     read: `let res; [res, o] = readVarint(buf, o);`,
   },
   // An integer a double holds exactly, so it is 64-bit on the wire but stays a
   // `number` in JS - which is the whole point of the format.
-  "double-int": {
-    proto: "int64",
+  'double-int': {
+    proto: 'int64',
     wire: 0,
     write: (t) => `o += writeVarint64(buf, o, ${t});`,
     read: `let res; [res, o] = readVarint64(buf, o);`,
   },
   unixtime: {
-    proto: "int64",
+    proto: 'int64',
     wire: 0,
     write: (t) => `o += writeVarint64(buf, o, ${t});`,
     read: `let res; [res, o] = readVarint64(buf, o);`,
   },
-  "sf-integer": {
-    proto: "int64",
+  'sf-integer': {
+    proto: 'int64',
     wire: 0,
     write: (t) => `o += writeVarint64(buf, o, ${t});`,
     read: `let res; [res, o] = readVarint64(buf, o);`,
   },
-  "sf-decimal": {
-    proto: "double",
+  'sf-decimal': {
+    proto: 'double',
     wire: 1,
     write: (t) => `view.setFloat64(o, Number(${t}), true); o += 8;`,
     read: `const res = view.getFloat64(o, true); o += 8;`,
@@ -163,35 +163,42 @@ const PROTO_NUMERICS: Record<string, ProtoNumeric> = {
 };
 
 /** Widths that must round-trip as BigInt rather than Number. */
-const BIGINT_FORMATS = new Set(["int64", "uint64", "fixed64", "sfixed64", "sint64"]);
+const BIGINT_FORMATS = new Set(['int64', 'uint64', 'fixed64', 'sfixed64', 'sint64']);
 
 /**
  * A JS number is a double, so that is the default. `@format` narrows it, using
  * the same OpenAPI registry values the avro codec reads. A bigint is 64-bit by
  * definition and defaults to int64.
  */
-function protoNumericFor(
-  ir: TypeIR,
-  carrier?: Annotated
-): ProtoNumeric | undefined {
-  if (ir.kind !== "primitive") return undefined;
+function protoNumericFor(ir: TypeIR, carrier?: Annotated): ProtoNumeric | undefined {
+  if (ir.kind !== 'primitive') {
+    return undefined;
+  }
   const format = declaredFormat(carrier, ir);
   const declared = format ? PROTO_NUMERICS[format] : undefined;
-  if (ir.type === "bigint") return declared ?? PROTO_NUMERICS.int64!;
-  if (ir.type === "number") return declared ?? PROTO_NUMERICS.double!;
-  if (ir.type === "date") return PROTO_NUMERICS.int64!;
+  if (ir.type === 'bigint') {
+    return declared ?? PROTO_NUMERICS.int64!;
+  }
+  if (ir.type === 'number') {
+    return declared ?? PROTO_NUMERICS.double!;
+  }
+  if (ir.type === 'date') {
+    return PROTO_NUMERICS.int64!;
+  }
   return undefined;
 }
 
 /** Does this field's JS value come back as a BigInt? */
 function readsAsBigInt(ir: TypeIR, carrier?: Annotated): boolean {
-  if (ir.kind !== "primitive") return false;
-  if (ir.type === "bigint") {
+  if (ir.kind !== 'primitive') {
+    return false;
+  }
+  if (ir.type === 'bigint') {
     const format = declaredFormat(carrier, ir);
     return !format || BIGINT_FORMATS.has(format);
   }
   const format = declaredFormat(carrier, ir);
-  return Boolean(format && BIGINT_FORMATS.has(format) && format !== "int64");
+  return Boolean(format && BIGINT_FORMATS.has(format) && format !== 'int64');
 }
 
 /** An object type that becomes its own protobuf message. */
@@ -208,7 +215,9 @@ function planMessages(root: TypeIR, resolve: Resolve): MessagePlan[] {
 
   const visit = (ir: TypeIR, name: string): number => {
     const existing = seen.get(ir);
-    if (existing !== undefined) return existing;
+    if (existing !== undefined) {
+      return existing;
+    }
 
     const id = plans.length;
     seen.set(ir, id);
@@ -219,13 +228,15 @@ function planMessages(root: TypeIR, resolve: Resolve): MessagePlan[] {
       const reachable = oneof ? oneof.types : [property.type];
       for (const candidate of reachable) {
         const target = messageTarget(candidate, resolve);
-        if (target) visit(target, target.name ?? `${name}_${property.name}`);
+        if (target) {
+          visit(target, target.name ?? `${name}_${property.name}`);
+        }
       }
     }
     return id;
   };
 
-  visit(root, root.name ?? "Target");
+  visit(root, root.name ?? 'Target');
   return plans;
 }
 
@@ -241,15 +252,15 @@ function refResolver(root: TypeIR): Resolve {
   walkTypeIR(root, (node) => {
     byId.set(node.id, node);
   });
-  return (ir) => (ir.kind === "ref" ? byId.get(ir.targetId) ?? ir : ir);
+  return (ir) => (ir.kind === 'ref' ? (byId.get(ir.targetId) ?? ir) : ir);
 }
 
 /** The object a field embeds, if it embeds one (directly or per array item). */
 function messageTarget(ir: TypeIR, resolve: Resolve): TypeIR | undefined {
   // An optional message still embeds; absence is field omission.
   const unwrapped = unwrapNullable(resolve(ir));
-  const candidate = resolve(unwrapped.kind === "array" ? unwrapped.element : unwrapped);
-  if (candidate.kind === "object" || candidate.kind === "intersection") {
+  const candidate = resolve(unwrapped.kind === 'array' ? unwrapped.element : unwrapped);
+  if (candidate.kind === 'object' || candidate.kind === 'intersection') {
     return flattenObjectProperties(candidate).length > 0 ? candidate : undefined;
   }
   return undefined;
@@ -283,20 +294,17 @@ interface ScalarCodec {
 }
 
 /** How a non-message value travels, or undefined if it needs a sub-message. */
-function scalarCodecFor(
-  ir: TypeIR,
-  carrier?: Annotated
-): ScalarCodec | undefined {
+function scalarCodecFor(ir: TypeIR, carrier?: Annotated): ScalarCodec | undefined {
   // A literal travels as its primitive: `kind: "circle"` is a string, not JSON.
-  if (ir.kind === "literal") {
-    const type = typeof ir.value === "bigint" ? "bigint" : typeof ir.value;
-    if (type === "string" || type === "number" || type === "boolean" || type === "bigint") {
-      return scalarCodecFor({ id: `${ir.id}_prim`, kind: "primitive", type }, carrier);
+  if (ir.kind === 'literal') {
+    const type = typeof ir.value === 'bigint' ? 'bigint' : typeof ir.value;
+    if (type === 'string' || type === 'number' || type === 'boolean' || type === 'bigint') {
+      return scalarCodecFor({ id: `${ir.id}_prim`, kind: 'primitive', type }, carrier);
     }
   }
 
-  if (ir.kind === "primitive") {
-    if (ir.type === "string" || ir.type === "symbol") {
+  if (ir.kind === 'primitive') {
+    if (ir.type === 'string' || ir.type === 'symbol') {
       return {
         wire: 2,
         write: (e) => `o += writeString(buf, o, String(${e}));`,
@@ -304,7 +312,7 @@ function scalarCodecFor(
         lift: (e) => e,
       };
     }
-    if (ir.type === "bytes") {
+    if (ir.type === 'bytes') {
       return {
         wire: 2,
         write: (e) => `o += writeBytes(buf, o, ${e});`,
@@ -312,7 +320,7 @@ function scalarCodecFor(
         lift: (e) => e,
       };
     }
-    if (ir.type === "boolean") {
+    if (ir.type === 'boolean') {
       return {
         wire: 0,
         write: (e) => `o += writeVarint(buf, o, ${e} ? 1 : 0);`,
@@ -320,7 +328,7 @@ function scalarCodecFor(
         lift: (e) => `Boolean(${e})`,
       };
     }
-    if (ir.type === "date") {
+    if (ir.type === 'date') {
       return {
         wire: 0,
         write: (e) => `o += writeVarint64(buf, o, BigInt(${e}.getTime()));`,
@@ -330,7 +338,7 @@ function scalarCodecFor(
     }
   }
 
-  if (ir.kind === "enum") {
+  if (ir.kind === 'enum') {
     return {
       wire: 0,
       write: (e) => `o += writeVarint(buf, o, ${e});`,
@@ -369,12 +377,14 @@ const JSON_FALLBACK: ScalarCodec = {
  * falls through to the JSON fallback, silently encoding text.
  */
 function unwrapNullable(ir: TypeIR): TypeIR {
-  if (ir.kind !== "union") return ir;
+  if (ir.kind !== 'union') {
+    return ir;
+  }
   const meaningful = ir.types.filter(
     (t) =>
       !(
-        t.kind === "primitive" &&
-        (t.type === "undefined" || t.type === "null" || t.type === "void")
+        t.kind === 'primitive' &&
+        (t.type === 'undefined' || t.type === 'null' || t.type === 'void')
       )
   );
   return meaningful.length === 1 ? meaningful[0]! : { ...ir, types: meaningful };
@@ -387,16 +397,20 @@ function unwrapNullable(ir: TypeIR): TypeIR {
 function collapseLiteralUnion(ir: UnionTypeIR): TypeIR | undefined {
   const types = new Set<string>();
   for (const member of ir.types) {
-    if (member.kind !== "literal") return undefined;
-    types.add(typeof member.value === "bigint" ? "bigint" : typeof member.value);
+    if (member.kind !== 'literal') {
+      return undefined;
+    }
+    types.add(typeof member.value === 'bigint' ? 'bigint' : typeof member.value);
   }
-  if (types.size !== 1) return undefined;
-  const only = [...types][0];
-  // `boolean` reaches us as `true | false`, which is one wire type, not two.
-  if (only !== "string" && only !== "number" && only !== "bigint" && only !== "boolean") {
+  if (types.size !== 1) {
     return undefined;
   }
-  return { id: `${ir.id}_collapsed`, kind: "primitive", type: only };
+  const only = [...types][0];
+  // `boolean` reaches us as `true | false`, which is one wire type, not two.
+  if (only !== 'string' && only !== 'number' && only !== 'bigint' && only !== 'boolean') {
+    return undefined;
+  }
+  return { id: `${ir.id}_collapsed`, kind: 'primitive', type: only };
 }
 
 /**
@@ -406,14 +420,18 @@ function collapseLiteralUnion(ir: UnionTypeIR): TypeIR | undefined {
  */
 function wireFieldType(ir: TypeIR): TypeIR {
   const unwrapped = unwrapNullable(ir);
-  if (unwrapped.kind !== "union") return unwrapped;
+  if (unwrapped.kind !== 'union') {
+    return unwrapped;
+  }
   return collapseLiteralUnion(unwrapped) ?? unwrapped;
 }
 
 /** The variants of a field encoded as a `oneof`, if it is one. */
 function oneofFor(ir: TypeIR): UnionTypeIR | undefined {
   const inner = unwrapNullable(ir);
-  if (inner.kind !== "union") return undefined;
+  if (inner.kind !== 'union') {
+    return undefined;
+  }
   return collapseLiteralUnion(inner) ? undefined : inner;
 }
 
@@ -427,7 +445,7 @@ function requiredSignature(ir: TypeIR): string[] {
 
 /** A JS literal for a value that may be a bigint, which JSON cannot spell. */
 function literalExpression(value: unknown): string {
-  return typeof value === "bigint" ? `${value}n` : JSON.stringify(value);
+  return typeof value === 'bigint' ? `${value}n` : JSON.stringify(value);
 }
 
 /**
@@ -445,7 +463,7 @@ function variantCheck(
   resolve: Resolve
 ): string {
   const target = resolve(unwrapNullable(variant));
-  if (target.kind !== "object" && target.kind !== "intersection") {
+  if (target.kind !== 'object' && target.kind !== 'intersection') {
     return generateTypeCheckExpression(target, local);
   }
 
@@ -453,20 +471,18 @@ function variantCheck(
   const properties = flattenObjectProperties(target);
 
   const discriminant = union.discriminator?.propertyName;
-  const tag = discriminant
-    ? properties.find((p) => p.name === discriminant)
-    : undefined;
-  if (tag?.type.kind === "literal") {
+  const tag = discriminant ? properties.find((p) => p.name === discriminant) : undefined;
+  if (tag?.type.kind === 'literal') {
     tests.push(
       `${local}[${JSON.stringify(discriminant)}] === ${literalExpression(tag.type.value)}`
     );
-    return tests.join(" && ");
+    return tests.join(' && ');
   }
 
   for (const name of requiredSignature(target)) {
     tests.push(`${JSON.stringify(name)} in ${local}`);
   }
-  return tests.join(" && ");
+  return tests.join(' && ');
 }
 
 /**
@@ -481,15 +497,17 @@ function nestedUnionBlocker(p: PropertyIR, typeName: string): string | undefined
   const field = wireFieldType(p.type);
 
   const nested =
-    field.kind === "array"
-      ? { position: "element", ir: wireFieldType(field.element) }
-      : field.kind === "record"
-        ? { position: "value", ir: wireFieldType(field.valueType) }
+    field.kind === 'array'
+      ? { position: 'element', ir: wireFieldType(field.element) }
+      : field.kind === 'record'
+        ? { position: 'value', ir: wireFieldType(field.valueType) }
         : undefined;
 
-  if (!nested || nested.ir.kind !== "union") return undefined;
+  if (!nested || nested.ir.kind !== 'union') {
+    return undefined;
+  }
 
-  const container = field.kind === "array" ? "repeated field" : "map";
+  const container = field.kind === 'array' ? 'repeated field' : 'map';
   return `[wiz] The ${nested.position} type of '${p.name}' on type '${typeName}' is a union, and protobuf has no ${container} of 'oneof'. Wrap the variants in their own type, so the oneof sits inside a message that can be repeated.`;
 }
 
@@ -519,7 +537,9 @@ function protobufBlocker(plans: MessagePlan[], resolve: Resolve): string | undef
 
     for (const p of props) {
       const nestedUnion = nestedUnionBlocker(p, plan.name);
-      if (nestedUnion) return nestedUnion;
+      if (nestedUnion) {
+        return nestedUnion;
+      }
 
       const oneof = oneofFor(p.type);
       if (!oneof) {
@@ -527,7 +547,9 @@ function protobufBlocker(plans: MessagePlan[], resolve: Resolve): string | undef
           return `[wiz] Property '${p.name}' on type '${plan.name}' is missing required '@fieldNumber <N>' JSDoc tag for protobuf encoding/decoding.`;
         }
         const clash = claim(p.fieldNumber, p.name);
-        if (clash) return clash;
+        if (clash) {
+          return clash;
+        }
         continue;
       }
 
@@ -539,7 +561,9 @@ function protobufBlocker(plans: MessagePlan[], resolve: Resolve): string | undef
       }
       for (const [index, n] of oneof.fieldNumbers.entries()) {
         const clash = claim(n, `${p.name} variant ${index + 1}`);
-        if (clash) return clash;
+        if (clash) {
+          return clash;
+        }
       }
 
       // Encoding picks a variant by inspecting the value, so two variants that
@@ -548,11 +572,13 @@ function protobufBlocker(plans: MessagePlan[], resolve: Resolve): string | undef
         const seen = new Map<string, number>();
         for (const [index, variant] of oneof.types.entries()) {
           const unwrapped = unwrapNullable(variant);
-          if (unwrapped.kind !== "object" && unwrapped.kind !== "intersection") continue;
-          const signature = requiredSignature(unwrapped).join(",");
+          if (unwrapped.kind !== 'object' && unwrapped.kind !== 'intersection') {
+            continue;
+          }
+          const signature = requiredSignature(unwrapped).join(',');
           const first = seen.get(signature);
           if (first !== undefined) {
-            return `[wiz] Variants ${first + 1} and ${index + 1} of property '${p.name}' on type '${plan.name}' have the same required properties (${signature || "none"}), so a value cannot be matched to one of them. Give the union a discriminant property with a distinct literal value.`;
+            return `[wiz] Variants ${first + 1} and ${index + 1} of property '${p.name}' on type '${plan.name}' have the same required properties (${signature || 'none'}), so a value cannot be matched to one of them. Give the union a discriminant property with a distinct literal value.`;
           }
           seen.set(signature, index);
         }
@@ -575,11 +601,13 @@ export function generateProtobufCode(ir: TypeIR): string {
       `export function decodeProto(buf, offset = 0) {`,
       `  throw new Error(${JSON.stringify(blocker)});`,
       `}`,
-    ].join("\n");
+    ].join('\n');
   }
 
   const messageId = new Map<TypeIR, number>();
-  for (const plan of plans) messageId.set(plan.ir, plan.id);
+  for (const plan of plans) {
+    messageId.set(plan.ir, plan.id);
+  }
 
   const functions: string[] = [];
 
@@ -591,9 +619,7 @@ export function generateProtobufCode(ir: TypeIR): string {
       const variants = oneofFor(p.type)?.fieldNumbers;
       return variants ? Math.min(...variants) : p.fieldNumber!;
     };
-    const sorted = [...flattenObjectProperties(plan.ir)].sort(
-      (a, b) => numberOf(a) - numberOf(b)
-    );
+    const sorted = [...flattenObjectProperties(plan.ir)].sort((a, b) => numberOf(a) - numberOf(b));
 
     for (const p of sorted) {
       const prop = JSON.stringify(p.name);
@@ -610,13 +636,13 @@ export function generateProtobufCode(ir: TypeIR): string {
           const n = oneof.fieldNumbers![index]!;
           const nested = messageId.get(messageTarget(variant, resolve) ?? variant);
           const check = variantCheck(variant, oneof, local, resolve);
-          const branch = index === 0 ? "if" : "} else if";
+          const branch = index === 0 ? 'if' : '} else if';
 
           encodeLines.push(`    ${branch} (${check}) {`);
           if (nested !== undefined) {
             encodeLines.push(`      o += writeVarint(buf, o, ${(n << 3) | 2});`);
             encodeLines.push(
-              ...lengthDelimited([`o = encodeMsg${nested}(${local}, buf, o, view);`], "      ")
+              ...lengthDelimited([`o = encodeMsg${nested}(${local}, buf, o, view);`], '      ')
             );
           } else {
             const codec = scalarCodecFor(variant, p) ?? JSON_FALLBACK;
@@ -632,7 +658,7 @@ export function generateProtobufCode(ir: TypeIR): string {
           } else {
             const codec = scalarCodecFor(variant, p) ?? JSON_FALLBACK;
             decodeCases.push(`        ${codec.read}`);
-            decodeCases.push(`        obj[${prop}] = ${codec.lift("res")};`);
+            decodeCases.push(`        obj[${prop}] = ${codec.lift('res')};`);
           }
           decodeCases.push(`        break;`);
           decodeCases.push(`      }`);
@@ -649,7 +675,7 @@ export function generateProtobufCode(ir: TypeIR): string {
       const embedded = messageTarget(pType, resolve);
 
       // ---- repeated -------------------------------------------------------
-      if (pType.kind === "array") {
+      if (pType.kind === 'array') {
         const element = pType.element;
         const nested = embedded ? messageId.get(embedded) : undefined;
 
@@ -660,7 +686,7 @@ export function generateProtobufCode(ir: TypeIR): string {
           encodeLines.push(`    for (const item of ${access}) {`);
           encodeLines.push(`      o += writeVarint(buf, o, ${tag});`);
           encodeLines.push(
-            ...lengthDelimited([`o = encodeMsg${nested}(item, buf, o, view);`], "      ")
+            ...lengthDelimited([`o = encodeMsg${nested}(item, buf, o, view);`], '      ')
           );
           encodeLines.push(`    }`);
           encodeLines.push(`  }`);
@@ -686,10 +712,7 @@ export function generateProtobufCode(ir: TypeIR): string {
         encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
         if (packable) {
           encodeLines.push(
-            ...lengthDelimited(
-              [`for (const item of ${access}) { ${codec.write("item")} }`],
-              "    "
-            )
+            ...lengthDelimited([`for (const item of ${access}) { ${codec.write('item')} }`], '    ')
           );
         } else {
           encodeLines.push(`    ${codec.write(`${access}[0]`)}`);
@@ -709,15 +732,15 @@ export function generateProtobufCode(ir: TypeIR): string {
           decodeCases.push(`          const stop = o + len;`);
           decodeCases.push(`          while (o < stop) {`);
           decodeCases.push(`            ${codec.read}`);
-          decodeCases.push(`            obj[${prop}].push(${codec.lift("res")});`);
+          decodeCases.push(`            obj[${prop}].push(${codec.lift('res')});`);
           decodeCases.push(`          }`);
           decodeCases.push(`        } else {`);
           decodeCases.push(`          ${codec.read}`);
-          decodeCases.push(`          obj[${prop}].push(${codec.lift("res")});`);
+          decodeCases.push(`          obj[${prop}].push(${codec.lift('res')});`);
           decodeCases.push(`        }`);
         } else {
           decodeCases.push(`        ${codec.read}`);
-          decodeCases.push(`        obj[${prop}].push(${codec.lift("res")});`);
+          decodeCases.push(`        obj[${prop}].push(${codec.lift('res')});`);
         }
         decodeCases.push(`        break;`);
         decodeCases.push(`      }`);
@@ -725,7 +748,7 @@ export function generateProtobufCode(ir: TypeIR): string {
       }
 
       // ---- map ------------------------------------------------------------
-      if (pType.kind === "record") {
+      if (pType.kind === 'record') {
         // `@format` on the property describes the map's value type.
         const valueCodec = scalarCodecFor(pType.valueType, p) ?? JSON_FALLBACK;
         const valueMsg = messageTarget(pType.valueType, resolve);
@@ -733,19 +756,24 @@ export function generateProtobufCode(ir: TypeIR): string {
         const tag = (fn << 3) | 2;
 
         // A protobuf map entry is a message with key = 1 and value = 2.
-        const entryBody: string[] = [`o += writeVarint(buf, o, ${(1 << 3) | 2});`, `o += writeString(buf, o, mapKey);`];
+        const entryBody: string[] = [
+          `o += writeVarint(buf, o, ${(1 << 3) | 2});`,
+          `o += writeString(buf, o, mapKey);`,
+        ];
         if (valueId !== undefined) {
           entryBody.push(`o += writeVarint(buf, o, ${(2 << 3) | 2});`);
-          entryBody.push(...lengthDelimited([`o = encodeMsg${valueId}(mapVal, buf, o, view);`], ""));
+          entryBody.push(
+            ...lengthDelimited([`o = encodeMsg${valueId}(mapVal, buf, o, view);`], '')
+          );
         } else {
           entryBody.push(`o += writeVarint(buf, o, ${(2 << 3) | valueCodec.wire});`);
-          entryBody.push(valueCodec.write("mapVal"));
+          entryBody.push(valueCodec.write('mapVal'));
         }
 
         encodeLines.push(`  if (${access} !== undefined && ${access} !== null) {`);
         encodeLines.push(`    for (const [mapKey, mapVal] of Object.entries(${access})) {`);
         encodeLines.push(`      o += writeVarint(buf, o, ${tag});`);
-        encodeLines.push(...lengthDelimited(entryBody, "      "));
+        encodeLines.push(...lengthDelimited(entryBody, '      '));
         encodeLines.push(`    }`);
         encodeLines.push(`  }`);
 
@@ -765,7 +793,7 @@ export function generateProtobufCode(ir: TypeIR): string {
           decodeCases.push(`            o += vlen;`);
         } else {
           decodeCases.push(`            ${valueCodec.read}`);
-          decodeCases.push(`            mapVal = ${valueCodec.lift("res")};`);
+          decodeCases.push(`            mapVal = ${valueCodec.lift('res')};`);
         }
         decodeCases.push(`          }`);
         decodeCases.push(`        }`);
@@ -783,7 +811,7 @@ export function generateProtobufCode(ir: TypeIR): string {
         encodeLines.push(`  if (${access} !== undefined && ${access} !== null) {`);
         encodeLines.push(`    o += writeVarint(buf, o, ${tag});`);
         encodeLines.push(
-          ...lengthDelimited([`o = encodeMsg${nestedId}(${access}, buf, o, view);`], "    ")
+          ...lengthDelimited([`o = encodeMsg${nestedId}(${access}, buf, o, view);`], '    ')
         );
         encodeLines.push(`  }`);
 
@@ -806,7 +834,7 @@ export function generateProtobufCode(ir: TypeIR): string {
 
       decodeCases.push(`      case ${fn}: {`);
       decodeCases.push(`        ${codec.read}`);
-      decodeCases.push(`        obj[${prop}] = ${codec.lift("res")};`);
+      decodeCases.push(`        obj[${prop}] = ${codec.lift('res')};`);
       decodeCases.push(`        break;`);
       decodeCases.push(`      }`);
     }
@@ -840,7 +868,7 @@ export function generateProtobufCode(ir: TypeIR): string {
         `  }`,
         `  return obj;`,
         `}`,
-      ].join("\n")
+      ].join('\n')
     );
   }
 
@@ -972,47 +1000,55 @@ export function generateProtobufCode(ir: TypeIR): string {
     `  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);`,
     `  return decodeMsg0(buf, offset, buf.length, view);`,
     `}`,
-  ].join("\n");
+  ].join('\n');
 }
 
 function mapIRToProtoType(ir: TypeIR, carrier?: Annotated): string {
   const numeric = protoNumericFor(ir, carrier);
-  if (numeric) return numeric.proto;
+  if (numeric) {
+    return numeric.proto;
+  }
 
   switch (ir.kind) {
-    case "primitive":
+    case 'primitive':
       switch (ir.type) {
-        case "string":
-        case "symbol":
-          return "string";
-        case "boolean":
-          return "bool";
-        case "bytes":
-          return "bytes";
+        case 'string':
+        case 'symbol':
+          return 'string';
+        case 'boolean':
+          return 'bool';
+        case 'bytes':
+          return 'bytes';
         default:
-          return "string";
+          return 'string';
       }
-    case "literal":
-      if (typeof ir.value === "boolean") return "bool";
-      if (typeof ir.value === "bigint") return "int64";
-      if (typeof ir.value === "number") return "double";
-      return "string";
-    case "enum":
-      return ir.name ?? "int32";
-    case "array":
+    case 'literal':
+      if (typeof ir.value === 'boolean') {
+        return 'bool';
+      }
+      if (typeof ir.value === 'bigint') {
+        return 'int64';
+      }
+      if (typeof ir.value === 'number') {
+        return 'double';
+      }
+      return 'string';
+    case 'enum':
+      return ir.name ?? 'int32';
+    case 'array':
       // The carrier travels with the element: `@format` sits on the property
       // but describes what the repeated field holds, and the codec reads it
       // that way. Dropping it here described an int32 field as a double.
       return `repeated ${mapIRToProtoType(wireFieldType(ir.element), carrier)}`;
-    case "record":
+    case 'record':
       return `map<${mapIRToProtoType(ir.keyType)}, ${mapIRToProtoType(wireFieldType(ir.valueType), carrier)}>`;
-    case "object":
-    case "intersection":
-      return ir.name ?? "bytes";
-    case "ref":
+    case 'object':
+    case 'intersection':
+      return ir.name ?? 'bytes';
+    case 'ref':
       return ir.name ?? ir.targetId;
     default:
-      return "string";
+      return 'string';
   }
 }
 
@@ -1024,7 +1060,9 @@ function mapIRToProtoType(ir: TypeIR, carrier?: Annotated): string {
  */
 function variantFieldName(ir: TypeIR, index: number): string {
   const base = unwrapNullable(ir).name;
-  if (!base) return `variant_${index + 1}`;
+  if (!base) {
+    return `variant_${index + 1}`;
+  }
   return base.charAt(0).toLowerCase() + base.slice(1);
 }
 
@@ -1065,14 +1103,12 @@ interface ProtoServiceDef {
  * body, so a definition always beats a reference no matter which order they
  * were walked in: otherwise the message is emitted empty.
  */
-function collectProtoNamedTypes(
-  types: Array<{ name: string; ir: TypeIR }>
-): Map<string, TypeIR> {
+function collectProtoNamedTypes(types: Array<{ name: string; ir: TypeIR }>): Map<string, TypeIR> {
   const allNamedTypes = new Map<string, TypeIR>();
 
   const offer = (name: string, ir: TypeIR): void => {
     const existing = allNamedTypes.get(name);
-    if (!existing || (existing.kind === "ref" && ir.kind !== "ref")) {
+    if (!existing || (existing.kind === 'ref' && ir.kind !== 'ref')) {
       allNamedTypes.set(name, ir);
     }
   };
@@ -1093,9 +1129,7 @@ function collectProtoNamedTypes(
  * Every property must be numbered, whether directly or through its variants:
  * a field number is the wire identity, and protobuf has no way to derive one.
  */
-function protoFieldBlocker(
-  allNamedTypes: ReadonlyMap<string, TypeIR>
-): string | undefined {
+function protoFieldBlocker(allNamedTypes: ReadonlyMap<string, TypeIR>): string | undefined {
   for (const [typeName, typeIR] of allNamedTypes.entries()) {
     for (const prop of flattenObjectProperties(typeIR)) {
       const oneof = oneofFor(prop.type);
@@ -1108,38 +1142,37 @@ function protoFieldBlocker(
           ? `[wiz] Property '${prop.name}' on type '${typeName}' is missing required '@fieldNumber <N>' JSDoc tag for protobuf schema generation.`
           : undefined);
 
-      if (blocker) return blocker;
+      if (blocker) {
+        return blocker;
+      }
     }
   }
   return undefined;
 }
 
 /** The named types as message and enum definitions, in field-number order. */
-function protoTypeDefs(
-  allNamedTypes: ReadonlyMap<string, TypeIR>
-): ProtoTypeDef[] {
+function protoTypeDefs(allNamedTypes: ReadonlyMap<string, TypeIR>): ProtoTypeDef[] {
   const typeDefs: ProtoTypeDef[] = [];
 
   // A named scalar, literal union, array or tuple is a field type rather than
   // a message: `type Species = "dog" | "cat"` travels as a `string`, so an
   // empty `message Species {}` beside it is noise nothing references.
   const isMessageBody = (ir: TypeIR): boolean =>
-    ir.kind === "enum" ||
-    ir.kind === "object" ||
-    ir.kind === "intersection" ||
-    ir.kind === "ref";
+    ir.kind === 'enum' || ir.kind === 'object' || ir.kind === 'intersection' || ir.kind === 'ref';
 
   for (const [typeName, typeIR] of allNamedTypes.entries()) {
-    if (!isMessageBody(typeIR)) continue;
-    if (typeIR.kind === "enum") {
+    if (!isMessageBody(typeIR)) {
+      continue;
+    }
+    if (typeIR.kind === 'enum') {
       typeDefs.push({
         name: typeName,
         isEnum: true,
         description: typeIR.description,
         entries: typeIR.members.map((m, idx) => ({
           name: m.name,
-          type: "",
-          fieldNumber: typeof m.value === "number" ? m.value : idx,
+          type: '',
+          fieldNumber: typeof m.value === 'number' ? m.value : idx,
           comments: [],
           options: [],
         })),
@@ -1168,7 +1201,7 @@ function protoTypeDefs(
           }
           const options: string[] = [];
           if (p.deprecated?.isDeprecated) {
-            options.push("deprecated = true");
+            options.push('deprecated = true');
           }
 
           const oneof = oneofFor(p.type);
@@ -1208,7 +1241,7 @@ function protoBlockedModuleCode(name: string, blocker: string): string {
     `export function ${name}(options = {}) {`,
     `  throw new Error(${JSON.stringify(blocker)});`,
     `}`,
-  ].join("\n");
+  ].join('\n');
 }
 
 /**
@@ -1295,31 +1328,28 @@ function protoModuleCode(
     `  }`,
     `  return lines.join('\\n').trim();`,
     `}`,
-  ].join("\n");
+  ].join('\n');
 }
 
-export function generateProtobufSchemaCode(
-  types: Array<{ name: string; ir: TypeIR }>
-): string {
+export function generateProtobufSchemaCode(types: Array<{ name: string; ir: TypeIR }>): string {
   const allNamedTypes = collectProtoNamedTypes(types);
 
   const blocker = protoFieldBlocker(allNamedTypes);
-  if (blocker) return protoBlockedModuleCode("protobufSchema", blocker);
+  if (blocker) {
+    return protoBlockedModuleCode('protobufSchema', blocker);
+  }
 
-  return protoModuleCode(
-    "protobufSchema",
-    protoTypeDefs(allNamedTypes),
-    undefined,
-    []
-  );
+  return protoModuleCode('protobufSchema', protoTypeDefs(allNamedTypes), undefined, []);
 }
 
 /** `never`/`void`/`undefined` in a payload slot means "no message at all". */
 function isAbsentIR(ir: TypeIR | undefined): boolean {
-  if (!ir) return true;
+  if (!ir) {
+    return true;
+  }
   return (
-    ir.kind === "primitive" &&
-    (ir.type === "never" || ir.type === "void" || ir.type === "undefined")
+    ir.kind === 'primitive' &&
+    (ir.type === 'never' || ir.type === 'void' || ir.type === 'undefined')
   );
 }
 
@@ -1347,15 +1377,11 @@ export function generateGrpcSchemaCode(
   let blocker: string | undefined;
 
   /** The message name for one rpc slot, defining it when the type has none. */
-  const messageFor = (
-    ir: TypeIR | undefined,
-    fallback: string,
-    slot: string
-  ): string => {
+  const messageFor = (ir: TypeIR | undefined, fallback: string, slot: string): string => {
     if (isAbsentIR(ir)) {
       roots.push({
         name: fallback,
-        ir: { id: `wiz:grpc:${fallback}`, kind: "object", name: fallback, properties: [] },
+        ir: { id: `wiz:grpc:${fallback}`, kind: 'object', name: fallback, properties: [] },
       });
       return fallback;
     }
@@ -1364,7 +1390,7 @@ export function generateGrpcSchemaCode(
       roots.push({ name: payload.name!, ir: payload });
       return payload.name!;
     }
-    if (payload.kind === "object" || payload.kind === "intersection") {
+    if (payload.kind === 'object' || payload.kind === 'intersection') {
       roots.push({ name: fallback, ir: payload });
       return fallback;
     }
@@ -1375,7 +1401,9 @@ export function generateGrpcSchemaCode(
   };
 
   for (const method of service.methods) {
-    if (!isGrpcMethod(method)) continue;
+    if (!isGrpcMethod(method)) {
+      continue;
+    }
 
     const declaredPkg = method.address.package;
     if (declaredPkg) {
@@ -1383,7 +1411,7 @@ export function generateGrpcSchemaCode(
         pkg = declaredPkg;
       } else if (pkg !== declaredPkg) {
         return protoBlockedModuleCode(
-          "grpcSchema",
+          'grpcSchema',
           `[wiz] Methods declare conflicting proto packages '${pkg}' and '${declaredPkg}', ` +
             `but a .proto file declares exactly one. Use one '@package' for the whole schema.`
         );
@@ -1396,9 +1424,13 @@ export function generateGrpcSchemaCode(
 
     const comments: string[] = [];
     for (const text of [method.summary, method.description]) {
-      if (!text) continue;
-      for (const line of text.split("\n")) {
-        if (line.trim()) comments.push(line.trim());
+      if (!text) {
+        continue;
+      }
+      for (const line of text.split('\n')) {
+        if (line.trim()) {
+          comments.push(line.trim());
+        }
       }
     }
 
@@ -1417,7 +1449,7 @@ export function generateGrpcSchemaCode(
       ),
       responseStream: response?.streaming ?? false,
       comments,
-      options: method.deprecated ? ["deprecated = true"] : [],
+      options: method.deprecated ? ['deprecated = true'] : [],
     };
 
     const existing = services.get(method.address.service);
@@ -1431,18 +1463,17 @@ export function generateGrpcSchemaCode(
     }
   }
 
-  if (blocker) return protoBlockedModuleCode("grpcSchema", blocker);
+  if (blocker) {
+    return protoBlockedModuleCode('grpcSchema', blocker);
+  }
 
   const allNamedTypes = collectProtoNamedTypes(roots);
   const fieldBlocker = protoFieldBlocker(allNamedTypes);
-  if (fieldBlocker) return protoBlockedModuleCode("grpcSchema", fieldBlocker);
+  if (fieldBlocker) {
+    return protoBlockedModuleCode('grpcSchema', fieldBlocker);
+  }
 
-  return protoModuleCode(
-    "grpcSchema",
-    protoTypeDefs(allNamedTypes),
-    pkg,
-    [...services.values()]
-  );
+  return protoModuleCode('grpcSchema', protoTypeDefs(allNamedTypes), pkg, [...services.values()]);
 }
 
 /**
@@ -1462,17 +1493,19 @@ export function generateProtobufCodecCode(
   types: Array<{ name: string; ir: TypeIR }>,
   options: { modelModule?: string; identifiers?: ReadonlyMap<string, string> } = {}
 ): string {
-  const MESSAGE_MARKER = "function encodeMsg0(";
-  const PUBLIC_MARKER = "\nexport function encodeProto(";
+  const MESSAGE_MARKER = 'function encodeMsg0(';
+  const PUBLIC_MARKER = '\nexport function encodeProto(';
 
   const identifierFor = (name: string): string => {
     const mapped = options.identifiers?.get(name);
-    if (mapped) return mapped;
-    const sanitized = name.replace(/[^A-Za-z0-9_$]/g, "_");
+    if (mapped) {
+      return mapped;
+    }
+    const sanitized = name.replace(/[^A-Za-z0-9_$]/g, '_');
     return /^[A-Za-z_$]/.test(sanitized) ? sanitized : `_${sanitized}`;
   };
 
-  const exported = (kind: "encode" | "decode", identifier: string): string =>
+  const exported = (kind: 'encode' | 'decode', identifier: string): string =>
     `${kind}${identifier.charAt(0).toUpperCase()}${identifier.slice(1)}`;
 
   let helpers: string | undefined;
@@ -1482,8 +1515,10 @@ export function generateProtobufCodecCode(
 
   types.forEach(({ name, ir }, index) => {
     const identifier = identifierFor(name);
-    const valueType = options.modelModule ? identifier : "unknown";
-    if (options.modelModule) modelTypes.push(identifier);
+    const valueType = options.modelModule ? identifier : 'unknown';
+    if (options.modelModule) {
+      modelTypes.push(identifier);
+    }
 
     const module = generateProtobufCode(ir);
     const start = module.indexOf(MESSAGE_MARKER);
@@ -1493,9 +1528,9 @@ export function generateProtobufCodecCode(
     if (start < 0) {
       const reason = /throw new Error\((".*?")\)/.exec(module)?.[1] ?? '"[wiz] not encodable"';
       wrappers.push(
-        `export function ${exported("encode", identifier)}(value: ${valueType}): Uint8Array {\n` +
+        `export function ${exported('encode', identifier)}(value: ${valueType}): Uint8Array {\n` +
           `  throw new Error(${reason});\n}`,
-        `export function ${exported("decode", identifier)}(bytes: Uint8Array): ${valueType} {\n` +
+        `export function ${exported('decode', identifier)}(bytes: Uint8Array): ${valueType} {\n` +
           `  throw new Error(${reason});\n}`
       );
       return;
@@ -1512,9 +1547,9 @@ export function generateProtobufCodecCode(
     );
 
     wrappers.push(
-      `export function ${exported("encode", identifier)}(value: ${valueType}): Uint8Array {\n` +
+      `export function ${exported('encode', identifier)}(value: ${valueType}): Uint8Array {\n` +
         `  return writeMessage((buf, view) => encodeMsg0_${index}(value, buf, 0, view));\n}`,
-      `export function ${exported("decode", identifier)}(bytes: Uint8Array): ${valueType} {\n` +
+      `export function ${exported('decode', identifier)}(bytes: Uint8Array): ${valueType} {\n` +
         `  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);\n` +
         `  return decodeMsg0_${index}(bytes, 0, bytes.length, view);\n}`
     );
@@ -1539,17 +1574,19 @@ export function generateProtobufCodecCode(
     `  }`,
     `  throw new Error("[wiz] message did not fit in any buffer this codec will allocate");`,
     `}`,
-  ].join("\n");
+  ].join('\n');
 
   return [
     `// @ts-nocheck - generated wire code; the typed surface is the exports below.`,
     ...(modelTypes.length > 0
-      ? [`import type { ${[...new Set(modelTypes)].sort().join(", ")} } from ${JSON.stringify(options.modelModule)};`]
+      ? [
+          `import type { ${[...new Set(modelTypes)].sort().join(', ')} } from ${JSON.stringify(options.modelModule)};`,
+        ]
       : []),
     ``,
     ...(helpers ? [helpers, ``] : []),
-    ...(bodies.length > 0 ? [bodies.join("\n\n"), ``] : []),
+    ...(bodies.length > 0 ? [bodies.join('\n\n'), ``] : []),
     ...(bodies.length > 0 ? [allocator, ``] : []),
-    wrappers.join("\n\n"),
-  ].join("\n");
+    wrappers.join('\n\n'),
+  ].join('\n');
 }

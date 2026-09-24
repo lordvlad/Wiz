@@ -1,9 +1,9 @@
 // @wiz-ignore
-import { beforeEach, describe, expect, test } from "bun:test";
-import { transformSource, type TransformResult, type GeneratedModule } from "../src/plugin.ts";
-import { VIRTUAL_ENTRY } from "../src/generators/virtualGenerator.ts";
-import { clearTypeRegistry } from "../src/registry.ts";
-import { silentLogger } from "../src/logger.ts";
+import { beforeEach, describe, expect, test } from 'bun:test';
+import { VIRTUAL_ENTRY } from '../src/generators/virtualGenerator.ts';
+import { silentLogger } from '../src/logger.ts';
+import { transformSource, type TransformResult, type GeneratedModule } from '../src/plugin.ts';
+import { clearTypeRegistry } from '../src/registry.ts';
 
 /**
  * A virtual module's identity is its type key *plus* the generator payload.
@@ -13,7 +13,7 @@ import { silentLogger } from "../src/logger.ts";
  * two callsites that shared a type but differed in payload collided and
  * whichever was transformed last redefined the other.
  */
-function transform(contents: string, path = "collide.ts") {
+function transform(contents: string, path = 'collide.ts') {
   return transformSource({ path, contents, logger: silentLogger });
 }
 
@@ -23,10 +23,10 @@ beforeEach(() => {
 });
 
 const moduleCode = (result: TransformResult, marker: string): string => {
-  const found = [...result.modules.values()].find((m) =>
-    m.files[VIRTUAL_ENTRY]?.includes(marker)
-  );
-  if (!found) throw new Error(`no generated module contains ${marker}`);
+  const found = [...result.modules.values()].find((m) => m.files[VIRTUAL_ENTRY]?.includes(marker));
+  if (!found) {
+    throw new Error(`no generated module contains ${marker}`);
+  }
   return found.files[VIRTUAL_ENTRY]!;
 };
 
@@ -37,8 +37,8 @@ const USER = `
   }
 `;
 
-describe("virtual module identity", () => {
-  test("two OpenAPI dialects of one type are two modules", () => {
+describe('virtual module identity', () => {
+  test('two OpenAPI dialects of one type are two modules', () => {
     const result = transform(`
       import { openapiSchema } from "wiz";
       ${USER}
@@ -47,17 +47,17 @@ describe("virtual module identity", () => {
     `);
 
     const documents = [...result.modules.values()].filter((m) =>
-      m.files[VIRTUAL_ENTRY]?.includes("openapiSchema")
+      m.files[VIRTUAL_ENTRY]?.includes('openapiSchema')
     );
     expect(documents).toHaveLength(2);
 
     const versions = documents
-      .map((m) => m.files[VIRTUAL_ENTRY]?.match(/openapi:\s*\"(3\.[01]\.\d)\"/)?.[1])
+      .map((m) => m.files[VIRTUAL_ENTRY]?.match(/openapi:\s*"(3\.[01]\.\d)"/)?.[1])
       .sort();
-    expect(versions).toEqual(["3.0.3", "3.1.0"]);
+    expect(versions).toEqual(['3.0.3', '3.1.0']);
   });
 
-  test("the same type with different operations is two modules", () => {
+  test('the same type with different operations is two modules', () => {
     const result = transform(`
       import { openapiSchema } from "wiz";
       ${USER}
@@ -70,13 +70,13 @@ describe("virtual module identity", () => {
     `);
 
     const paths = [...result.modules.values()]
-      .filter((m) => m.files[VIRTUAL_ENTRY]?.includes("openapiSchema"))
-      .map((m) => (m.files[VIRTUAL_ENTRY]?.includes('\"/users\"') ? "/users" : "/people"))
+      .filter((m) => m.files[VIRTUAL_ENTRY]?.includes('openapiSchema'))
+      .map((m) => (m.files[VIRTUAL_ENTRY]?.includes('"/users"') ? '/users' : '/people'))
       .sort();
-    expect(paths).toEqual(["/people", "/users"]);
+    expect(paths).toEqual(['/people', '/users']);
   });
 
-  test("a codec and a schema of one type share the type key, not the module", () => {
+  test('a codec and a schema of one type share the type key, not the module', () => {
     const result = transform(`
       import { encodeProto, protobufSchema } from "wiz";
       ${USER}
@@ -87,13 +87,13 @@ describe("virtual module identity", () => {
     // The schema payload earns its own module; the codec keeps the bare type
     // key. Both must exist, and only one may carry the .proto text.
     const withSchema = [...result.modules.values()].filter((m) =>
-      m.files[VIRTUAL_ENTRY]?.includes("export function protobufSchema")
+      m.files[VIRTUAL_ENTRY]?.includes('export function protobufSchema')
     );
     expect(withSchema).toHaveLength(1);
     expect(result.modules.size).toBe(2);
   });
 
-  test("identical callsites still share one module", () => {
+  test('identical callsites still share one module', () => {
     const result = transform(`
       import { openapiSchema } from "wiz";
       ${USER}
@@ -107,7 +107,7 @@ describe("virtual module identity", () => {
    * Everything below differs only in a field the key used to drop, so the
    * second transform was handed the first one's module.
    */
-  test("a changed doc comment is a new module, not the old one", () => {
+  test('a changed doc comment is a new module, not the old one', () => {
     const source = (doc: string) => `
       import { schema } from "wiz";
       /** ${doc} */
@@ -117,11 +117,11 @@ describe("virtual module identity", () => {
       export const s = jsonSchema<Doc>();
     `;
 
-    const first = transform(source("first revision"));
-    const second = transform(source("second revision"));
+    const first = transform(source('first revision'));
+    const second = transform(source('second revision'));
 
-    expect(moduleCode(first, "schema_draft2020")).toContain("first revision");
-    expect(moduleCode(second, "schema_draft2020")).toContain("second revision");
+    expect(moduleCode(first, 'schema_draft2020')).toContain('first revision');
+    expect(moduleCode(second, 'schema_draft2020')).toContain('second revision');
   });
 
   test("a nested component name is part of the document's identity", () => {
@@ -135,16 +135,16 @@ describe("virtual module identity", () => {
 
     // Same path and same structure: only the nested schema name differs, and
     // it decides both the `$ref` and the `components.schemas` key.
-    const users = transform(source("User"));
-    const admins = transform(source("Admin"));
+    const users = transform(source('User'));
+    const admins = transform(source('Admin'));
 
-    expect(moduleCode(users, "openapiSchema")).toContain('"User"');
-    const adminDoc = moduleCode(admins, "openapiSchema");
+    expect(moduleCode(users, 'openapiSchema')).toContain('"User"');
+    const adminDoc = moduleCode(admins, 'openapiSchema');
     expect(adminDoc).toContain('"Admin"');
     expect(adminDoc).not.toContain('"User"');
   });
 
-  test("a changed field number is a new protobuf schema", () => {
+  test('a changed field number is a new protobuf schema', () => {
     const source = (fieldNumber: number) => `
       import { protobufSchema } from "wiz";
       export interface Wire {
@@ -159,7 +159,7 @@ describe("virtual module identity", () => {
 
     // The schema module carries the wire numbers as data and renders the
     // `.proto` text from them, so that is where the contract is observable.
-    const marker = "export function protobufSchema";
+    const marker = 'export function protobufSchema';
     expect(moduleCode(one, marker)).toContain('"fieldNumber": 1');
     expect(moduleCode(two, marker)).toContain('"fieldNumber": 2');
   });

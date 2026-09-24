@@ -1,4 +1,4 @@
-import type { ObjectTypeIR, TypeIR, ValidationError } from "../types.ts";
+import type { ObjectTypeIR, TypeIR, ValidationError } from '../types.ts';
 
 /**
  * A parser for query strings, generated from the type they should produce.
@@ -17,7 +17,7 @@ import type { ObjectTypeIR, TypeIR, ValidationError } from "../types.ts";
  */
 
 /** Values a query string can be handed as. */
-const INPUT_TYPES = "string, URLSearchParams or object";
+const INPUT_TYPES = 'string, URLSearchParams or object';
 
 /**
  * The coercion a declared type needs, by helper name.
@@ -27,34 +27,40 @@ const INPUT_TYPES = "string, URLSearchParams or object";
  */
 function coercerFor(ir: TypeIR): string | undefined {
   switch (ir.kind) {
-    case "primitive":
+    case 'primitive':
       switch (ir.type) {
-        case "number":
-          return "__wizQueryNumber";
-        case "bigint":
-          return "__wizQueryBigInt";
-        case "boolean":
-          return "__wizQueryBoolean";
-        case "date":
-          return "__wizQueryDate";
+        case 'number':
+          return '__wizQueryNumber';
+        case 'bigint':
+          return '__wizQueryBigInt';
+        case 'boolean':
+          return '__wizQueryBoolean';
+        case 'date':
+          return '__wizQueryDate';
         default:
           return undefined;
       }
 
-    case "literal":
+    case 'literal':
       // A literal's own type says what to coerce to, so `?page=2` reaches a
       // `2` literal rather than being compared as `"2"`.
-      if (typeof ir.value === "number") return "__wizQueryNumber";
-      if (typeof ir.value === "boolean") return "__wizQueryBoolean";
-      if (typeof ir.value === "bigint") return "__wizQueryBigInt";
+      if (typeof ir.value === 'number') {
+        return '__wizQueryNumber';
+      }
+      if (typeof ir.value === 'boolean') {
+        return '__wizQueryBoolean';
+      }
+      if (typeof ir.value === 'bigint') {
+        return '__wizQueryBigInt';
+      }
       return undefined;
 
-    case "enum": {
-      const numeric = ir.members.every((member) => typeof member.value === "number");
-      return numeric ? "__wizQueryNumber" : undefined;
+    case 'enum': {
+      const numeric = ir.members.every((member) => typeof member.value === 'number');
+      return numeric ? '__wizQueryNumber' : undefined;
     }
 
-    case "union": {
+    case 'union': {
       // Only when every member wants the same thing. A union of a number and a
       // string has no single answer, and guessing would make `?q=7` a number
       // in a field that accepts both - a coercion the caller never asked for.
@@ -69,12 +75,12 @@ function coercerFor(ir: TypeIR): string | undefined {
 
 /** The expression that turns `access` into the value the type declares. */
 function coerceExpression(ir: TypeIR, access: string): string {
-  if (ir.kind === "array") {
+  if (ir.kind === 'array') {
     // A repeated key is how a query string spells a list, and a single
     // occurrence is a list of one - which is why this cannot just check
     // `Array.isArray`.
-    const element = coerceExpression(ir.element, "item");
-    return element === "item"
+    const element = coerceExpression(ir.element, 'item');
+    return element === 'item'
       ? `__wizQueryArray(${access})`
       : `__wizQueryArray(${access}).map((item) => ${element})`;
   }
@@ -92,12 +98,11 @@ export class QueryValidationError extends Error {
 
   constructor(errors: ValidationError[]) {
     super(
-      "Invalid query: " +
-        errors
-          .map((error) => (error.path ? error.path + ": " + error.message : error.message))
-          .join("; ")
+      `Invalid query: ${errors
+        .map((error) => (error.path ? `${error.path}: ${error.message}` : error.message))
+        .join('; ')}`
     );
-    this.name = "QueryValidationError";
+    this.name = 'QueryValidationError';
     this.errors = errors;
   }
 }
@@ -116,7 +121,7 @@ const ERROR_CLASS = [
   `    this.errors = errors;`,
   `  }`,
   `}`,
-].join("\n");
+].join('\n');
 
 const RUNTIME = [
   `function __wizQuerySource(input) {`,
@@ -177,7 +182,7 @@ const RUNTIME = [
   `  if (value === undefined) return value;`,
   `  return Array.isArray(value) ? value : [value];`,
   `}`,
-].join("\n");
+].join('\n');
 
 /**
  * A `parseQuery` that coerces and then validates.
@@ -188,7 +193,7 @@ const RUNTIME = [
  * client emitter, because the mistake is at the callsite and a stub says so.
  */
 export function generateQueryParserCode(ir: TypeIR): string {
-  if (ir.kind !== "object") {
+  if (ir.kind !== 'object') {
     return [
       ERROR_CLASS,
       ``,
@@ -197,7 +202,7 @@ export function generateQueryParserCode(ir: TypeIR): string {
       `    "[wiz] parseQuery needs an object type: a query string is a set of named fields, and ${ir.kind} has none"`,
       `  );`,
       `}`,
-    ].join("\n");
+    ].join('\n');
   }
 
   const lines: string[] = [
@@ -225,7 +230,7 @@ export function generateQueryParserCode(ir: TypeIR): string {
     lines.push(`  {`);
     lines.push(`    const value = source[${key}];`);
     lines.push(
-      `    if (value !== undefined) out[${key}] = ${coerceExpression(property.type, "value")};`
+      `    if (value !== undefined) out[${key}] = ${coerceExpression(property.type, 'value')};`
     );
     lines.push(`  }`);
   }
@@ -236,5 +241,5 @@ export function generateQueryParserCode(ir: TypeIR): string {
   lines.push(`  return out;`);
   lines.push(`}`);
 
-  return lines.join("\n");
+  return lines.join('\n');
 }

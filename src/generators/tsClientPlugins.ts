@@ -1,6 +1,6 @@
-import { walkTypeIR, type TypeIR } from "../ir/types.ts";
-import type { WizLogger } from "../logger.ts";
-import { docComment, literalText, TS_IDENTIFIER } from "./tsTypes.ts";
+import { walkTypeIR, type TypeIR } from '../ir/types.ts';
+import type { WizLogger } from '../logger.ts';
+import { docComment, literalText, TS_IDENTIFIER } from './tsTypes.ts';
 
 /**
  * The seam through which OpenAPI vendor extensions shape the emitted client.
@@ -75,11 +75,7 @@ export interface AppliedPlugins {
    * The expression one operation's response body is read from, wrapped by
    * whichever plugin claims the response's extensions.
    */
-  responseBody(
-    name: string,
-    extensions: Record<string, unknown> | undefined,
-    body: string
-  ): string;
+  responseBody(name: string, extensions: Record<string, unknown> | undefined, body: string): string;
 }
 
 /**
@@ -112,7 +108,9 @@ export function applyPlugins(
 
   const warnUnclaimed = (extensions: Readonly<Record<string, unknown>>) => {
     for (const key of Object.keys(extensions)) {
-      if (claimed.has(key) || warned.has(key)) continue;
+      if (claimed.has(key) || warned.has(key)) {
+        continue;
+      }
       warned.add(key);
       logger.warn(`[wiz] no plugin handles vendor extension '${key}'; it is dropped`);
     }
@@ -121,7 +119,9 @@ export function applyPlugins(
   for (const [name, root] of types) {
     walkTypeIR(root, (node) => {
       const extensions = node.extensions;
-      if (!extensions) return;
+      if (!extensions) {
+        return;
+      }
       warnUnclaimed(extensions);
       for (const plugin of plugins) {
         plugin.type?.({ node, name, extensions, logger });
@@ -133,7 +133,9 @@ export function applyPlugins(
     types,
     declaration(name, ir, identifiers) {
       const extensions = ir.extensions;
-      if (!extensions) return undefined;
+      if (!extensions) {
+        return undefined;
+      }
       for (const plugin of plugins) {
         const rendered = plugin.declaration?.({
           ir,
@@ -142,16 +144,22 @@ export function applyPlugins(
           extensions,
           logger,
         });
-        if (rendered !== undefined) return rendered;
+        if (rendered !== undefined) {
+          return rendered;
+        }
       }
       return undefined;
     },
     responseBody(name, extensions, body) {
-      if (!extensions) return body;
+      if (!extensions) {
+        return body;
+      }
       warnUnclaimed(extensions);
       for (const plugin of plugins) {
         const rewritten = plugin.responseBody?.({ name, extensions, body, logger });
-        if (rewritten !== undefined) return rewritten;
+        if (rewritten !== undefined) {
+          return rewritten;
+        }
       }
       return body;
     },
@@ -162,14 +170,13 @@ export function applyPlugins(
  * The `x-*` value as a list, or nothing when the schema is not shaped as this
  * family of extensions is defined: one entry per enum value, in order.
  */
-function positionalList(
-  input: TsClientTypeInput,
-  key: string
-): unknown[] | undefined {
+function positionalList(input: TsClientTypeInput, key: string): unknown[] | undefined {
   const { node, name, logger } = input;
   const value = input.extensions[key];
-  if (value === undefined) return undefined;
-  if (node.kind !== "enum") {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (node.kind !== 'enum') {
     logger.warn(`[wiz] ${key} on '${name}' is ignored; the schema is not an enum`);
     return undefined;
   }
@@ -191,14 +198,16 @@ function positionalList(
 }
 
 export const enumDescriptionsPlugin: TsClientPlugin = {
-  name: "x-enum-descriptions",
-  extensions: ["x-enum-descriptions"],
+  name: 'x-enum-descriptions',
+  extensions: ['x-enum-descriptions'],
   type(input) {
-    const list = positionalList(input, "x-enum-descriptions");
-    if (!list || input.node.kind !== "enum") return;
+    const list = positionalList(input, 'x-enum-descriptions');
+    if (!list || input.node.kind !== 'enum') {
+      return;
+    }
     input.node.members.forEach((member, index) => {
       const description = list[index];
-      if (typeof description === "string" && description.length > 0) {
+      if (typeof description === 'string' && description.length > 0) {
         member.description = description;
       }
     });
@@ -206,18 +215,19 @@ export const enumDescriptionsPlugin: TsClientPlugin = {
 };
 
 export const enumVarnamesPlugin: TsClientPlugin = {
-  name: "x-enum-varnames",
-  extensions: ["x-enum-varnames"],
+  name: 'x-enum-varnames',
+  extensions: ['x-enum-varnames'],
   type(input) {
-    const list = positionalList(input, "x-enum-varnames");
-    if (!list || input.node.kind !== "enum") return;
+    const list = positionalList(input, 'x-enum-varnames');
+    if (!list || input.node.kind !== 'enum') {
+      return;
+    }
 
     const taken = new Set<string>();
     let repeated: string | undefined;
     input.node.members.forEach((member, index) => {
       const varname = list[index];
-      const candidate =
-        typeof varname === "string" && varname.length > 0 ? varname : member.name;
+      const candidate = typeof varname === 'string' && varname.length > 0 ? varname : member.name;
       // A repeated key is a duplicate property in the emitted const object,
       // which TypeScript rejects outright, so the later one is suffixed.
       let unique = candidate;
@@ -236,25 +246,27 @@ export const enumVarnamesPlugin: TsClientPlugin = {
     }
   },
   declaration({ ir, name, identifiers, extensions }) {
-    if (ir.kind !== "enum" || ir.members.length === 0) return undefined;
+    if (ir.kind !== 'enum' || ir.members.length === 0) {
+      return undefined;
+    }
     // Only claim an enum this plugin actually renamed.
-    if (!Array.isArray(extensions["x-enum-varnames"])) return undefined;
+    if (!Array.isArray(extensions['x-enum-varnames'])) {
+      return undefined;
+    }
 
     const identifier = identifiers.get(name) ?? name;
     const entries = ir.members
       .map((member) => {
-        const key = TS_IDENTIFIER.test(member.name)
-          ? member.name
-          : JSON.stringify(member.name);
-        return `${docComment(member, "  ")}  ${key}: ${literalText(member.value)},`;
+        const key = TS_IDENTIFIER.test(member.name) ? member.name : JSON.stringify(member.name);
+        return `${docComment(member, '  ')}  ${key}: ${literalText(member.value)},`;
       })
-      .join("\n");
+      .join('\n');
 
     // A const object plus a union alias, not a TypeScript `enum`: the union
     // keeps a bare `"active"` assignable wherever the type is expected, so no
     // emitted signature gets stricter than it was. The schema's own doc goes
     // on the const alone, so hover text is not shown twice.
-    return `${docComment(ir, "")}export const ${identifier} = {\n${entries}\n} as const;\nexport type ${identifier} = (typeof ${identifier})[keyof typeof ${identifier}];`;
+    return `${docComment(ir, '')}export const ${identifier} = {\n${entries}\n} as const;\nexport type ${identifier} = (typeof ${identifier})[keyof typeof ${identifier}];`;
   },
 };
 
@@ -269,17 +281,25 @@ export const enumVarnamesPlugin: TsClientPlugin = {
  * thrown from inside the generated client.
  */
 function jsonPathAccess(selector: string): string | undefined {
-  if (!selector.startsWith("$")) return undefined;
+  if (!selector.startsWith('$')) {
+    return undefined;
+  }
   const segment = /\.([A-Za-z_$][A-Za-z0-9_$]*)|\[(\d+)\]|\["([^"\\]*)"\]|\['([^'\\]*)'\]/y;
   segment.lastIndex = 1;
-  let access = "$";
+  let access = '$';
   while (segment.lastIndex < selector.length) {
     const match = segment.exec(selector);
-    if (!match) return undefined;
+    if (!match) {
+      return undefined;
+    }
     const [, property, index, doubleQuoted, singleQuoted] = match;
-    if (property !== undefined) access += `?.${property}`;
-    else if (index !== undefined) access += `?.[${index}]`;
-    else access += `?.[${JSON.stringify(doubleQuoted ?? singleQuoted)}]`;
+    if (property !== undefined) {
+      access += `?.${property}`;
+    } else if (index !== undefined) {
+      access += `?.[${index}]`;
+    } else {
+      access += `?.[${JSON.stringify(doubleQuoted ?? singleQuoted)}]`;
+    }
   }
   return access;
 }
@@ -288,8 +308,11 @@ function jsonPathAccess(selector: string): string | undefined {
 function parses(expression: string): boolean {
   const source = `const __wizSelect = ($: any) => (${expression});`;
   try {
-    if (typeof Bun === "undefined") new Function("$", `return (${expression});`);
-    else new Bun.Transpiler({ loader: "ts" }).transformSync(source);
+    if (typeof Bun === 'undefined') {
+      new Function('$', `return (${expression});`);
+    } else {
+      new Bun.Transpiler({ loader: 'ts' }).transformSync(source);
+    }
     return true;
   } catch {
     return false;
@@ -313,19 +336,23 @@ function parses(expression: string): boolean {
  * path is warned about.
  */
 export const selectPlugin: TsClientPlugin = {
-  name: "x-select",
-  extensions: ["x-select"],
+  name: 'x-select',
+  extensions: ['x-select'],
   responseBody({ extensions, name, body, logger }) {
-    const selector = extensions["x-select"];
-    if (selector === undefined) return undefined;
-    if (typeof selector !== "string" || selector.trim() === "") {
+    const selector = extensions['x-select'];
+    if (selector === undefined) {
+      return undefined;
+    }
+    if (typeof selector !== 'string' || selector.trim() === '') {
       logger.warn(`[wiz] x-select on '${name}' is ignored; expected a non-empty string`);
       return undefined;
     }
 
     const expression = selector.trim();
     const path = jsonPathAccess(expression);
-    if (path === "$") return body;
+    if (path === '$') {
+      return body;
+    }
     if (path === undefined) {
       if (!parses(expression)) {
         logger.warn(

@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
-import { openRPCHandler } from "../src/server/openrpc.ts";
+import { describe, expect, test } from 'bun:test';
+import { openRPCHandler } from '../src/server/openrpc.ts';
 import {
   openRpcClient,
   httpTransport,
@@ -7,7 +7,7 @@ import {
   tcpTransport,
   type OpenRpcCall,
   type OpenRpcResult,
-} from "../src/transports/openrpc.ts";
+} from '../src/transports/openrpc.ts';
 
 class CalculatorService {
   async multiply(params: { a: number; b: number }) {
@@ -16,7 +16,7 @@ class CalculatorService {
 
   async divide(a: number, b: number) {
     if (b === 0) {
-      const err = new Error("Division by zero");
+      const err = new Error('Division by zero');
       (err as any).code = -32000;
       throw err;
     }
@@ -24,12 +24,12 @@ class CalculatorService {
   }
 }
 
-describe("OpenRPC Client & Transports", () => {
+describe('OpenRPC Client & Transports', () => {
   const handler = openRPCHandler({
     services: [new CalculatorService()],
   });
 
-  test("openRpcClient over HTTP transport", async () => {
+  test('openRpcClient over HTTP transport', async () => {
     const transport = httpTransport({
       fetch: async (url, init) => handler.fetch(new Request(String(url), init)),
     });
@@ -54,7 +54,7 @@ describe("OpenRPC Client & Transports", () => {
     expect(directProd).toBe(12);
   });
 
-  test("openRpcClient over WebSocket transport (mock)", async () => {
+  test('openRpcClient over WebSocket transport (mock)', async () => {
     let wsOnMessage: ((ev: { data: string }) => void) | undefined;
     const mockWs = {
       readyState: 1,
@@ -62,7 +62,9 @@ describe("OpenRPC Client & Transports", () => {
         await handler.websocket.message(
           {
             send: (reply: string) => {
-              if (wsOnMessage) wsOnMessage({ data: reply });
+              if (wsOnMessage) {
+                wsOnMessage({ data: reply });
+              }
             },
           },
           msg
@@ -71,7 +73,7 @@ describe("OpenRPC Client & Transports", () => {
       onmessage: null as any,
     };
 
-    Object.defineProperty(mockWs, "onmessage", {
+    Object.defineProperty(mockWs, 'onmessage', {
       set(fn) {
         wsOnMessage = fn;
       },
@@ -80,7 +82,7 @@ describe("OpenRPC Client & Transports", () => {
       },
     });
 
-    const transport = webSocketTransport({ url: "ws://localhost", ws: mockWs });
+    const transport = webSocketTransport({ url: 'ws://localhost', ws: mockWs });
     const client = openRpcClient<{ multiply(params: { a: number; b: number }): Promise<number> }>({
       transport,
     });
@@ -89,12 +91,14 @@ describe("OpenRPC Client & Transports", () => {
     expect(res).toBe(25);
   });
 
-  test("openRpcClient over TCP transport (mock socket)", async () => {
+  test('openRpcClient over TCP transport (mock socket)', async () => {
     let socketDataListener: ((data: Uint8Array) => void) | undefined;
 
     const mockSocket = {
       on(event: string, fn: any) {
-        if (event === "data") socketDataListener = fn;
+        if (event === 'data') {
+          socketDataListener = fn;
+        }
       },
       write: async (dataStr: string) => {
         await handler.socket.data(
@@ -119,15 +123,15 @@ describe("OpenRPC Client & Transports", () => {
     expect(res).toBe(32);
   });
 
-  test("openRpcClient with interceptors", async () => {
+  test('openRpcClient with interceptors', async () => {
     const traceIds: string[] = [];
 
     const traceInterceptor = async (
       call: OpenRpcCall,
       next: (req: OpenRpcCall) => Promise<OpenRpcResult>
     ) => {
-      call.meta = { ...call.meta, "x-trace-id": "trace-123" };
-      traceIds.push("trace-123");
+      call.meta = { ...call.meta, 'x-trace-id': 'trace-123' };
+      traceIds.push('trace-123');
       return await next(call);
     };
 
@@ -142,10 +146,10 @@ describe("OpenRPC Client & Transports", () => {
 
     const res = await client.multiply({ a: 9, b: 9 });
     expect(res).toBe(81);
-    expect(traceIds).toEqual(["trace-123"]);
+    expect(traceIds).toEqual(['trace-123']);
   });
 
-  test("openRpcClient handles error response", async () => {
+  test('openRpcClient handles error response', async () => {
     const transport = httpTransport({
       fetch: async (url, init) => handler.fetch(new Request(String(url), init)),
     });
@@ -156,9 +160,9 @@ describe("OpenRPC Client & Transports", () => {
 
     try {
       await client.divide(10, 0);
-      expect.unreachable("Should have thrown error");
+      expect.unreachable('Should have thrown error');
     } catch (err: any) {
-      expect(err.message).toBe("Division by zero");
+      expect(err.message).toBe('Division by zero');
       expect(err.code).toBe(-32000);
     }
   });

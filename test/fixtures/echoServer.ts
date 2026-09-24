@@ -1,7 +1,7 @@
+import { join } from 'node:path';
 // @wiz-ignore
-import * as grpc from "@grpc/grpc-js";
-import * as loader from "@grpc/proto-loader";
-import { join } from "node:path";
+import * as grpc from '@grpc/grpc-js';
+import * as loader from '@grpc/proto-loader';
 
 /**
  * A real gRPC server, so the emitted client is checked against an
@@ -11,7 +11,7 @@ import { join } from "node:path";
  * own framing and its own protobuf. If a call succeeds against this, the client
  * speaks gRPC rather than something that merely looks like it.
  */
-export const ECHO_PROTO = join(import.meta.dir, "echo.proto");
+export const ECHO_PROTO = join(import.meta.dir, 'echo.proto');
 
 interface Ping {
   text: string;
@@ -22,11 +22,7 @@ interface Pong {
   text: string;
 }
 
-type Callback = (
-  error: grpc.ServiceError | null,
-  value?: Pong,
-  trailing?: grpc.Metadata
-) => void;
+type Callback = (error: grpc.ServiceError | null, value?: Pong, trailing?: grpc.Metadata) => void;
 
 export interface RunningServer {
   port: number;
@@ -47,23 +43,23 @@ export async function startEchoServer(): Promise<RunningServer> {
   // 2 is gzip in grpc-js's algorithm table: replies come back compressed when
   // the client says it accepts them that way, which is what exercises our
   // decompression against a real implementation.
-  const server = new grpc.Server({ "grpc.default_compression_algorithm": 2 });
+  const server = new grpc.Server({ 'grpc.default_compression_algorithm': 2 });
   server.addService(echo.v1.Echo.service, {
     // Unary, plus the one path that answers with a status instead of a message.
     // Both append trailing metadata, which is where a real server explains
     // itself beyond the status code.
     Unary: (call: grpc.ServerUnaryCall<Ping, Pong>, callback: Callback) => {
       const trailing = new grpc.Metadata();
-      trailing.set("x-request-id", "req-42");
+      trailing.set('x-request-id', 'req-42');
 
-      if (call.request.text === "boom") {
-        trailing.set("x-retry-after", "5");
+      if (call.request.text === 'boom') {
+        trailing.set('x-retry-after', '5');
         callback({
           code: grpc.status.INVALID_ARGUMENT,
-          details: "no booms here",
+          details: 'no booms here',
           metadata: trailing,
-          name: "Error",
-          message: "no booms here",
+          name: 'Error',
+          message: 'no booms here',
         });
         return;
       }
@@ -80,13 +76,13 @@ export async function startEchoServer(): Promise<RunningServer> {
 
     Up: (call: grpc.ServerReadableStream<Ping, Pong>, callback: Callback) => {
       const seen: string[] = [];
-      call.on("data", (ping: Ping) => seen.push(ping.text));
-      call.on("end", () => callback(null, { text: seen.join(",") }));
+      call.on('data', (ping: Ping) => seen.push(ping.text));
+      call.on('end', () => callback(null, { text: seen.join(',') }));
     },
 
     Both: (call: grpc.ServerDuplexStream<Ping, Pong>) => {
-      call.on("data", (ping: Ping) => call.write({ text: `re:${ping.text}` }));
-      call.on("end", () => call.end());
+      call.on('data', (ping: Ping) => call.write({ text: `re:${ping.text}` }));
+      call.on('end', () => call.end());
     },
 
     // Never answers, so a deadline has something to expire against.
@@ -94,10 +90,8 @@ export async function startEchoServer(): Promise<RunningServer> {
   });
 
   const port = await new Promise<number>((resolve, reject) => {
-    server.bindAsync(
-      "127.0.0.1:0",
-      grpc.ServerCredentials.createInsecure(),
-      (error, bound) => (error ? reject(error) : resolve(bound))
+    server.bindAsync('127.0.0.1:0', grpc.ServerCredentials.createInsecure(), (error, bound) =>
+      error ? reject(error) : resolve(bound)
     );
   });
   return {

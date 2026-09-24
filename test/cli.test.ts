@@ -1,168 +1,166 @@
 // @wiz-ignore
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { addPreload } from "../src/cli/bunfig.ts";
-import { BUNFIG_FILE, PLUGIN_FILE, runInit } from "../src/cli/init.ts";
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { addPreload } from '../src/cli/bunfig.ts';
+import { BUNFIG_FILE, PLUGIN_FILE, runInit } from '../src/cli/init.ts';
 
-const ENTRY = "./wizPlugin.ts";
+const ENTRY = './wizPlugin.ts';
 
 /** Every result must still parse, or we have corrupted someone's config. */
 function reparse(source: string): Record<string, any> {
   return Bun.TOML.parse(source) as Record<string, any>;
 }
 
-describe("adding a preload entry", () => {
-  test("creates the key in an empty file", () => {
-    const { source, changed } = addPreload("", ENTRY, "");
+describe('adding a preload entry', () => {
+  test('creates the key in an empty file', () => {
+    const { source, changed } = addPreload('', ENTRY, '');
     expect(changed).toBe(true);
     expect(reparse(source).preload).toEqual([ENTRY]);
   });
 
-  test("extends an existing array", () => {
-    const { source } = addPreload(`preload = ["./a.ts"]\n`, ENTRY, "");
-    expect(reparse(source).preload).toEqual(["./a.ts", ENTRY]);
+  test('extends an existing array', () => {
+    const { source } = addPreload(`preload = ["./a.ts"]\n`, ENTRY, '');
+    expect(reparse(source).preload).toEqual(['./a.ts', ENTRY]);
   });
 
-  test("promotes a bare string to an array", () => {
-    const { source } = addPreload(`preload = "./a.ts"\n`, ENTRY, "");
-    expect(reparse(source).preload).toEqual(["./a.ts", ENTRY]);
+  test('promotes a bare string to an array', () => {
+    const { source } = addPreload(`preload = "./a.ts"\n`, ENTRY, '');
+    expect(reparse(source).preload).toEqual(['./a.ts', ENTRY]);
   });
 
-  test("fills an empty array", () => {
-    const { source } = addPreload(`preload = []\n`, ENTRY, "");
+  test('fills an empty array', () => {
+    const { source } = addPreload(`preload = []\n`, ENTRY, '');
     expect(reparse(source).preload).toEqual([ENTRY]);
   });
 
-  test("extends a multi-line array, keeping its indentation", () => {
+  test('extends a multi-line array, keeping its indentation', () => {
     const source = addPreload(
-      ['preload = [', '    "./a.ts",', '    "./b.ts",', ']', ''].join("\n"),
+      ['preload = [', '    "./a.ts",', '    "./b.ts",', ']', ''].join('\n'),
       ENTRY,
-      ""
+      ''
     ).source;
-    expect(reparse(source).preload).toEqual(["./a.ts", "./b.ts", ENTRY]);
+    expect(reparse(source).preload).toEqual(['./a.ts', './b.ts', ENTRY]);
     expect(source).toContain(`    "${ENTRY}",`);
   });
 
-  test("extends a multi-line array with no trailing comma", () => {
-    const source = addPreload(
-      ["preload = [", '  "./a.ts"', "]", ""].join("\n"),
-      ENTRY,
-      ""
-    ).source;
-    expect(reparse(source).preload).toEqual(["./a.ts", ENTRY]);
+  test('extends a multi-line array with no trailing comma', () => {
+    const source = addPreload(['preload = [', '  "./a.ts"', ']', ''].join('\n'), ENTRY, '').source;
+    expect(reparse(source).preload).toEqual(['./a.ts', ENTRY]);
   });
 
-  test("is a no-op when already listed", () => {
+  test('is a no-op when already listed', () => {
     const original = `preload = ["${ENTRY}"]\n`;
-    const { source, changed } = addPreload(original, ENTRY, "");
+    const { source, changed } = addPreload(original, ENTRY, '');
     expect(changed).toBe(false);
     expect(source).toBe(original);
   });
 
-  test("treats a path with and without ./ as the same entry", () => {
-    const { changed } = addPreload(`preload = ["wizPlugin.ts"]\n`, ENTRY, "");
+  test('treats a path with and without ./ as the same entry', () => {
+    const { changed } = addPreload(`preload = ["wizPlugin.ts"]\n`, ENTRY, '');
     expect(changed).toBe(false);
   });
 
-  test("keeps comments, ordering and unrelated keys", () => {
+  test('keeps comments, ordering and unrelated keys', () => {
     const original = [
-      "# my config",
+      '# my config',
       'telemetry = false',
-      "",
-      "[install]",
+      '',
+      '[install]',
       'registry = "https://example.com"',
-      "",
-    ].join("\n");
-    const { source } = addPreload(original, ENTRY, "");
+      '',
+    ].join('\n');
+    const { source } = addPreload(original, ENTRY, '');
 
-    expect(source).toContain("# my config");
-    expect(source).toContain("telemetry = false");
+    expect(source).toContain('# my config');
+    expect(source).toContain('telemetry = false');
     const parsed = reparse(source);
     expect(parsed.preload).toEqual([ENTRY]);
-    expect(parsed.install.registry).toBe("https://example.com");
+    expect(parsed.install.registry).toBe('https://example.com');
   });
 
-  test("a root key lands before the first section, not inside it", () => {
-    const { source } = addPreload(`[install]\nregistry = "x"\n`, ENTRY, "");
+  test('a root key lands before the first section, not inside it', () => {
+    const { source } = addPreload(`[install]\nregistry = "x"\n`, ENTRY, '');
     // Inserted after `[install]` it would become install.preload.
     expect(reparse(source).preload).toEqual([ENTRY]);
     expect(reparse(source).install.preload).toBeUndefined();
   });
 
-  test("a ] inside a string does not end the array early", () => {
-    const { source } = addPreload(`preload = ["./we[ird].ts"]\n`, ENTRY, "");
-    expect(reparse(source).preload).toEqual(["./we[ird].ts", ENTRY]);
+  test('a ] inside a string does not end the array early', () => {
+    const { source } = addPreload(`preload = ["./we[ird].ts"]\n`, ENTRY, '');
+    expect(reparse(source).preload).toEqual(['./we[ird].ts', ENTRY]);
   });
 
-  test("a trailing comment survives", () => {
-    const { source } = addPreload(`preload = ["./a.ts"] # keep me\n`, ENTRY, "");
-    expect(reparse(source).preload).toEqual(["./a.ts", ENTRY]);
-    expect(source).toContain("# keep me");
+  test('a trailing comment survives', () => {
+    const { source } = addPreload(`preload = ["./a.ts"] # keep me\n`, ENTRY, '');
+    expect(reparse(source).preload).toEqual(['./a.ts', ENTRY]);
+    expect(source).toContain('# keep me');
   });
 
-  describe("the test section", () => {
-    test("is created when absent", () => {
-      const { source } = addPreload("", ENTRY, "test");
+  describe('the test section', () => {
+    test('is created when absent', () => {
+      const { source } = addPreload('', ENTRY, 'test');
       expect(reparse(source).test.preload).toEqual([ENTRY]);
     });
 
-    test("reuses an existing [test] header", () => {
-      const { source } = addPreload(`[test]\nroot = "./src"\n`, ENTRY, "test");
+    test('reuses an existing [test] header', () => {
+      const { source } = addPreload(`[test]\nroot = "./src"\n`, ENTRY, 'test');
       const parsed = reparse(source);
       expect(parsed.test.preload).toEqual([ENTRY]);
-      expect(parsed.test.root).toBe("./src");
+      expect(parsed.test.root).toBe('./src');
       expect(source.match(/\[test\]/g)).toHaveLength(1);
     });
 
-    test("finds the dotted form", () => {
+    test('finds the dotted form', () => {
       const original = `test.preload = ["${ENTRY}"]\n`;
-      expect(addPreload(original, ENTRY, "test").changed).toBe(false);
+      expect(addPreload(original, ENTRY, 'test').changed).toBe(false);
     });
 
-    test("extends the dotted form", () => {
-      const { source } = addPreload(`test.preload = ["./a.ts"]\n`, ENTRY, "test");
-      expect(reparse(source).test.preload).toEqual(["./a.ts", ENTRY]);
+    test('extends the dotted form', () => {
+      const { source } = addPreload(`test.preload = ["./a.ts"]\n`, ENTRY, 'test');
+      expect(reparse(source).test.preload).toEqual(['./a.ts', ENTRY]);
     });
 
-    test("does not confuse the root key with the test key", () => {
-      const { source } = addPreload(`preload = ["./a.ts"]\n`, ENTRY, "test");
+    test('does not confuse the root key with the test key', () => {
+      const { source } = addPreload(`preload = ["./a.ts"]\n`, ENTRY, 'test');
       const parsed = reparse(source);
-      expect(parsed.preload).toEqual(["./a.ts"]);
+      expect(parsed.preload).toEqual(['./a.ts']);
       expect(parsed.test.preload).toEqual([ENTRY]);
     });
   });
 });
 
-describe("wiz init", () => {
+describe('wiz init', () => {
   const dirs: string[] = [];
 
   const workspace = async () => {
-    const dir = await mkdtemp(join(tmpdir(), "wiz-init-"));
+    const dir = await mkdtemp(join(tmpdir(), 'wiz-init-'));
     dirs.push(dir);
     return dir;
   };
 
   afterEach(async () => {
-    for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true });
+    for (const dir of dirs.splice(0)) {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
-  test("writes the plugin file and both preloads", async () => {
+  test('writes the plugin file and both preloads', async () => {
     const cwd = await workspace();
     const result = await runInit({ cwd });
 
     expect(result.changed).toBe(true);
     const plugin = await Bun.file(join(cwd, PLUGIN_FILE)).text();
     expect(plugin).toContain(`from "wiz/plugin"`);
-    expect(plugin).toContain("plugin(wizPlugin())");
+    expect(plugin).toContain('plugin(wizPlugin())');
 
     const parsed = reparse(await Bun.file(join(cwd, BUNFIG_FILE)).text());
     expect(parsed.preload).toEqual([`./${PLUGIN_FILE}`]);
     expect(parsed.test.preload).toEqual([`./${PLUGIN_FILE}`]);
   });
 
-  test("is idempotent", async () => {
+  test('is idempotent', async () => {
     const cwd = await workspace();
     await runInit({ cwd });
     const first = await Bun.file(join(cwd, BUNFIG_FILE)).text();
@@ -170,51 +168,51 @@ describe("wiz init", () => {
     const second = await runInit({ cwd });
     expect(second.changed).toBe(false);
     expect(await Bun.file(join(cwd, BUNFIG_FILE)).text()).toBe(first);
-    expect(second.notes.join(" ")).toContain("already");
+    expect(second.notes.join(' ')).toContain('already');
   });
 
-  test("leaves an existing plugin file alone unless forced", async () => {
+  test('leaves an existing plugin file alone unless forced', async () => {
     const cwd = await workspace();
-    await Bun.write(join(cwd, PLUGIN_FILE), "// mine\n");
+    await Bun.write(join(cwd, PLUGIN_FILE), '// mine\n');
 
     await runInit({ cwd });
-    expect(await Bun.file(join(cwd, PLUGIN_FILE)).text()).toBe("// mine\n");
+    expect(await Bun.file(join(cwd, PLUGIN_FILE)).text()).toBe('// mine\n');
 
     await runInit({ cwd, force: true });
-    expect(await Bun.file(join(cwd, PLUGIN_FILE)).text()).toContain("wizPlugin");
+    expect(await Bun.file(join(cwd, PLUGIN_FILE)).text()).toContain('wizPlugin');
   });
 
-  test("warns when wiz cannot be resolved from the project", async () => {
+  test('warns when wiz cannot be resolved from the project', async () => {
     // Left unsaid, this surfaces as a module error on every later bun command.
     const cwd = await workspace();
     const result = await runInit({ cwd });
-    expect(result.notes.join("\n")).toContain("bun add wiz");
+    expect(result.notes.join('\n')).toContain('bun add wiz');
   });
 
-  test("merges into a config that already has content", async () => {
+  test('merges into a config that already has content', async () => {
     const cwd = await workspace();
     await Bun.write(
       join(cwd, BUNFIG_FILE),
-      ['# keep\npreload = ["./other.ts"]\n', "[test]\nroot = \"./spec\"\n"].join("\n")
+      ['# keep\npreload = ["./other.ts"]\n', '[test]\nroot = "./spec"\n'].join('\n')
     );
 
     await runInit({ cwd });
     const text = await Bun.file(join(cwd, BUNFIG_FILE)).text();
     const parsed = reparse(text);
 
-    expect(text).toContain("# keep");
-    expect(parsed.preload).toEqual(["./other.ts", `./${PLUGIN_FILE}`]);
-    expect(parsed.test.root).toBe("./spec");
+    expect(text).toContain('# keep');
+    expect(parsed.preload).toEqual(['./other.ts', `./${PLUGIN_FILE}`]);
+    expect(parsed.test.root).toBe('./spec');
     expect(parsed.test.preload).toEqual([`./${PLUGIN_FILE}`]);
   });
 });
 
-describe("the wiz binary", () => {
+describe('the wiz binary', () => {
   const run = async (args: string[], cwd: string) => {
-    const proc = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "cli.ts"), ...args], {
+    const proc = Bun.spawn(['bun', join(import.meta.dir, '..', 'src', 'cli.ts'), ...args], {
       cwd,
-      stdout: "pipe",
-      stderr: "pipe",
+      stdout: 'pipe',
+      stderr: 'pipe',
     });
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -223,10 +221,10 @@ describe("the wiz binary", () => {
     return { code: await proc.exited, stdout, stderr };
   };
 
-  test("init sets the project up end to end", async () => {
-    const cwd = await mkdtemp(join(tmpdir(), "wiz-cli-"));
+  test('init sets the project up end to end', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'wiz-cli-'));
     try {
-      const result = await run(["init"], cwd);
+      const result = await run(['init'], cwd);
       expect(result.code).toBe(0);
       expect(result.stdout).toContain(PLUGIN_FILE);
 
@@ -237,24 +235,24 @@ describe("the wiz binary", () => {
     }
   });
 
-  test("an unknown command fails with usage", async () => {
-    const cwd = await mkdtemp(join(tmpdir(), "wiz-cli-"));
+  test('an unknown command fails with usage', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'wiz-cli-'));
     try {
-      const result = await run(["nope"], cwd);
+      const result = await run(['nope'], cwd);
       expect(result.code).toBe(1);
-      expect(result.stderr).toContain("unknown command");
-      expect(result.stderr).toContain("Usage:");
+      expect(result.stderr).toContain('unknown command');
+      expect(result.stderr).toContain('Usage:');
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }
   });
 
-  test("--help succeeds", async () => {
-    const cwd = await mkdtemp(join(tmpdir(), "wiz-cli-"));
+  test('--help succeeds', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'wiz-cli-'));
     try {
-      const result = await run(["--help"], cwd);
+      const result = await run(['--help'], cwd);
       expect(result.code).toBe(0);
-      expect(result.stdout).toContain("wiz init");
+      expect(result.stdout).toContain('wiz init');
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }
@@ -263,34 +261,36 @@ describe("the wiz binary", () => {
 
 const TSCONFIG_JSON = JSON.stringify({
   compilerOptions: {
-    target: "ESNext",
-    module: "Preserve",
-    moduleResolution: "bundler",
+    target: 'ESNext',
+    module: 'Preserve',
+    moduleResolution: 'bundler',
     strict: true,
     noEmit: true,
     allowImportingTsExtensions: true,
   },
-  include: ["src"],
+  include: ['src'],
 });
 
-describe("wiz eject through the binary", () => {
+describe('wiz eject through the binary', () => {
   const scratch: string[] = [];
 
   afterEach(async () => {
-    for (const dir of scratch.splice(0)) await rm(dir, { recursive: true, force: true });
+    for (const dir of scratch.splice(0)) {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   const workspace = async () => {
-    const dir = await mkdtemp(join(tmpdir(), "wiz-eject-cli-"));
+    const dir = await mkdtemp(join(tmpdir(), 'wiz-eject-cli-'));
     scratch.push(dir);
     return dir;
   };
 
   const run = async (args: string[], cwd: string) => {
-    const proc = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "cli.ts"), ...args], {
+    const proc = Bun.spawn(['bun', join(import.meta.dir, '..', 'src', 'cli.ts'), ...args], {
       cwd,
-      stdout: "pipe",
-      stderr: "pipe",
+      stdout: 'pipe',
+      stderr: 'pipe',
     });
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -304,64 +304,64 @@ export interface User { name: string }
 export const keys = keysOf<User>();
 `;
 
-  test("one file with no output path prints to stdout", async () => {
+  test('one file with no output path prints to stdout', async () => {
     const cwd = await workspace();
-    await Bun.write(join(cwd, "one.ts"), SOURCE);
+    await Bun.write(join(cwd, 'one.ts'), SOURCE);
 
-    const result = await run(["eject", "one.ts"], cwd);
+    const result = await run(['eject', 'one.ts'], cwd);
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain("export const keys =");
+    expect(result.stdout).toContain('export const keys =');
     expect(result.stdout).not.toMatch(/from\s+"wiz"/);
   });
 
-  test("one file with an output path writes it, overwriting", async () => {
+  test('one file with an output path writes it, overwriting', async () => {
     const cwd = await workspace();
-    await Bun.write(join(cwd, "one.ts"), SOURCE);
-    await Bun.write(join(cwd, "out.ts"), "// stale\n");
+    await Bun.write(join(cwd, 'one.ts'), SOURCE);
+    await Bun.write(join(cwd, 'out.ts'), '// stale\n');
 
-    const result = await run(["eject", "one.ts", "out.ts"], cwd);
+    const result = await run(['eject', 'one.ts', 'out.ts'], cwd);
     expect(result.code).toBe(0);
 
-    const written = await Bun.file(join(cwd, "out.ts")).text();
-    expect(written).not.toContain("stale");
-    expect(written).toContain("export const keys =");
+    const written = await Bun.file(join(cwd, 'out.ts')).text();
+    expect(written).not.toContain('stale');
+    expect(written).toContain('export const keys =');
   });
 
-  test("a directory with no outdir prints a JSON tree keyed by path", async () => {
+  test('a directory with no outdir prints a JSON tree keyed by path', async () => {
     const cwd = await workspace();
-    await Bun.write(join(cwd, "tsconfig.json"), TSCONFIG_JSON);
-    await Bun.write(join(cwd, "src", "one.ts"), SOURCE);
+    await Bun.write(join(cwd, 'tsconfig.json'), TSCONFIG_JSON);
+    await Bun.write(join(cwd, 'src', 'one.ts'), SOURCE);
 
-    const result = await run(["eject", "."], cwd);
+    const result = await run(['eject', '.'], cwd);
     expect(result.code).toBe(0);
 
     const tree = JSON.parse(result.stdout) as Record<string, string>;
-    expect(Object.keys(tree)).toContain("src/one.ts");
-    expect(tree["src/one.ts"]).toContain("export const keys =");
+    expect(Object.keys(tree)).toContain('src/one.ts');
+    expect(tree['src/one.ts']).toContain('export const keys =');
   });
 
-  test("a directory with an outdir mirrors the tree", async () => {
+  test('a directory with an outdir mirrors the tree', async () => {
     const cwd = await workspace();
-    await Bun.write(join(cwd, "tsconfig.json"), TSCONFIG_JSON);
-    await Bun.write(join(cwd, "src", "one.ts"), SOURCE);
+    await Bun.write(join(cwd, 'tsconfig.json'), TSCONFIG_JSON);
+    await Bun.write(join(cwd, 'src', 'one.ts'), SOURCE);
 
-    const result = await run(["eject", ".", "dist"], cwd);
+    const result = await run(['eject', '.', 'dist'], cwd);
     expect(result.code).toBe(0);
-    expect(await Bun.file(join(cwd, "dist", "src", "one.ts")).exists()).toBe(true);
+    expect(await Bun.file(join(cwd, 'dist', 'src', 'one.ts')).exists()).toBe(true);
   });
 
-  test("eject needs something to eject", async () => {
+  test('eject needs something to eject', async () => {
     const cwd = await workspace();
-    const result = await run(["eject"], cwd);
+    const result = await run(['eject'], cwd);
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain("needs a file or directory");
+    expect(result.stderr).toContain('needs a file or directory');
   });
 
-  test("a project eject without a tsconfig is refused", async () => {
+  test('a project eject without a tsconfig is refused', async () => {
     const cwd = await workspace();
-    const result = await run(["eject", "."], cwd);
+    const result = await run(['eject', '.'], cwd);
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain("no tsconfig.json");
+    expect(result.stderr).toContain('no tsconfig.json');
   });
 });
 
@@ -385,52 +385,54 @@ const GENERATOR_MODULE = `export default {
 `;
 
 const API_DOC = JSON.stringify({
-  openapi: "3.1.0",
-  info: { title: "Users", version: "1.0.0" },
+  openapi: '3.1.0',
+  info: { title: 'Users', version: '1.0.0' },
   paths: {
-    "/users": {
+    '/users': {
       get: {
-        operationId: "listUsers",
-        responses: { "200": { description: "ok" } },
+        operationId: 'listUsers',
+        responses: { '200': { description: 'ok' } },
       },
     },
   },
   components: {
     schemas: {
       User: {
-        type: "object",
-        properties: { name: { type: "string" } },
-        required: ["name"],
+        type: 'object',
+        properties: { name: { type: 'string' } },
+        required: ['name'],
       },
     },
   },
 });
 
-describe("wiz generate through the binary", () => {
+describe('wiz generate through the binary', () => {
   const scratch: string[] = [];
 
   afterEach(async () => {
-    for (const dir of scratch.splice(0)) await rm(dir, { recursive: true, force: true });
+    for (const dir of scratch.splice(0)) {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   /** Every case needs the generator module and the document, so seed both. */
   const workspace = async () => {
-    const dir = await mkdtemp(join(tmpdir(), "wiz-generate-cli-"));
+    const dir = await mkdtemp(join(tmpdir(), 'wiz-generate-cli-'));
     scratch.push(dir);
-    await Bun.write(join(dir, "gen.ts"), GENERATOR_MODULE);
-    await Bun.write(join(dir, "api.json"), API_DOC);
+    await Bun.write(join(dir, 'gen.ts'), GENERATOR_MODULE);
+    await Bun.write(join(dir, 'api.json'), API_DOC);
     return dir;
   };
 
-  const run = async (args: string[], cwd: string, stdin = "") => {
+  const run = async (args: string[], cwd: string, stdin = '') => {
     // stdin is always piped: closing it empty is what a caller that passes a
     // file path does anyway, and switching between "ignore" and "pipe" would
     // only make the sink optional.
-    const proc = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "cli.ts"), ...args], {
+    const proc = Bun.spawn(['bun', join(import.meta.dir, '..', 'src', 'cli.ts'), ...args], {
       cwd,
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
     });
     proc.stdin.write(stdin);
     await proc.stdin.end();
@@ -441,79 +443,71 @@ describe("wiz generate through the binary", () => {
     return { code: await proc.exited, stdout, stderr };
   };
 
-  test("a file into --outdir writes every generated file", async () => {
+  test('a file into --outdir writes every generated file', async () => {
     const cwd = await workspace();
 
-    const result = await run(["generate", "-g", "gen.ts", "api.json", "-o", "out"], cwd);
+    const result = await run(['generate', '-g', 'gen.ts', 'api.json', '-o', 'out'], cwd);
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain(join("out", "types.ts"));
+    expect(result.stdout).toContain(join('out', 'types.ts'));
 
-    expect(await Bun.file(join(cwd, "out", "types.ts")).text()).toBe(
-      "// 3.1 lenient=false\n"
-    );
-    expect(await Bun.file(join(cwd, "out", "nested", "names.ts")).text()).toBe(
-      '["User"]\n'
-    );
+    expect(await Bun.file(join(cwd, 'out', 'types.ts')).text()).toBe('// 3.1 lenient=false\n');
+    expect(await Bun.file(join(cwd, 'out', 'nested', 'names.ts')).text()).toBe('["User"]\n');
   });
 
-  test("a second run overwrites the outdir, and --lenient reaches the generator", async () => {
+  test('a second run overwrites the outdir, and --lenient reaches the generator', async () => {
     const cwd = await workspace();
-    await run(["generate", "-g", "gen.ts", "api.json", "--outdir", "out"], cwd);
+    await run(['generate', '-g', 'gen.ts', 'api.json', '--outdir', 'out'], cwd);
 
     const result = await run(
-      ["generate", "-g", "gen.ts", "api.json", "--outdir", "out", "--lenient"],
+      ['generate', '-g', 'gen.ts', 'api.json', '--outdir', 'out', '--lenient'],
       cwd
     );
     expect(result.code).toBe(0);
-    expect(await Bun.file(join(cwd, "out", "types.ts")).text()).toBe(
-      "// 3.1 lenient=true\n"
-    );
+    expect(await Bun.file(join(cwd, 'out', 'types.ts')).text()).toBe('// 3.1 lenient=true\n');
   });
 
   test("a '-' input reads the document from stdin", async () => {
     const cwd = await workspace();
 
     const result = await run(
-      ["generate", "-g", "gen.ts", "-", "--outdir", "out", "--format", "json"],
+      ['generate', '-g', 'gen.ts', '-', '--outdir', 'out', '--format', 'json'],
       cwd,
       API_DOC
     );
     expect(result.code).toBe(0);
-    expect(await Bun.file(join(cwd, "out", "types.ts")).text()).toBe(
-      "// 3.1 lenient=false\n"
-    );
+    expect(await Bun.file(join(cwd, 'out', 'types.ts')).text()).toBe('// 3.1 lenient=false\n');
   });
 
-  test("no outdir prints the whole record as JSON", async () => {
+  test('no outdir prints the whole record as JSON', async () => {
     const cwd = await workspace();
 
-    const result = await run(["generate", "-g", "gen.ts", "api.json"], cwd);
+    const result = await run(['generate', '-g', 'gen.ts', 'api.json'], cwd);
     expect(result.code).toBe(0);
 
     const files = JSON.parse(result.stdout) as Record<string, string>;
-    expect(Object.keys(files).sort()).toEqual(["nested/names.ts", "types.ts"]);
-    expect(files["types.ts"]).toBe("// 3.1 lenient=false\n");
+    expect(Object.keys(files).sort()).toEqual(['nested/names.ts', 'types.ts']);
+    expect(files['types.ts']).toBe('// 3.1 lenient=false\n');
   });
 
-  test("generate needs a generator", async () => {
+  test('generate needs a generator', async () => {
     const cwd = await workspace();
-    const result = await run(["generate", "api.json"], cwd);
+    const result = await run(['generate', 'api.json'], cwd);
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain("needs --generator");
+    expect(result.stderr).toContain('needs --generator');
   });
 
-  test("a module exporting no generator is refused", async () => {
+  test('a module exporting no generator is refused', async () => {
     const cwd = await workspace();
-    await Bun.write(join(cwd, "empty.ts"), "export const nothing = 1;\n");
+    await Bun.write(join(cwd, 'empty.ts'), 'export const nothing = 1;\n');
 
-    const result = await run(["generate", "-g", "empty.ts", "api.json"], cwd);
+    const result = await run(['generate', '-g', 'empty.ts', 'api.json'], cwd);
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain("no usable generator");
+    expect(result.stderr).toContain('no usable generator');
   });
 
-  test("an unknown option fails instead of being ignored", async () => {
+  test('an unknown option fails instead of being ignored', async () => {
     const cwd = await workspace();
-    const result = await run(["generate", "-g", "gen.ts", "api.json", "--nope"], cwd);
+    const result = await run(['generate', '-g', 'gen.ts', 'api.json', '--nope'], cwd);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("unknown option '--nope'");
   });
@@ -521,7 +515,7 @@ describe("wiz generate through the binary", () => {
   test("passes --media-types array or 'all' to generator options", async () => {
     const cwd = await workspace();
     await Bun.write(
-      join(cwd, "gen_media.ts"),
+      join(cwd, 'gen_media.ts'),
       `export default {
   name: "test-gen",
   api(ir, context) {
@@ -531,34 +525,34 @@ describe("wiz generate through the binary", () => {
     );
 
     const result1 = await run(
-      ["generate", "-g", "gen_media.ts", "api.json", "--media-types=jsonl,yaml"],
+      ['generate', '-g', 'gen_media.ts', 'api.json', '--media-types=jsonl,yaml'],
       cwd
     );
     expect(result1.code).toBe(0);
     const files1 = JSON.parse(result1.stdout);
-    const opts1 = JSON.parse(files1["options.json"]);
-    expect(opts1.mediaTypes).toEqual(["jsonl", "yaml"]);
+    const opts1 = JSON.parse(files1['options.json']);
+    expect(opts1.mediaTypes).toEqual(['jsonl', 'yaml']);
 
     const result2 = await run(
-      ["generate", "-g", "gen_media.ts", "api.json", "--media-types", "all"],
+      ['generate', '-g', 'gen_media.ts', 'api.json', '--media-types', 'all'],
       cwd
     );
     expect(result2.code).toBe(0);
     const files2 = JSON.parse(result2.stdout);
-    const opts2 = JSON.parse(files2["options.json"]);
-    expect(opts2.mediaTypes).toBe("all");
+    const opts2 = JSON.parse(files2['options.json']);
+    expect(opts2.mediaTypes).toBe('all');
   });
-  test("an unknown format throws an error", async () => {
+  test('an unknown format throws an error', async () => {
     const cwd = await workspace();
-    const result = await run(["generate", "-g", "gen.ts", "api.json", "--format", "nope"], cwd);
+    const result = await run(['generate', '-g', 'gen.ts', 'api.json', '--format', 'nope'], cwd);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("unknown format 'nope'; expected json, jsonc, json5, yaml");
   });
 
-  test("parses --media-types array correctly", async () => {
+  test('parses --media-types array correctly', async () => {
     const cwd = await workspace();
     await Bun.write(
-      join(cwd, "gen_media_test.ts"),
+      join(cwd, 'gen_media_test.ts'),
       `export default {
   name: "test-gen",
   api(ir, context) {
@@ -568,19 +562,19 @@ describe("wiz generate through the binary", () => {
     );
 
     const result1 = await run(
-      ["generate", "-g", "gen_media_test.ts", "api.json", "--media-types", "jsonl, yaml "],
+      ['generate', '-g', 'gen_media_test.ts', 'api.json', '--media-types', 'jsonl, yaml '],
       cwd
     );
     expect(result1.code).toBe(0);
     const files1 = JSON.parse(result1.stdout);
-    const opts1 = JSON.parse(files1["options.json"]);
-    expect(opts1.mediaTypes).toEqual(["jsonl", "yaml"]);
+    const opts1 = JSON.parse(files1['options.json']);
+    expect(opts1.mediaTypes).toEqual(['jsonl', 'yaml']);
   });
 
-  test("parses --media-types=all correctly", async () => {
+  test('parses --media-types=all correctly', async () => {
     const cwd = await workspace();
     await Bun.write(
-      join(cwd, "gen_media_test_all.ts"),
+      join(cwd, 'gen_media_test_all.ts'),
       `export default {
   name: "test-gen",
   api(ir, context) {
@@ -590,19 +584,19 @@ describe("wiz generate through the binary", () => {
     );
 
     const result = await run(
-      ["generate", "-g", "gen_media_test_all.ts", "api.json", "--media-types=all"],
+      ['generate', '-g', 'gen_media_test_all.ts', 'api.json', '--media-types=all'],
       cwd
     );
     expect(result.code).toBe(0);
     const files = JSON.parse(result.stdout);
-    const opts = JSON.parse(files["options.json"]);
-    expect(opts.mediaTypes).toBe("all");
+    const opts = JSON.parse(files['options.json']);
+    expect(opts.mediaTypes).toBe('all');
   });
 
-  test("passes --lenient flag when provided", async () => {
+  test('passes --lenient flag when provided', async () => {
     const cwd = await workspace();
     await Bun.write(
-      join(cwd, "gen_lenient.ts"),
+      join(cwd, 'gen_lenient.ts'),
       `export default {
   name: "test-gen",
   api(ir, context) {
@@ -612,17 +606,17 @@ describe("wiz generate through the binary", () => {
     );
 
     // Without lenient
-    const result1 = await run(["generate", "-g", "gen_lenient.ts", "api.json"], cwd);
+    const result1 = await run(['generate', '-g', 'gen_lenient.ts', 'api.json'], cwd);
     expect(result1.code).toBe(0);
     const files1 = JSON.parse(result1.stdout);
-    const opts1 = JSON.parse(files1["options.json"]);
+    const opts1 = JSON.parse(files1['options.json']);
     expect(opts1.lenient).toBe(false);
 
     // With lenient
-    const result2 = await run(["generate", "-g", "gen_lenient.ts", "api.json", "--lenient"], cwd);
+    const result2 = await run(['generate', '-g', 'gen_lenient.ts', 'api.json', '--lenient'], cwd);
     expect(result2.code).toBe(0);
     const files2 = JSON.parse(result2.stdout);
-    const opts2 = JSON.parse(files2["options.json"]);
+    const opts2 = JSON.parse(files2['options.json']);
     expect(opts2.lenient).toBe(true);
   });
 });

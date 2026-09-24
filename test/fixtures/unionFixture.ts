@@ -1,5 +1,5 @@
-import { decodeProto, encodeProto, jsonSchema, protobufSchema } from "../../src/index.ts";
-import type { Shape } from "./shapeTypes.ts";
+import { decodeProto, encodeProto, jsonSchema, protobufSchema } from '../../src/index.ts';
+import type { Shape } from './shapeTypes.ts';
 
 export interface Drawing {
   /** @fieldNumber 1 */
@@ -10,7 +10,7 @@ export interface Drawing {
   note?: string;
 }
 
-export const drawingProto = protobufSchema<[Drawing]>({ indent: "  " });
+export const drawingProto = protobufSchema<[Drawing]>({ indent: '  ' });
 export const drawingJsonSchema = jsonSchema<Drawing>();
 
 export function encodeDrawing(value: Drawing, buf: Uint8Array): number {

@@ -1,4 +1,4 @@
-import type { TypeIR } from "../ir/types.ts";
+import type { TypeIR } from '../ir/types.ts';
 
 /**
  * Generates Virtual Module code for `encodeCbor` and `decodeCbor`.

@@ -1,14 +1,14 @@
-import { flattenObjectProperties, type TypeIR } from "../types.ts";
+import { flattenObjectProperties, type TypeIR } from '../types.ts';
 
 function extractDeepKeys(
   ir: TypeIR,
   declaredTypes?: ReadonlyMap<string, TypeIR>,
-  prefix = "",
+  prefix = '',
   depth = 1,
   maxDepth = 5,
   visited = new Set<string>()
 ): string[] {
-  if (ir.kind === "ref" && declaredTypes) {
+  if (ir.kind === 'ref' && declaredTypes) {
     if (visited.has(ir.targetId)) {
       return prefix ? [prefix] : [];
     }
@@ -25,7 +25,7 @@ function extractDeepKeys(
     }
   }
 
-  if (ir.kind !== "object" || ir.properties.length === 0 || depth > maxDepth) {
+  if (ir.kind !== 'object' || ir.properties.length === 0 || depth > maxDepth) {
     return prefix ? [prefix] : [];
   }
 
@@ -48,10 +48,7 @@ function extractDeepKeys(
   return results;
 }
 
-export function generateKeysCode(
-  ir: TypeIR,
-  declaredTypes?: ReadonlyMap<string, TypeIR>
-): string {
+export function generateKeysCode(ir: TypeIR, declaredTypes?: ReadonlyMap<string, TypeIR>): string {
   const props = flattenObjectProperties(ir);
 
   const keys = props.map((p) => p.name);
@@ -60,7 +57,7 @@ export function generateKeysCode(
 
   const deepKeysByDepth: Record<number, string[]> = {};
   for (let d = 1; d <= 10; d++) {
-    deepKeysByDepth[d] = extractDeepKeys(ir, declaredTypes, "", 1, d);
+    deepKeysByDepth[d] = extractDeepKeys(ir, declaredTypes, '', 1, d);
   }
 
   return [
@@ -72,5 +69,5 @@ export function generateKeysCode(
     `  const d = Math.min(Math.max(options && typeof options.maxDepth === "number" ? options.maxDepth : 5, 1), 10);`,
     `  return _deepKeysByDepth[d] || _deepKeysByDepth[5];`,
     `}`,
-  ].join("\n");
+  ].join('\n');
 }

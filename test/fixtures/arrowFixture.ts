@@ -1,4 +1,4 @@
-import { arrowSchema, decodeArrow, encodeArrow } from "../../src/index.ts";
+import { arrowSchema, decodeArrow, encodeArrow } from '../../src/index.ts';
 
 export interface Reading {
   /** @format int32 */
@@ -17,7 +17,7 @@ export interface Reading {
   note?: string;
 }
 
-export const readingSchema = arrowSchema<[Reading]>({ indent: "  " });
+export const readingSchema = arrowSchema<[Reading]>({ indent: '  ' });
 
 export function encodeReadings(rows: Reading[], buf: Uint8Array): number {
   return encodeArrow<Reading>(rows, buf);

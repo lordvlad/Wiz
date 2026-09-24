@@ -1,8 +1,8 @@
 // @wiz-ignore
-import { describe, expect, test } from "bun:test";
-import avro from "avsc";
-import { generateAvroCode, generateAvroSchemaCode } from "../src/generators/avro.ts";
-import { evalModule, getIRForSource } from "./helpers.ts";
+import { describe, expect, test } from 'bun:test';
+import avro from 'avsc';
+import { generateAvroCode, generateAvroSchemaCode } from '../src/generators/avro.ts';
+import { evalModule, getIRForSource } from './helpers.ts';
 
 /**
  * Interop against avsc.
@@ -32,12 +32,12 @@ const bigintLong = avro.types.LongType.__with({
   },
   fromJSON: BigInt,
   toJSON: Number,
-  isValid: (n: unknown) => typeof n === "bigint",
+  isValid: (n: unknown) => typeof n === 'bigint',
   compare: (a: bigint, b: bigint) => (a === b ? 0 : a < b ? -1 : 1),
 });
 
 /** wiz's codec, its `.avsc` text, and avsc's view of that schema. */
-function pair(source: string, root = "M") {
+function pair(source: string, root = 'M') {
   const ir = getIRForSource(source, root);
   const codec = evalModule<Codec>(generateAvroCode(ir));
   const schemaText = evalModule<{ avroSchema: (o?: any) => string }>(
@@ -56,8 +56,8 @@ const wizEncode = (codec: Codec, value: unknown) => {
   return buf.subarray(0, codec.encodeAvro(value, buf));
 };
 
-describe("avsc reads what wiz writes", () => {
-  test("primitives, at the widths @format selects", () => {
+describe('avsc reads what wiz writes', () => {
+  test('primitives, at the widths @format selects', () => {
     const { codec, type } = pair(`
       export interface M {
         text: string;
@@ -72,12 +72,12 @@ describe("avsc reads what wiz writes", () => {
       }
     `);
 
-    const value = { text: "hi", count: -7, ratio: 3.14, approx: 0.5, flag: true, big: 42n };
+    const value = { text: 'hi', count: -7, ratio: 3.14, approx: 0.5, flag: true, big: 42n };
     const decoded = type.fromBuffer(Buffer.from(wizEncode(codec, value)));
     expect(decoded).toEqual(value);
   });
 
-  test("negative and large integers", () => {
+  test('negative and large integers', () => {
     const { codec, type } = pair(`
       export interface M {
         /** @format int32 */
@@ -99,7 +99,7 @@ describe("avsc reads what wiz writes", () => {
     }
   });
 
-  test("optional fields, which Avro spells as a null union", () => {
+  test('optional fields, which Avro spells as a null union', () => {
     const { codec, type } = pair(`
       export interface M {
         required: string;
@@ -109,14 +109,18 @@ describe("avsc reads what wiz writes", () => {
       }
     `);
 
-    expect(type.fromBuffer(Buffer.from(wizEncode(codec, { required: "a", optional: "b", count: 1 }))))
-      .toEqual({ required: "a", optional: "b", count: 1 });
+    expect(
+      type.fromBuffer(Buffer.from(wizEncode(codec, { required: 'a', optional: 'b', count: 1 })))
+    ).toEqual({ required: 'a', optional: 'b', count: 1 });
 
-    expect(type.fromBuffer(Buffer.from(wizEncode(codec, { required: "a" }))))
-      .toEqual({ required: "a", optional: null, count: null });
+    expect(type.fromBuffer(Buffer.from(wizEncode(codec, { required: 'a' })))).toEqual({
+      required: 'a',
+      optional: null,
+      count: null,
+    });
   });
 
-  test("nested records", () => {
+  test('nested records', () => {
     const { codec, type } = pair(`
       export interface Inner {
         a: string;
@@ -128,11 +132,11 @@ describe("avsc reads what wiz writes", () => {
       }
     `);
 
-    const value = { inner: { a: "hi", b: 3 } };
+    const value = { inner: { a: 'hi', b: 3 } };
     expect(type.fromBuffer(Buffer.from(wizEncode(codec, value)))).toEqual(value);
   });
 
-  test("arrays, including of records", () => {
+  test('arrays, including of records', () => {
     const { codec, type } = pair(`
       export interface Inner {
         a: string;
@@ -145,11 +149,11 @@ describe("avsc reads what wiz writes", () => {
       }
     `);
 
-    const value = { nums: [1, 2, 300], items: [{ a: "x" }, { a: "y" }], empty: [] };
+    const value = { nums: [1, 2, 300], items: [{ a: 'x' }, { a: 'y' }], empty: [] };
     expect(type.fromBuffer(Buffer.from(wizEncode(codec, value)))).toEqual(value);
   });
 
-  test("maps", () => {
+  test('maps', () => {
     const { codec, type } = pair(`
       export interface M {
         /** @format int32 */
@@ -161,7 +165,7 @@ describe("avsc reads what wiz writes", () => {
     expect(type.fromBuffer(Buffer.from(wizEncode(codec, value)))).toEqual(value);
   });
 
-  test("enums travel by symbol, not by name", () => {
+  test('enums travel by symbol, not by name', () => {
     const { codec, type } = pair(`
       export enum Role {
         User = "user",
@@ -172,11 +176,11 @@ describe("avsc reads what wiz writes", () => {
       }
     `);
 
-    const decoded = type.fromBuffer(Buffer.from(wizEncode(codec, { role: "admin" })));
-    expect(decoded.role).toBe("admin");
+    const decoded = type.fromBuffer(Buffer.from(wizEncode(codec, { role: 'admin' })));
+    expect(decoded.role).toBe('admin');
   });
 
-  test("bytes and instants", () => {
+  test('bytes and instants', () => {
     const { codec, type } = pair(`
       export interface M {
         blob: Uint8Array;
@@ -184,7 +188,7 @@ describe("avsc reads what wiz writes", () => {
       }
     `);
 
-    const at = new Date("2024-03-01T12:00:00.000Z");
+    const at = new Date('2024-03-01T12:00:00.000Z');
     const decoded = type.fromBuffer(
       Buffer.from(wizEncode(codec, { blob: new Uint8Array([1, 2, 250]), at }))
     );
@@ -193,25 +197,25 @@ describe("avsc reads what wiz writes", () => {
     expect(Number(decoded.at)).toBe(at.getTime());
   });
 
-  test("multi-byte text is measured in bytes, not code points", () => {
+  test('multi-byte text is measured in bytes, not code points', () => {
     const { codec, type } = pair(`
       export interface M {
         text: string;
       }
     `);
 
-    const value = { text: "héllo — 日本語 🎉" };
+    const value = { text: 'héllo — 日本語 🎉' };
     expect(type.fromBuffer(Buffer.from(wizEncode(codec, value)))).toEqual(value);
   });
 });
 
-describe("wiz reads what avsc writes", () => {
+describe('wiz reads what avsc writes', () => {
   const roundtrip = (source: string, value: Record<string, unknown>) => {
     const { codec, type } = pair(source);
     return codec.decodeAvro(new Uint8Array(type.toBuffer(value)));
   };
 
-  test("primitives", () => {
+  test('primitives', () => {
     const decoded = roundtrip(
       `export interface M {
         text: string;
@@ -222,26 +226,26 @@ describe("wiz reads what avsc writes", () => {
         approx: number;
         flag: boolean;
       }`,
-      { text: "hi", count: -7, ratio: 3.14, approx: 0.5, flag: true }
+      { text: 'hi', count: -7, ratio: 3.14, approx: 0.5, flag: true }
     );
-    expect(decoded).toEqual({ text: "hi", count: -7, ratio: 3.14, approx: 0.5, flag: true });
+    expect(decoded).toEqual({ text: 'hi', count: -7, ratio: 3.14, approx: 0.5, flag: true });
   });
 
-  test("a present and an absent optional", () => {
+  test('a present and an absent optional', () => {
     const source = `export interface M {
       required: string;
       optional?: string;
     }`;
-    expect(roundtrip(source, { required: "a", optional: "b" })).toEqual({
-      required: "a",
-      optional: "b",
+    expect(roundtrip(source, { required: 'a', optional: 'b' })).toEqual({
+      required: 'a',
+      optional: 'b',
     });
-    expect(roundtrip(source, { required: "a", optional: null })).toMatchObject({
-      required: "a",
+    expect(roundtrip(source, { required: 'a', optional: null })).toMatchObject({
+      required: 'a',
     });
   });
 
-  test("nested records and arrays", () => {
+  test('nested records and arrays', () => {
     const decoded = roundtrip(
       `export interface Inner {
         a: string;
@@ -250,12 +254,12 @@ describe("wiz reads what avsc writes", () => {
         inner: Inner;
         items: Inner[];
       }`,
-      { inner: { a: "x" }, items: [{ a: "y" }, { a: "z" }] }
+      { inner: { a: 'x' }, items: [{ a: 'y' }, { a: 'z' }] }
     );
-    expect(decoded).toEqual({ inner: { a: "x" }, items: [{ a: "y" }, { a: "z" }] });
+    expect(decoded).toEqual({ inner: { a: 'x' }, items: [{ a: 'y' }, { a: 'z' }] });
   });
 
-  test("maps", () => {
+  test('maps', () => {
     const decoded = roundtrip(
       `export interface M {
         /** @format int32 */
@@ -266,7 +270,7 @@ describe("wiz reads what avsc writes", () => {
     expect(decoded).toEqual({ counts: { a: 1, b: 22 } });
   });
 
-  test("a long array, which avsc may write as several blocks", () => {
+  test('a long array, which avsc may write as several blocks', () => {
     const nums = Array.from({ length: 500 }, (_, i) => i - 250);
     const decoded = roundtrip(
       `export interface M {
@@ -278,7 +282,7 @@ describe("wiz reads what avsc writes", () => {
     expect(decoded.nums).toEqual(nums);
   });
 
-  test("enums", () => {
+  test('enums', () => {
     const decoded = roundtrip(
       `export enum Role {
         User = "user",
@@ -287,12 +291,12 @@ describe("wiz reads what avsc writes", () => {
       export interface M {
         role: Role;
       }`,
-      { role: "admin" }
+      { role: 'admin' }
     );
-    expect(decoded.role).toBe("admin");
+    expect(decoded.role).toBe('admin');
   });
 
-  test("bytes", () => {
+  test('bytes', () => {
     const decoded = roundtrip(
       `export interface M {
         blob: Uint8Array;
@@ -303,8 +307,8 @@ describe("wiz reads what avsc writes", () => {
   });
 });
 
-describe("named types repeated and recursive", () => {
-  test("a type used twice is defined once and referenced by name", () => {
+describe('named types repeated and recursive', () => {
+  test('a type used twice is defined once and referenced by name', () => {
     const { schema, type } = pair(`
       export interface Inner {
         a: string;
@@ -319,15 +323,15 @@ describe("named types repeated and recursive", () => {
     const fields = Object.fromEntries(
       (schema.fields as Array<{ name: string; type: unknown }>).map((f) => [f.name, f.type])
     );
-    expect((fields.first as { type: string }).type).toBe("record");
+    expect((fields.first as { type: string }).type).toBe('record');
     // Avro defines a name once; later uses are the bare name.
-    expect(fields.second).toBe("Inner");
-    expect(fields.list).toEqual({ type: "array", items: "Inner" });
+    expect(fields.second).toBe('Inner');
+    expect(fields.list).toEqual({ type: 'array', items: 'Inner' });
 
-    expect(type.name).toBe("M");
+    expect(type.name).toBe('M');
   });
 
-  test("a recursive type still generates, rather than looping forever", () => {
+  test('a recursive type still generates, rather than looping forever', () => {
     // `ref` is the extractor's cycle-breaker; following it unguarded would
     // recurse in the generator instead of on the wire.
     const { schema } = pair(`
@@ -341,12 +345,12 @@ describe("named types repeated and recursive", () => {
     `);
 
     const root = (schema.fields as Array<{ name: string; type: any }>).find(
-      (f) => f.name === "root"
+      (f) => f.name === 'root'
     )!;
-    expect(root.type.name).toBe("Node");
-    expect(root.type.fields.find((f: any) => f.name === "children").type).toEqual({
-      type: "array",
-      items: "Node",
+    expect(root.type.name).toBe('Node');
+    expect(root.type.fields.find((f: any) => f.name === 'children').type).toEqual({
+      type: 'array',
+      items: 'Node',
     });
   });
 });

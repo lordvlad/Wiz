@@ -1,10 +1,5 @@
-import type { TypeIR } from "./types.ts";
-import type {
-  HttpResponseIR,
-  ParameterIR,
-  ServiceIR,
-  ServiceMethodBodyIR,
-} from "./service.ts";
+import type { HttpResponseIR, ParameterIR, ServiceIR, ServiceMethodBodyIR } from './service.ts';
+import type { TypeIR } from './types.ts';
 
 /** One keyword the document used that the IR cannot represent. */
 export interface ApiDiagnostic {
@@ -14,11 +9,7 @@ export interface ApiDiagnostic {
   keyword: string;
   message: string;
 }
-export type SecuritySchemeType =
-  | "http"
-  | "apiKey"
-  | "oauth2"
-  | "openIdConnect";
+export type SecuritySchemeType = 'http' | 'apiKey' | 'oauth2' | 'openIdConnect';
 
 export interface SecurityOAuthFlowIR {
   authorizationUrl?: string;
@@ -38,7 +29,7 @@ export interface SecuritySchemeIR {
   type: SecuritySchemeType;
   description?: string;
   name?: string;
-  in?: "header" | "query" | "cookie";
+  in?: 'header' | 'query' | 'cookie';
   scheme?: string;
   bearerFormat?: string;
   flows?: SecurityOAuthFlowsIR;
@@ -60,10 +51,7 @@ export interface ApiComponentsIR {
   /** `components.headers`; header-shaped, so each has `in: "header"`. */
   headers: Map<string, ParameterIR>;
   /** `components.requestBodies`: the media types each offers. */
-  requestBodies: Map<
-    string,
-    { bodies: ServiceMethodBodyIR[]; required: boolean }
-  >;
+  requestBodies: Map<string, { bodies: ServiceMethodBodyIR[]; required: boolean }>;
   /**
    * `components.responses`. A response component has no status of its own, so
    * `status` is `"default"` as a placeholder; the operation that uses it holds
@@ -75,19 +63,13 @@ export interface ApiComponentsIR {
   securitySchemes: Map<string, SecuritySchemeIR>;
 }
 export interface ApiIR {
-  kind: "api";
+  kind: 'api';
   /**
    * The dialect the document was written in. An OpenAPI version, or `proto3`
    * for a `.proto` file: one field, because every consumer that cares asks the
    * same question - what shape was this before it became IR.
    */
-  version:
-    | "3.0"
-    | "3.1"
-    | "proto3"
-    | "openrpc-1.3"
-    | "asyncapi-2.6"
-    | "asyncapi-3.0";
+  version: '3.0' | '3.1' | 'proto3' | 'openrpc-1.3' | 'asyncapi-2.6' | 'asyncapi-3.0';
   /** `components.schemas`, or a proto file's messages and enums, by name. */
   types: Map<string, TypeIR>;
   /** The other four component sections, by name. Empty for a proto file. */

@@ -1,4 +1,4 @@
-import { openapiDocument, openapiSchema } from "../../src/index.ts";
+import { openapiDocument, openapiSchema } from '../../src/index.ts';
 
 export interface Product {
   /** @format uuid */
@@ -49,8 +49,8 @@ export interface ProductService {
 }
 
 export const schema = openapiSchema<[ProductService]>({
-  openapi: "3.1.0",
-  info: { title: "Catalogue", version: "2.0.0" },
+  openapi: '3.1.0',
+  info: { title: 'Catalogue', version: '2.0.0' },
 });
 
 /** Resolved at build time; the test reads it from here. */

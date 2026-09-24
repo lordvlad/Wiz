@@ -1,7 +1,7 @@
-import type { ApiIR } from "../ir/api.ts";
-import type { ServiceIR } from "../ir/service.ts";
-import type { TypeIR } from "../ir/types.ts";
-import { defaultLogger, type WizLogger } from "../logger.ts";
+import type { ApiIR } from '../ir/api.ts';
+import type { ServiceIR } from '../ir/service.ts';
+import type { TypeIR } from '../ir/types.ts';
+import { defaultLogger, type WizLogger } from '../logger.ts';
 
 /**
  * The pluggable emitter boundary.
@@ -42,16 +42,15 @@ export interface Generator<TOptions = Record<string, never>> {
 
 function unsupported(generator: Generator<never>, kind: string): Error {
   const roots = [
-    generator.type ? "a type" : undefined,
-    generator.service ? "a service" : undefined,
-    generator.api ? "an API document" : undefined,
+    generator.type ? 'a type' : undefined,
+    generator.service ? 'a service' : undefined,
+    generator.api ? 'an API document' : undefined,
   ].filter((root): root is string => root !== undefined);
 
   return new Error(
-    `[wiz] generator '${generator.name}' cannot generate from '${kind}'; ` +
-      (roots.length > 0
-        ? `it reads ${roots.join(" or ")}`
-        : "it declares no inputs at all")
+    `[wiz] generator '${generator.name}' cannot generate from '${kind}'; ${
+      roots.length > 0 ? `it reads ${roots.join(' or ')}` : 'it declares no inputs at all'
+    }`
   );
 }
 
@@ -70,16 +69,22 @@ export function generate<TOptions>(
   const context: GeneratorContext<TOptions> = { options, logger };
   const declared = generator as Generator<never>;
 
-  if (ir.kind === "api") {
-    if (!generator.api) throw unsupported(declared, ir.kind);
+  if (ir.kind === 'api') {
+    if (!generator.api) {
+      throw unsupported(declared, ir.kind);
+    }
     return generator.api(ir, context);
   }
 
-  if (ir.kind === "service") {
-    if (!generator.service) throw unsupported(declared, ir.kind);
+  if (ir.kind === 'service') {
+    if (!generator.service) {
+      throw unsupported(declared, ir.kind);
+    }
     return generator.service(ir, context);
   }
 
-  if (!generator.type) throw unsupported(declared, ir.kind);
+  if (!generator.type) {
+    throw unsupported(declared, ir.kind);
+  }
   return generator.type(ir, context);
 }

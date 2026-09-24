@@ -13,7 +13,11 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test --timeout=20000",
-    "test:parallel": "bun test --parallel --no-isolate --timeout=20000"
+    "test:parallel": "bun test --parallel --no-isolate --timeout=20000",
+    "lint": "oxlint --config oxlint.config.ts src/ test/",
+    "lint:fix": "oxlint --config oxlint.config.ts --fix src/ test/",
+    "format": "oxfmt --config oxfmt.config.ts --write src/ test/",
+    "format:check": "oxfmt --config oxfmt.config.ts --check src/ test/"
   },
   "type": "module",
   "devDependencies": {
@@ -25,6 +29,9 @@
     "ajv-formats": "^3.0.1",
     "apache-arrow": "^21.2.0",
     "avsc": "^5.7.9",
+    "oxc-config-mantine": "^1.0.3",
+    "oxfmt": "^0.70.0",
+    "oxlint": "^1.85.0",
     "protobufjs": "^8.7.2",
     "typescript": "^5.7.3",
     "zod": "^3.24.0"

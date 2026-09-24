@@ -1,4 +1,4 @@
-import type { TypeIR } from "../types.ts";
+import type { TypeIR } from '../types.ts';
 
 /**
  * Generates Virtual Module code for `encodeErlangText` and `decodeErlangText`.

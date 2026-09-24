@@ -350,17 +350,12 @@
           "value": 1,
           "tests": [
             {
-              "data": [
-                1,
-                2
-              ],
+              "data": [1, 2],
               "valid": true,
               "description": "longer is valid"
             },
             {
-              "data": [
-                1
-              ],
+              "data": [1],
               "valid": true,
               "description": "exact length is valid"
             },
@@ -375,10 +370,7 @@
           "value": 1,
           "tests": [
             {
-              "data": [
-                1,
-                2
-              ],
+              "data": [1, 2],
               "valid": true,
               "description": "longer is valid"
             },
@@ -398,26 +390,17 @@
           "value": 2,
           "tests": [
             {
-              "data": [
-                1
-              ],
+              "data": [1],
               "valid": true,
               "description": "shorter is valid"
             },
             {
-              "data": [
-                1,
-                2
-              ],
+              "data": [1, 2],
               "valid": true,
               "description": "exact length is valid"
             },
             {
-              "data": [
-                1,
-                2,
-                3
-              ],
+              "data": [1, 2, 3],
               "valid": false,
               "description": "too long is invalid"
             }
@@ -427,18 +410,12 @@
           "value": 2,
           "tests": [
             {
-              "data": [
-                1
-              ],
+              "data": [1],
               "valid": true,
               "description": "shorter is valid"
             },
             {
-              "data": [
-                1,
-                2,
-                3
-              ],
+              "data": [1, 2, 3],
               "valid": false,
               "description": "too long is invalid"
             }
@@ -453,70 +430,42 @@
           "value": true,
           "tests": [
             {
-              "data": [
-                1,
-                2
-              ],
+              "data": [1, 2],
               "valid": true,
               "description": "unique array of integers is valid"
             },
             {
-              "data": [
-                1,
-                1
-              ],
+              "data": [1, 1],
               "valid": false,
               "description": "non-unique array of integers is invalid"
             },
             {
-              "data": [
-                1,
-                2,
-                1
-              ],
+              "data": [1, 2, 1],
               "valid": false,
               "description": "non-unique array of more than two integers is invalid"
             },
             {
-              "data": [
-                1,
-                1,
-                1
-              ],
+              "data": [1, 1, 1],
               "valid": false,
               "description": "numbers are unique if mathematically unequal"
             },
             {
-              "data": [
-                0,
-                false
-              ],
+              "data": [0, false],
               "valid": true,
               "description": "false is not equal to zero"
             },
             {
-              "data": [
-                1,
-                true
-              ],
+              "data": [1, true],
               "valid": true,
               "description": "true is not equal to one"
             },
             {
-              "data": [
-                "foo",
-                "bar",
-                "baz"
-              ],
+              "data": ["foo", "bar", "baz"],
               "valid": true,
               "description": "unique array of strings is valid"
             },
             {
-              "data": [
-                "foo",
-                "bar",
-                "foo"
-              ],
+              "data": ["foo", "bar", "foo"],
               "valid": false,
               "description": "non-unique array of strings is invalid"
             },
@@ -599,145 +548,63 @@
               "description": "non-unique array of nested objects is invalid"
             },
             {
-              "data": [
-                [
-                  "foo"
-                ],
-                [
-                  "bar"
-                ]
-              ],
+              "data": [["foo"], ["bar"]],
               "valid": true,
               "description": "unique array of arrays is valid"
             },
             {
-              "data": [
-                [
-                  "foo"
-                ],
-                [
-                  "foo"
-                ]
-              ],
+              "data": [["foo"], ["foo"]],
               "valid": false,
               "description": "non-unique array of arrays is invalid"
             },
             {
-              "data": [
-                [
-                  "foo"
-                ],
-                [
-                  "bar"
-                ],
-                [
-                  "foo"
-                ]
-              ],
+              "data": [["foo"], ["bar"], ["foo"]],
               "valid": false,
               "description": "non-unique array of more than two arrays is invalid"
             },
             {
-              "data": [
-                1,
-                true
-              ],
+              "data": [1, true],
               "valid": true,
               "description": "1 and true are unique"
             },
             {
-              "data": [
-                0,
-                false
-              ],
+              "data": [0, false],
               "valid": true,
               "description": "0 and false are unique"
             },
             {
-              "data": [
-                [
-                  1
-                ],
-                [
-                  true
-                ]
-              ],
+              "data": [[1], [true]],
               "valid": true,
               "description": "[1] and [true] are unique"
             },
             {
-              "data": [
-                [
-                  0
-                ],
-                [
-                  false
-                ]
-              ],
+              "data": [[0], [false]],
               "valid": true,
               "description": "[0] and [false] are unique"
             },
             {
               "data": [
-                [
-                  [
-                    1
-                  ],
-                  "foo"
-                ],
-                [
-                  [
-                    true
-                  ],
-                  "foo"
-                ]
+                [[1], "foo"],
+                [[true], "foo"]
               ],
               "valid": true,
               "description": "nested [1] and [true] are unique"
             },
             {
               "data": [
-                [
-                  [
-                    0
-                  ],
-                  "foo"
-                ],
-                [
-                  [
-                    false
-                  ],
-                  "foo"
-                ]
+                [[0], "foo"],
+                [[false], "foo"]
               ],
               "valid": true,
               "description": "nested [0] and [false] are unique"
             },
             {
-              "data": [
-                {},
-                [
-                  1
-                ],
-                true,
-                null,
-                1,
-                "{}"
-              ],
+              "data": [{}, [1], true, null, 1, "{}"],
               "valid": true,
               "description": "unique heterogeneous types are valid"
             },
             {
-              "data": [
-                {},
-                [
-                  1
-                ],
-                true,
-                null,
-                {},
-                1
-              ],
+              "data": [{}, [1], true, null, {}, 1],
               "valid": false,
               "description": "non-unique heterogeneous types are invalid"
             },
@@ -799,43 +666,27 @@
           "value": false,
           "tests": [
             {
-              "data": [
-                1,
-                2
-              ],
+              "data": [1, 2],
               "valid": true,
               "description": "unique array of integers is valid"
             },
             {
-              "data": [
-                1,
-                1
-              ],
+              "data": [1, 1],
               "valid": true,
               "description": "non-unique array of integers is valid"
             },
             {
-              "data": [
-                1,
-                1,
-                1
-              ],
+              "data": [1, 1, 1],
               "valid": true,
               "description": "numbers are unique if mathematically unequal"
             },
             {
-              "data": [
-                0,
-                false
-              ],
+              "data": [0, false],
               "valid": true,
               "description": "false is not equal to zero"
             },
             {
-              "data": [
-                1,
-                true
-              ],
+              "data": [1, true],
               "valid": true,
               "description": "true is not equal to one"
             },
@@ -904,69 +755,32 @@
               "description": "non-unique array of nested objects is valid"
             },
             {
-              "data": [
-                [
-                  "foo"
-                ],
-                [
-                  "bar"
-                ]
-              ],
+              "data": [["foo"], ["bar"]],
               "valid": true,
               "description": "unique array of arrays is valid"
             },
             {
-              "data": [
-                [
-                  "foo"
-                ],
-                [
-                  "foo"
-                ]
-              ],
+              "data": [["foo"], ["foo"]],
               "valid": true,
               "description": "non-unique array of arrays is valid"
             },
             {
-              "data": [
-                1,
-                true
-              ],
+              "data": [1, true],
               "valid": true,
               "description": "1 and true are unique"
             },
             {
-              "data": [
-                0,
-                false
-              ],
+              "data": [0, false],
               "valid": true,
               "description": "0 and false are unique"
             },
             {
-              "data": [
-                {},
-                [
-                  1
-                ],
-                true,
-                null,
-                1
-              ],
+              "data": [{}, [1], true, null, 1],
               "valid": true,
               "description": "unique heterogeneous types are valid"
             },
             {
-              "data": [
-                {},
-                [
-                  1
-                ],
-                true,
-                null,
-                {},
-                1
-              ],
+              "data": [{}, [1], true, null, {}, 1],
               "valid": true,
               "description": "non-unique heterogeneous types are valid"
             }

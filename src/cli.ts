@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
-import { runInit } from "./cli/init.ts";
-import { ejectFile, ejectProject, writeEjected } from "./cli/eject.ts";
-import { runGenerate } from "./cli/generate.ts";
-import { consoleLogger, silentLogger } from "./logger.ts";
+import { ejectFile, ejectProject, writeEjected } from './cli/eject.ts';
+import { runGenerate } from './cli/generate.ts';
+import { runInit } from './cli/init.ts';
+import { consoleLogger, silentLogger } from './logger.ts';
 
 const USAGE = `wiz - compile-time type introspection for Bun
 
@@ -53,37 +53,43 @@ async function ejectDir(input: string, output: string | undefined): Promise<numb
   if (!output) {
     // Keys are paths, values are contents, so the whole tree is one JSON value.
     const tree: Record<string, string> = {};
-    for (const file of files) tree[file.path] = file.contents;
+    for (const file of files) {
+      tree[file.path] = file.contents;
+    }
     process.stdout.write(`${JSON.stringify(tree, null, 2)}\n`);
     return 0;
   }
 
   await writeEjected(output, files);
-  for (const file of files) console.log(`  ${file.path}`);
+  for (const file of files) {
+    console.log(`  ${file.path}`);
+  }
   return 0;
 }
 
 async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
 
-  if (command === undefined || command === "--help" || command === "-h") {
+  if (command === undefined || command === '--help' || command === '-h') {
     console.log(USAGE);
     return command === undefined ? 1 : 0;
   }
 
-  if (command === "init") {
-    const unknown = rest.filter((flag) => flag !== "--force" && flag !== "-f");
+  if (command === 'init') {
+    const unknown = rest.filter((flag) => flag !== '--force' && flag !== '-f');
     if (unknown.length > 0) {
       console.error(`wiz init: unknown option '${unknown[0]}'`);
       return 1;
     }
     try {
       const result = await runInit({ force: rest.length > 0 });
-      for (const note of result.notes) console.log(`  ${note}`);
+      for (const note of result.notes) {
+        console.log(`  ${note}`);
+      }
       console.log(
         result.changed
-          ? "\nDone. Bun will load the plugin on the next run."
-          : "\nAlready set up; nothing to do."
+          ? '\nDone. Bun will load the plugin on the next run.'
+          : '\nAlready set up; nothing to do.'
       );
       return 0;
     } catch (error) {
@@ -92,10 +98,10 @@ async function main(argv: string[]): Promise<number> {
     }
   }
 
-  if (command === "eject") {
+  if (command === 'eject') {
     const [input, output, ...extra] = rest;
     if (!input) {
-      console.error("wiz eject: needs a file or directory to eject");
+      console.error('wiz eject: needs a file or directory to eject');
       return 1;
     }
     if (extra.length > 0) {
@@ -105,9 +111,7 @@ async function main(argv: string[]): Promise<number> {
 
     try {
       const stat = await Bun.file(input).stat();
-      return stat.isDirectory()
-        ? await ejectDir(input, output)
-        : await ejectOne(input, output);
+      return stat.isDirectory() ? await ejectDir(input, output) : await ejectOne(input, output);
     } catch (error) {
       console.error(`wiz eject: ${(error as Error).message}`);
       return 1;
@@ -115,7 +119,9 @@ async function main(argv: string[]): Promise<number> {
   }
 
   // runGenerate owns its own reporting, so there is nothing to wrap here.
-  if (command === "generate") return runGenerate(rest);
+  if (command === 'generate') {
+    return runGenerate(rest);
+  }
 
   console.error(`wiz: unknown command '${command}'\n`);
   console.error(USAGE);

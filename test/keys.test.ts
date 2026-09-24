@@ -1,10 +1,10 @@
 // @wiz-ignore
-import { describe, expect, test } from "bun:test";
-import { generateKeysCode } from "../src/generators/keys.ts";
-import { evalModule, getIRForSource } from "./helpers.ts";
+import { describe, expect, test } from 'bun:test';
+import { generateKeysCode } from '../src/generators/keys.ts';
+import { evalModule, getIRForSource } from './helpers.ts';
 
-describe("Key Extractor Generator", () => {
-  test("generates keys, requiredKeys, optionalKeys for interface", () => {
+describe('Key Extractor Generator', () => {
+  test('generates keys, requiredKeys, optionalKeys for interface', () => {
     const ir = getIRForSource(
       `
       export interface User {
@@ -13,7 +13,7 @@ describe("Key Extractor Generator", () => {
         age?: number;
       }
     `,
-      "User"
+      'User'
     );
 
     const code = generateKeysCode(ir);
@@ -23,19 +23,19 @@ describe("Key Extractor Generator", () => {
       optionalKeys: string[];
     }>(code);
 
-    expect(mod.keys).toEqual(["id", "name", "age"]);
-    expect(mod.requiredKeys).toEqual(["id", "name"]);
-    expect(mod.optionalKeys).toEqual(["age"]);
+    expect(mod.keys).toEqual(['id', 'name', 'age']);
+    expect(mod.requiredKeys).toEqual(['id', 'name']);
+    expect(mod.optionalKeys).toEqual(['age']);
   });
 
-  test("generates keys for intersection of object types", () => {
+  test('generates keys for intersection of object types', () => {
     const ir = getIRForSource(
       `
       export type Base = { id: string };
       export type Meta = { createdAt: number };
       export type Entity = Base & Meta & { title: string };
     `,
-      "Entity"
+      'Entity'
     );
 
     const code = generateKeysCode(ir);
@@ -45,8 +45,8 @@ describe("Key Extractor Generator", () => {
       optionalKeys: string[];
     }>(code);
 
-    expect(mod.keys).toEqual(["id", "createdAt", "title"]);
-    expect(mod.requiredKeys).toEqual(["id", "createdAt", "title"]);
+    expect(mod.keys).toEqual(['id', 'createdAt', 'title']);
+    expect(mod.requiredKeys).toEqual(['id', 'createdAt', 'title']);
     expect(mod.optionalKeys).toEqual([]);
   });
 });

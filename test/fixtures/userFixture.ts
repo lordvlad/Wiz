@@ -10,7 +10,7 @@ import {
   jsonSchema,
   validate,
   type ValidationError,
-} from "../../src/index.ts";
+} from '../../src/index.ts';
 
 export interface User {
   id: string;
@@ -46,14 +46,14 @@ export const userKeys = keysOf<User>();
 export const userReqKeys = requiredKeysOf<User>();
 export const userOptKeys = optionalKeysOf<User>();
 export const userSchema = jsonSchema<User>();
-export const apiOpenApiSchema = openapiSchema<[User, Book], "3.0">({
+export const apiOpenApiSchema = openapiSchema<[User, Book], '3.0'>({
   info: {
-    title: "Library API",
-    version: "1.0.0",
-    server: "http://books.com",
+    title: 'Library API',
+    version: '1.0.0',
+    server: 'http://books.com',
   },
 });
-export const protoSchemaString = protobufSchema<[ProtoUser]>({ indent: "    " });
+export const protoSchemaString = protobufSchema<[ProtoUser]>({ indent: '    ' });
 
 export function checkUserIs(user: unknown): boolean {
   return is<User>(user);

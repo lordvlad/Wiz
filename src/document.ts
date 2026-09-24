@@ -10,7 +10,7 @@
 export type OpenApiDocument = Record<string, unknown>;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -21,7 +21,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  */
 function mergeInto(target: OpenApiDocument, source: OpenApiDocument): void {
   for (const [key, value] of Object.entries(source)) {
-    if (key === "paths" && isPlainObject(value)) {
+    if (key === 'paths' && isPlainObject(value)) {
       const paths = isPlainObject(target.paths) ? target.paths : {};
       for (const [path, item] of Object.entries(value)) {
         const existing = paths[path];
@@ -47,7 +47,7 @@ function mergeInto(target: OpenApiDocument, source: OpenApiDocument): void {
               // When an existing operation has rich response definitions (e.g. 200 with body)
               // and a new fragment only has a default void/no-content 204, preserve the
               // richer response definition.
-              if (exResponses && newResponses && ("204" in newResponses) && !("204" in exResponses)) {
+              if (exResponses && newResponses && '204' in newResponses && !('204' in exResponses)) {
                 mergedOp.responses = exResponses;
               }
               mergedPath[verb] = mergedOp;
@@ -64,22 +64,18 @@ function mergeInto(target: OpenApiDocument, source: OpenApiDocument): void {
       continue;
     }
 
-    if (key === "components" && isPlainObject(value)) {
-      const components = isPlainObject(target.components)
-        ? target.components
-        : {};
+    if (key === 'components' && isPlainObject(value)) {
+      const components = isPlainObject(target.components) ? target.components : {};
       for (const [kind, entries] of Object.entries(value)) {
         const existing = components[kind];
         components[kind] =
-          isPlainObject(existing) && isPlainObject(entries)
-            ? { ...existing, ...entries }
-            : entries;
+          isPlainObject(existing) && isPlainObject(entries) ? { ...existing, ...entries } : entries;
       }
       target.components = components;
       continue;
     }
 
-    if (key === "tags" && Array.isArray(value)) {
+    if (key === 'tags' && Array.isArray(value)) {
       const tags = Array.isArray(target.tags) ? target.tags : [];
       target.tags = [...tags, ...value];
       continue;

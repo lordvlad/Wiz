@@ -1,23 +1,15 @@
-import {
-  emptyApiComponents,
-  type ApiDiagnostic,
-  type ApiIR,
-} from "../ir/api.ts";
-import type { TypeIR } from "../ir/types.ts";
-import type {
-  OpenRpcServiceMethodIR,
-  ParameterIR,
-  ServiceIR,
-} from "../ir/service.ts";
-import { jsonSchemaToIR as schemaToIR } from "./jsonSchema.ts";
-import { parseApiDocument, type ExtractApiOptions } from "./openapi.ts";
+import { emptyApiComponents, type ApiDiagnostic, type ApiIR } from '../ir/api.ts';
+import type { OpenRpcServiceMethodIR, ParameterIR, ServiceIR } from '../ir/service.ts';
+import type { TypeIR } from '../ir/types.ts';
+import { jsonSchemaToIR as schemaToIR } from './jsonSchema.ts';
+import { parseApiDocument, type ExtractApiOptions } from './openapi.ts';
 
 function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function token(part: string): string {
-  return part.replace(/~/g, "~0").replace(/\//g, "~1");
+  return part.replace(/~/g, '~0').replace(/\//g, '~1');
 }
 
 interface Ctx {
@@ -27,17 +19,14 @@ interface Ctx {
   ids: number;
 }
 
-export function extractOpenRpcIR(
-  text: string,
-  options: ExtractApiOptions = {}
-): ApiIR {
+export function extractOpenRpcIR(text: string, options: ExtractApiOptions = {}): ApiIR {
   const parsed = parseApiDocument(text, options.format);
   if (!isObject(parsed)) {
-    throw new Error("[wiz] OpenRPC document must be an object");
+    throw new Error('[wiz] OpenRPC document must be an object');
   }
 
-  const openrpcVer = typeof parsed.openrpc === "string" ? parsed.openrpc : "1.3.0";
-  if (!openrpcVer.startsWith("1.")) {
+  const openrpcVer = typeof parsed.openrpc === 'string' ? parsed.openrpc : '1.3.0';
+  if (!openrpcVer.startsWith('1.')) {
     if (options.strict) {
       throw new Error(`[wiz] unsupported OpenRPC version '${openrpcVer}'`);
     }
@@ -51,9 +40,9 @@ export function extractOpenRpcIR(
   };
 
   const infoObj = isObject(parsed.info) ? parsed.info : {};
-  const serviceName = typeof infoObj.title === "string" ? infoObj.title : undefined;
-  const serviceVer = typeof infoObj.version === "string" ? infoObj.version : undefined;
-  const serviceDesc = typeof infoObj.description === "string" ? infoObj.description : undefined;
+  const serviceName = typeof infoObj.title === 'string' ? infoObj.title : undefined;
+  const serviceVer = typeof infoObj.version === 'string' ? infoObj.version : undefined;
+  const serviceDesc = typeof infoObj.description === 'string' ? infoObj.description : undefined;
 
   const typesMap = new Map<string, TypeIR>();
   const componentsObj = isObject(parsed.components) ? parsed.components : {};
@@ -63,7 +52,9 @@ export function extractOpenRpcIR(
     const ir = schemaToIR(schemaRaw, ctx, `#/components/schemas/${token(schemaName)}`);
     // Every component is a declaration a client can name, union of literals
     // and scalar alias included; only a `$ref` already carries its own name.
-    if (ir.kind !== "ref") ir.name = schemaName;
+    if (ir.kind !== 'ref') {
+      ir.name = schemaName;
+    }
     typesMap.set(schemaName, ir);
   }
 
@@ -72,29 +63,34 @@ export function extractOpenRpcIR(
 
   for (let i = 0; i < methodsList.length; i++) {
     const m = methodsList[i];
-    if (!isObject(m)) continue;
+    if (!isObject(m)) {
+      continue;
+    }
 
-    const fullMethodName = typeof m.name === "string" ? m.name : `method_${i}`;
+    const fullMethodName = typeof m.name === 'string' ? m.name : `method_${i}`;
     let svc: string | undefined;
     let methodName = fullMethodName;
 
-    if (typeof m.service === "string") {
+    if (typeof m.service === 'string') {
       svc = m.service;
-    } else if (fullMethodName.includes(".")) {
-      const parts = fullMethodName.split(".");
-      svc = parts.slice(0, -1).join(".");
+    } else if (fullMethodName.includes('.')) {
+      const parts = fullMethodName.split('.');
+      svc = parts.slice(0, -1).join('.');
       methodName = parts[parts.length - 1]!;
     }
 
-    const summary = typeof m.summary === "string" ? m.summary : undefined;
-    const description = typeof m.description === "string" ? m.description : undefined;
+    const summary = typeof m.summary === 'string' ? m.summary : undefined;
+    const description = typeof m.description === 'string' ? m.description : undefined;
     const deprecated = m.deprecated === true;
 
     const tags: string[] = [];
     if (Array.isArray(m.tags)) {
       for (const t of m.tags) {
-        if (typeof t === "string") tags.push(t);
-        else if (isObject(t) && typeof t.name === "string") tags.push(t.name);
+        if (typeof t === 'string') {
+          tags.push(t);
+        } else if (isObject(t) && typeof t.name === 'string') {
+          tags.push(t.name);
+        }
       }
     }
 
@@ -102,52 +98,46 @@ export function extractOpenRpcIR(
     const parameters: ParameterIR[] = [];
     for (let pIdx = 0; pIdx < paramsList.length; pIdx++) {
       const p = paramsList[pIdx];
-      if (!isObject(p)) continue;
-      const paramName = typeof p.name === "string" ? p.name : `param_${pIdx}`;
-      const paramDesc = typeof p.description === "string" ? p.description : undefined;
+      if (!isObject(p)) {
+        continue;
+      }
+      const paramName = typeof p.name === 'string' ? p.name : `param_${pIdx}`;
+      const paramDesc = typeof p.description === 'string' ? p.description : undefined;
       const required = p.required === true;
       const paramSchema = p.schema;
 
-      const paramType = schemaToIR(
-        paramSchema,
-        ctx,
-        `#/methods/${i}/params/${pIdx}/schema`
-      );
+      const paramType = schemaToIR(paramSchema, ctx, `#/methods/${i}/params/${pIdx}/schema`);
 
       parameters.push({
         name: paramName,
-        in: "rpc",
+        in: 'rpc',
         required,
         type: paramType,
         description: paramDesc,
       });
     }
 
-    const paramsByName = m.paramStructure === "by-name";
+    const paramsByName = m.paramStructure === 'by-name';
 
     const resultObj = isObject(m.result) ? m.result : {};
-    const resultType = schemaToIR(
-      resultObj.schema,
-      ctx,
-      `#/methods/${i}/result/schema`
-    );
+    const resultType = schemaToIR(resultObj.schema, ctx, `#/methods/${i}/result/schema`);
 
     const methodIR: OpenRpcServiceMethodIR = {
-      kind: "serviceMethod",
-      protocol: "openrpc",
+      kind: 'serviceMethod',
+      protocol: 'openrpc',
       address: {
-        protocol: "openrpc",
+        protocol: 'openrpc',
         service: svc,
         method: methodName,
       },
       request: {
-        protocol: "openrpc",
+        protocol: 'openrpc',
         params: parameters,
         paramsByName,
       },
       responses: [
         {
-          protocol: "openrpc",
+          protocol: 'openrpc',
           result: resultType,
         },
       ],
@@ -161,7 +151,7 @@ export function extractOpenRpcIR(
   }
 
   const service: ServiceIR = {
-    kind: "service",
+    kind: 'service',
     name: serviceName,
     version: serviceVer,
     description: serviceDesc,
@@ -169,8 +159,8 @@ export function extractOpenRpcIR(
   };
 
   return {
-    kind: "api",
-    version: "openrpc-1.3",
+    kind: 'api',
+    version: 'openrpc-1.3',
     types: typesMap,
     components: emptyApiComponents(),
     service,

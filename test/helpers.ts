@@ -1,7 +1,6 @@
-import ts from "typescript";
-import { extractTypeIR } from "../src/extractors/typescript.ts";
-import { flattenObjectProperties, type TypeIR } from "../src/types.ts";
-import { isHttpMethod } from "../src/ir/service.ts";
+import ts from 'typescript';
+import { extractTypeIR } from '../src/extractors/typescript.ts';
+import { isHttpMethod } from '../src/ir/service.ts';
 import type {
   HttpMethodName,
   HttpRequestIR,
@@ -9,7 +8,8 @@ import type {
   ParameterIR,
   ServiceIR,
   ServiceMethodIR,
-} from "../src/ir/service.ts";
+} from '../src/ir/service.ts';
+import { flattenObjectProperties, type TypeIR } from '../src/types.ts';
 
 /**
  * Narrows an extracted method to the HTTP shape.
@@ -25,7 +25,7 @@ export function asHttp(method: ServiceMethodIR): HttpServiceMethodIR {
   return method;
 }
 
-const VIRTUAL_ENTRY = "test.ts";
+const VIRTUAL_ENTRY = 'test.ts';
 
 const compilerOptions: ts.CompilerOptions = {
   target: ts.ScriptTarget.ESNext,
@@ -53,7 +53,9 @@ let lastSourceText: string | undefined;
 
 function programFor(sourceText: string): ts.Program {
   const cached = programCache.get(sourceText);
-  if (cached) return cached;
+  if (cached) {
+    return cached;
+  }
 
   const host = ts.createCompilerHost(compilerOptions);
   const originalReadFile = host.readFile.bind(host);
@@ -65,12 +67,7 @@ function programFor(sourceText: string): ts.Program {
   host.getSourceFile = (fileName, languageVersion, onError, shouldCreate) => {
     // Only declaration files are shareable; the entry differs per fixture.
     if (fileName === VIRTUAL_ENTRY) {
-      return originalGetSourceFile(
-        fileName,
-        languageVersion,
-        onError,
-        shouldCreate
-      );
+      return originalGetSourceFile(fileName, languageVersion, onError, shouldCreate);
     }
     if (!libFileCache.has(fileName)) {
       libFileCache.set(
@@ -88,9 +85,7 @@ function programFor(sourceText: string): ts.Program {
 function declarationNamed(sourceFile: ts.SourceFile, typeName: string) {
   return sourceFile.statements.find(
     (s) =>
-      (ts.isInterfaceDeclaration(s) ||
-        ts.isTypeAliasDeclaration(s) ||
-        ts.isEnumDeclaration(s)) &&
+      (ts.isInterfaceDeclaration(s) || ts.isTypeAliasDeclaration(s) || ts.isEnumDeclaration(s)) &&
       s.name.text === typeName
   );
 }
@@ -138,68 +133,65 @@ export function getIRsForSource<T extends string>(
  */
 export function evalModule<T>(code: string): T {
   const exportNames = [
-    "keys",
-    "requiredKeys",
-    "optionalKeys",
-    "deepKeys",
-    "jsonSchema",
-    "jsonSchemas",
-    "jsonSchema_draft2020",
-    "jsonSchema_draft07",
-    "jsonSchemas_draft2020",
-    "jsonSchemas_draft07",
-    "schema_draft2020",
-    "schema_draft07",
-    "validate",
-    "parseQuery",
-    "QueryValidationError",
-    "is",
-    "assert",
-    "openapiSchema",
-    "openRPCSchema",
-    "encodeProto",
-    "decodeProto",
-    "protobufSchema",
-    "encodeAvro",
-    "decodeAvro",
-    "avroSchema",
-    "encodeArrow",
-    "decodeArrow",
-    "arrowSchema",
-    "zodSchema",
-    "encodeJson",
-    "decodeJson",
-    "encodeErlangText",
-    "decodeErlangText",
-    "encodeErlangBinary",
-    "decodeErlangBinary",
-    "encodeCbor",
-    "decodeCbor",
-    "asyncapiSchema",
-    "mcpSchema",
-    "grpcSchema",
+    'keys',
+    'requiredKeys',
+    'optionalKeys',
+    'deepKeys',
+    'jsonSchema',
+    'jsonSchemas',
+    'jsonSchema_draft2020',
+    'jsonSchema_draft07',
+    'jsonSchemas_draft2020',
+    'jsonSchemas_draft07',
+    'schema_draft2020',
+    'schema_draft07',
+    'validate',
+    'parseQuery',
+    'QueryValidationError',
+    'is',
+    'assert',
+    'openapiSchema',
+    'openRPCSchema',
+    'encodeProto',
+    'decodeProto',
+    'protobufSchema',
+    'encodeAvro',
+    'decodeAvro',
+    'avroSchema',
+    'encodeArrow',
+    'decodeArrow',
+    'arrowSchema',
+    'zodSchema',
+    'encodeJson',
+    'decodeJson',
+    'encodeErlangText',
+    'decodeErlangText',
+    'encodeErlangBinary',
+    'decodeErlangBinary',
+    'encodeCbor',
+    'decodeCbor',
+    'asyncapiSchema',
+    'mcpSchema',
+    'grpcSchema',
   ];
 
   const collected = exportNames
     .map((name) => `${name}: typeof ${name} !== "undefined" ? ${name} : undefined`)
-    .join(", ");
+    .join(', ');
 
   return new Function(
-    `"use strict";\n${code.replace(/export /g, "")}\nreturn { ${collected} };`
+    `"use strict";\n${code.replace(/export /g, '')}\nreturn { ${collected} };`
   )() as T;
 }
 /**
  * Turns a fixture interface's IR into the flat `ParameterIR[]` the IR now
  * carries, the same way `src/plugin.ts` does for `op<{ … }>` slots.
  */
-export function params(
-  ir: TypeIR,
-  location: ParameterIR["in"]
-): ParameterIR[] {
+export function params(ir: TypeIR, location: ParameterIR['in']): ParameterIR[] {
   return flattenObjectProperties(ir).map((property) => ({
     name: property.name,
     in: location,
-    required: location === "path" ? true : !property.optional,
+    required: location === 'path' ? true : !property.optional,
     type: property.type,
   }));
 }
@@ -214,19 +206,19 @@ export function httpMethod(spec: {
   status?: number;
   overrides?: string;
 }): HttpServiceMethodIR {
-  const request: HttpRequestIR = { protocol: "http" };
+  const request: HttpRequestIR = { protocol: 'http' };
   if (spec.parameters && spec.parameters.length > 0) {
     request.parameters = spec.parameters;
   }
   if (spec.body) {
-    request.body = [{ mimetype: "application/json", content: spec.body }];
+    request.body = [{ mimetype: 'application/json', content: spec.body }];
   }
 
   return {
-    kind: "serviceMethod",
-    protocol: "http",
+    kind: 'serviceMethod',
+    protocol: 'http',
     address: {
-      protocol: "http",
+      protocol: 'http',
       method: spec.method.toUpperCase() as HttpMethodName,
       path: spec.path,
     },
@@ -234,16 +226,16 @@ export function httpMethod(spec: {
     responses: [
       spec.response
         ? {
-            protocol: "http",
+            protocol: 'http',
             status: spec.status ?? 200,
-            body: [{ mimetype: "application/json", content: spec.response }],
+            body: [{ mimetype: 'application/json', content: spec.response }],
           }
-        : { protocol: "http", status: spec.status ?? 204 },
+        : { protocol: 'http', status: spec.status ?? 204 },
     ],
     overrides: spec.overrides,
   };
 }
 
 export function service(methods: ServiceMethodIR[]): ServiceIR {
-  return { kind: "service", methods };
+  return { kind: 'service', methods };
 }

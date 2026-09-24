@@ -1,43 +1,43 @@
 // @wiz-ignore
-import { describe, expect, test } from "bun:test";
-import { extractAsyncApiIR } from "../src/extractors/asyncapi.ts";
-import { extractApiIR } from "../src/extractors/openapi.ts";
-import { isAsyncApiMethod } from "../src/ir/service.ts";
-import { generateAsyncApiSchemaCode } from "../src/generators/asyncapi.ts";
-import { generate } from "../src/generators/generator.ts";
-import { tsClientGenerator } from "../src/generators/tsClient.ts";
-import { transformSource } from "../src/plugin.ts";
-import { silentLogger } from "../src/logger.ts";
-import { getIRsForSource, evalModule } from "./helpers.ts";
+import { describe, expect, test } from 'bun:test';
+import { extractAsyncApiIR } from '../src/extractors/asyncapi.ts';
+import { extractApiIR } from '../src/extractors/openapi.ts';
+import { generateAsyncApiSchemaCode } from '../src/generators/asyncapi.ts';
+import { generate } from '../src/generators/generator.ts';
+import { tsClientGenerator } from '../src/generators/tsClient.ts';
+import { isAsyncApiMethod } from '../src/ir/service.ts';
+import { silentLogger } from '../src/logger.ts';
+import { transformSource } from '../src/plugin.ts';
+import { getIRsForSource, evalModule } from './helpers.ts';
 
-describe("AsyncAPI Extractor", () => {
-  test("extracts AsyncAPI 3.0 document IR", () => {
+describe('AsyncAPI Extractor', () => {
+  test('extracts AsyncAPI 3.0 document IR', () => {
     const doc = JSON.stringify({
-      asyncapi: "3.0.0",
-      info: { title: "User Events", version: "1.0.0" },
+      asyncapi: '3.0.0',
+      info: { title: 'User Events', version: '1.0.0' },
       channels: {
         userSignup: {
-          address: "users/signup",
+          address: 'users/signup',
           messages: {
-            UserSignup: { $ref: "#/components/messages/UserSignup" },
+            UserSignup: { $ref: '#/components/messages/UserSignup' },
           },
         },
       },
       operations: {
         onSignup: {
-          action: "send",
-          channel: { $ref: "#/channels/userSignup" },
-          summary: "User signup event",
+          action: 'send',
+          channel: { $ref: '#/channels/userSignup' },
+          summary: 'User signup event',
         },
       },
       components: {
         messages: {
           UserSignup: {
             payload: {
-              type: "object",
+              type: 'object',
               properties: {
-                userId: { type: "string" },
-                email: { type: "string" },
+                userId: { type: 'string' },
+                email: { type: 'string' },
               },
             },
           },
@@ -46,32 +46,34 @@ describe("AsyncAPI Extractor", () => {
     });
 
     const ir = extractAsyncApiIR(doc);
-    expect(ir.kind).toBe("api");
-    expect(ir.version).toBe("asyncapi-3.0");
-    expect(ir.service.name).toBe("User Events");
+    expect(ir.kind).toBe('api');
+    expect(ir.version).toBe('asyncapi-3.0');
+    expect(ir.service.name).toBe('User Events');
 
     const method = ir.service.methods[0]!;
-    expect(method.operationId).toBe("onSignup");
+    expect(method.operationId).toBe('onSignup');
     expect(isAsyncApiMethod(method)).toBe(true);
-    if (!isAsyncApiMethod(method)) throw new Error("expected an asyncapi method");
-    expect(method.address.channel).toBe("users/signup");
-    expect(method.address.action).toBe("send");
+    if (!isAsyncApiMethod(method)) {
+      throw new Error('expected an asyncapi method');
+    }
+    expect(method.address.channel).toBe('users/signup');
+    expect(method.address.action).toBe('send');
   });
 
-  test("extracts AsyncAPI 2.6 document IR", () => {
+  test('extracts AsyncAPI 2.6 document IR', () => {
     const doc = JSON.stringify({
-      asyncapi: "2.6.0",
-      info: { title: "Orders API", version: "2.0.0" },
+      asyncapi: '2.6.0',
+      info: { title: 'Orders API', version: '2.0.0' },
       channels: {
-        "orders/created": {
+        'orders/created': {
           publish: {
-            operationId: "orderCreated",
+            operationId: 'orderCreated',
             message: {
               payload: {
-                type: "object",
+                type: 'object',
                 properties: {
-                  orderId: { type: "string" },
-                  total: { type: "number" },
+                  orderId: { type: 'string' },
+                  total: { type: 'number' },
                 },
               },
             },
@@ -81,14 +83,16 @@ describe("AsyncAPI Extractor", () => {
     });
 
     const ir = extractAsyncApiIR(doc);
-    expect(ir.version).toBe("asyncapi-2.6");
-    expect(ir.service.name).toBe("Orders API");
+    expect(ir.version).toBe('asyncapi-2.6');
+    expect(ir.service.name).toBe('Orders API');
 
     const method = ir.service.methods[0]!;
-    expect(method.operationId).toBe("orderCreated");
-    if (!isAsyncApiMethod(method)) throw new Error("expected an asyncapi method");
-    expect(method.address.channel).toBe("orders/created");
-    expect(method.address.action).toBe("send");
+    expect(method.operationId).toBe('orderCreated');
+    if (!isAsyncApiMethod(method)) {
+      throw new Error('expected an asyncapi method');
+    }
+    expect(method.address.channel).toBe('orders/created');
+    expect(method.address.action).toBe('send');
   });
 
   /**
@@ -96,46 +100,46 @@ describe("AsyncAPI Extractor", () => {
    * the dialect off the document's root field. Without an `asyncapi` branch the
    * documented `-g asyncapiClient` invocation died on the OpenAPI version check.
    */
-  test("extractApiIR dispatches an AsyncAPI document to this extractor", () => {
+  test('extractApiIR dispatches an AsyncAPI document to this extractor', () => {
     const doc = JSON.stringify({
-      asyncapi: "3.0.0",
-      info: { title: "Routed", version: "1.0.0" },
+      asyncapi: '3.0.0',
+      info: { title: 'Routed', version: '1.0.0' },
       channels: {},
       operations: {},
     });
 
     const ir = extractApiIR(doc);
-    expect(ir.version).toBe("asyncapi-3.0");
-    expect(ir.service.name).toBe("Routed");
+    expect(ir.version).toBe('asyncapi-3.0');
+    expect(ir.service.name).toBe('Routed');
   });
 });
 
-describe("AsyncAPI Client Generator (model and decoder only)", () => {
-  test("client generator produces ONLY model.ts and codec.ts", () => {
+describe('AsyncAPI Client Generator (model and decoder only)', () => {
+  test('client generator produces ONLY model.ts and codec.ts', () => {
     const doc = JSON.stringify({
-      asyncapi: "3.0.0",
-      info: { title: "Events", version: "1.0.0" },
+      asyncapi: '3.0.0',
+      info: { title: 'Events', version: '1.0.0' },
       channels: {
         userSignup: {
-          address: "users/signup",
+          address: 'users/signup',
           messages: {
-            UserSignup: { $ref: "#/components/messages/UserSignup" },
+            UserSignup: { $ref: '#/components/messages/UserSignup' },
           },
         },
       },
       operations: {
         onSignup: {
-          action: "send",
-          channel: { $ref: "#/channels/userSignup" },
+          action: 'send',
+          channel: { $ref: '#/channels/userSignup' },
         },
       },
       components: {
         messages: {
           UserSignup: {
             payload: {
-              type: "object",
+              type: 'object',
               properties: {
-                id: { type: "string" },
+                id: { type: 'string' },
               },
             },
           },
@@ -146,36 +150,35 @@ describe("AsyncAPI Client Generator (model and decoder only)", () => {
     const ir = extractAsyncApiIR(doc);
     const files = generate(ir, tsClientGenerator, {}, silentLogger);
 
-    expect(Object.keys(files).sort()).toEqual(["codec.ts", "model.ts"]);
-    expect(files["api.ts"]).toBeUndefined();
-    expect(files["transport.ts"]).toBeUndefined();
+    expect(Object.keys(files).sort()).toEqual(['codec.ts', 'model.ts']);
+    expect(files['api.ts']).toBeUndefined();
+    expect(files['transport.ts']).toBeUndefined();
 
-    expect(files["model.ts"]).toContain("export interface UserSignup");
-    expect(files["codec.ts"]).toContain("export function encodeUserSignup");
-    expect(files["codec.ts"]).toContain("export function decodeUserSignup");
+    expect(files['model.ts']).toContain('export interface UserSignup');
+    expect(files['codec.ts']).toContain('export function encodeUserSignup');
+    expect(files['codec.ts']).toContain('export function decodeUserSignup');
   });
 });
 
-describe("AsyncAPI Spec Generator", () => {
-  test("generates AsyncAPI 3.0 schema virtual module", () => {
-    const irs = getIRsForSource(
-      `export interface OrderEvent { orderId: string; amount: number }`,
-      ["OrderEvent"]
-    );
+describe('AsyncAPI Spec Generator', () => {
+  test('generates AsyncAPI 3.0 schema virtual module', () => {
+    const irs = getIRsForSource(`export interface OrderEvent { orderId: string; amount: number }`, [
+      'OrderEvent',
+    ]);
     const code = generateAsyncApiSchemaCode(
-      [{ name: "OrderEvent", ir: irs.OrderEvent!.ir }],
-      "3.0"
+      [{ name: 'OrderEvent', ir: irs.OrderEvent!.ir }],
+      '3.0'
     );
 
     const mod = evalModule<{ asyncapiSchema(): any }>(code);
     const doc = mod.asyncapiSchema();
 
-    expect(doc.asyncapi).toBe("3.0.0");
+    expect(doc.asyncapi).toBe('3.0.0');
     expect(doc.components.schemas.OrderEvent).toBeDefined();
     expect(doc.components.messages.OrderEvent).toBeDefined();
   });
 
-  test("plugin rewrites asyncapiSchema for signature/service types", () => {
+  test('plugin rewrites asyncapiSchema for signature/service types', () => {
     const source = `
       import { asyncapiSchema } from "wiz";
       export interface UserEvent { id: string }
@@ -189,24 +192,20 @@ describe("AsyncAPI Spec Generator", () => {
       export const doc = asyncapiSchema<[EventService]>();
     `;
 
-    const result = transformSource({ path: "app.ts", contents: source, logger: silentLogger });
-    expect(result.code).toContain("asyncapiSchema as __wiz_asyncapiSchema_");
+    const result = transformSource({ path: 'app.ts', contents: source, logger: silentLogger });
+    expect(result.code).toContain('asyncapiSchema as __wiz_asyncapiSchema_');
 
     const module = [...result.modules.values()].find((m) =>
-      m.files["index.js"]?.includes("export function asyncapiSchema")
+      m.files['index.js']?.includes('export function asyncapiSchema')
     )!;
-    const doc = evalModule<{ asyncapiSchema(): any }>(
-      module.files["index.js"]!
-    ).asyncapiSchema();
+    const doc = evalModule<{ asyncapiSchema(): any }>(module.files['index.js']!).asyncapiSchema();
 
-    expect(Object.values(doc.channels).map((c: any) => c.address)).toEqual([
-      "users/signup",
-    ]);
-    expect(Object.keys(doc.operations)).toEqual(["signup"]);
-    expect(doc.operations.signup.action).toBe("send");
+    expect(Object.values(doc.channels).map((c: any) => c.address)).toEqual(['users/signup']);
+    expect(Object.keys(doc.operations)).toEqual(['signup']);
+    expect(doc.operations.signup.action).toBe('send');
   });
 
-  test("a producer is a listener registration, and its payload the event", () => {
+  test('a producer is a listener registration, and its payload the event', () => {
     const source = `
       import { asyncapiSchema } from "wiz";
       export interface UserSignupEvent { id: string }
@@ -234,31 +233,25 @@ describe("AsyncAPI Spec Generator", () => {
       export const doc = asyncapiSchema<[Events]>();
     `;
 
-    const result = transformSource({ path: "app.ts", contents: source, logger: silentLogger });
+    const result = transformSource({ path: 'app.ts', contents: source, logger: silentLogger });
     const module = [...result.modules.values()].find((m) =>
-      m.files["index.js"]?.includes("export function asyncapiSchema")
+      m.files['index.js']?.includes('export function asyncapiSchema')
     )!;
-    const doc = evalModule<{ asyncapiSchema(): any }>(
-      module.files["index.js"]!
-    ).asyncapiSchema();
+    const doc = evalModule<{ asyncapiSchema(): any }>(module.files['index.js']!).asyncapiSchema();
 
     const channel = (address: string) =>
       Object.values(doc.channels).find((c: any) => c.address === address) as any;
 
     // The listener's own parameter is the payload, not the function type.
-    expect(Object.keys(channel("user/signup").messages)).toEqual([
-      "UserSignupEvent",
-    ]);
+    expect(Object.keys(channel('user/signup').messages)).toEqual(['UserSignupEvent']);
     expect(doc.components.schemas.UserSignupEvent.properties.id).toEqual({
-      type: "string",
+      type: 'string',
     });
     // A returned stream says the same thing.
-    expect(Object.keys(channel("user/login").messages)).toEqual([
-      "UserLoginEvent",
-    ]);
-    expect(doc.operations.onSignup.action).toBe("send");
-    expect(doc.operations.logins.action).toBe("send");
-    expect(doc.operations.applySignup.action).toBe("receive");
+    expect(Object.keys(channel('user/login').messages)).toEqual(['UserLoginEvent']);
+    expect(doc.operations.onSignup.action).toBe('send');
+    expect(doc.operations.logins.action).toBe('send');
+    expect(doc.operations.applySignup.action).toBe('receive');
     // An interface of methods is not itself a message.
     expect(doc.components.schemas.Events).toBeUndefined();
   });
