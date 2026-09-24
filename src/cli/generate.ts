@@ -219,6 +219,8 @@ const GENERATOR_SHORTCUTS: Record<string, string> = {
     "asyncapi.ts": "../generators/asyncapi.ts",
     java: "../generators/java.ts",
     "java.ts": "../generators/java.ts",
+    cli: "../generators/cli.ts",
+    "cli.ts": "../generators/cli.ts",
 };
 
 async function loadGenerator(module: string): Promise<Generator<GenerateOptions>> {
