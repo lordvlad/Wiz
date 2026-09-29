@@ -106,7 +106,38 @@ describe("TypeIR as TypeScript", () => {
             keyType: primitive("string"),
             valueType: union,
         };
-        expect(typeText(record, NONE)).toBe("Record<string, string | number>");
+        expect(typeText(record, NONE)).toBe("{ [key: string]: string | number }");
+    });
+
+    test("a record valued by its own declared type does not become a circular `Record<>` alias", () => {
+        // `additionalProperties: { $ref: <self> }` inside a `oneOf`, as seen in
+        // Discord's `ErrorDetails`. `type ErrorDetails = Record<string, ErrorDetails> | X`
+        // is a TS2456 circular type alias; the index-signature form is not.
+        const innerErrors: TypeIR = { id: "ie", kind: "object", properties: [], name: "InnerErrors" };
+        const selfRecord: Extract<TypeIR, { kind: "record" }> = {
+            id: "r",
+            kind: "record",
+            keyType: primitive("string"),
+            valueType: primitive("never"), // replaced below once `union` exists
+        };
+        const union: Extract<TypeIR, { kind: "union" }> = {
+            id: "u",
+            kind: "union",
+            types: [selfRecord, innerErrors],
+            name: "ErrorDetails",
+        };
+        selfRecord.valueType = union;
+
+        const identifiers = typeIdentifiers(["ErrorDetails", "InnerErrors"]);
+        const declarations = tsDeclarations(
+            [
+                ["ErrorDetails", union],
+                ["InnerErrors", innerErrors],
+            ],
+            identifiers,
+        );
+        expect(declarations).toContain("export type ErrorDetails = { [key: string]: ErrorDetails } | InnerErrors;");
+        expect(declarations).not.toContain("Record<string, ErrorDetails>");
     });
 
     test("an enum is a union of its values, not a runtime enum", () => {

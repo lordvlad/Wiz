@@ -1130,7 +1130,7 @@ export interface Call {
   url: string;
   headers: Record<string, string>;
   /** JSON text for an HTTP call, a framed protobuf message for a gRPC one. */
-  body?: string | Uint8Array;
+  body?: string | Uint8Array | FormData;
   /** Signal for cancellation or local timeout. */
   signal?: AbortSignal;
 }
@@ -1217,7 +1217,7 @@ export type FetchLike = (
   init: {
     method: string;
     headers: Record<string, string>;
-    body?: string | Uint8Array;
+    body?: string | Uint8Array | FormData;
     signal?: AbortSignal;
   }
 ) => Promise<Response>;

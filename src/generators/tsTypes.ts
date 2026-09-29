@@ -258,8 +258,17 @@ export function typeBodyText(ir: TypeIR, identifiers: ReadonlyMap<string, string
                 .map((member) => `${docComment(member, inner)}${inner}| ${literalText(member.value)}`)
                 .join("\n")}`;
         }
-        case "record":
-            return `Record<${typeText(ir.keyType, identifiers, indent)}, ${typeText(ir.valueType, identifiers, indent)}>`;
+        case "record": {
+            const keyText = typeText(ir.keyType, identifiers, indent);
+            const valueText = typeText(ir.valueType, identifiers, indent);
+            // A `Record<string, T>` that is (directly or transitively) self-referential
+            // is a TS2456 circular type alias, because `Record` is a generic
+            // instantiation and TS will not defer it. An inline index signature is
+            // structurally the same type but is not an instantiation, so it is exempt
+            // from that check; safe here because `additionalProperties` keys are
+            // always strings, and an index signature only accepts string/number/symbol.
+            return keyText === "string" ? `{ [key: string]: ${valueText} }` : `Record<${keyText}, ${valueText}>`;
+        }
         case "ref": {
             // A ref only names its target. Without a name there is nothing to point
             // at in TypeScript - the id is an extraction detail - so the shape is

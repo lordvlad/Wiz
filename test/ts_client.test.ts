@@ -893,6 +893,10 @@ describe("multipart/form-data and application/x-www-form-urlencoded request body
         const clientFiles = generate(ir, tsClientGenerator, {}, silentLogger);
         expect(clientFiles["api.ts"]).toContain("serializeFormData(body)");
         expect(clientFiles["api.ts"]).toContain("function serializeFormData");
+        // `serializeFormData` returns `FormData`, so `Call.body` (and every other
+        // place a call's body is typed) must admit it or the emitted file does
+        // not typecheck: `body: serializeFormData(body)` would be a type error.
+        expect(clientFiles["api.ts"]).toContain("body?: string | Uint8Array | FormData;");
     });
 
     test("emits client with urlencoded serializer for form urlencoded request bodies", async () => {
