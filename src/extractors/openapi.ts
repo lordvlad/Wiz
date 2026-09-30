@@ -1,3 +1,4 @@
+import { dirname, isAbsolute, join } from "node:path";
 import { emptyApiComponents, type ApiComponentsIR, type ApiDiagnostic, type ApiIR } from "../ir/api.ts";
 import type {
     HttpMethodName,
@@ -508,6 +509,183 @@ export function parseApiDocument(text: string, format?: ExtractApiOptions["forma
     // A document that is neither JSON nor YAML is most usefully reported as
     // malformed YAML, so this error is the one that escapes.
     return Bun.YAML.parse(text);
+}
+function resolveJsonPointer(root: unknown, pointer: string): unknown {
+    if (!pointer || pointer === "#" || pointer === "#/") {
+        return root;
+    }
+    const path = pointer
+        .replace(/^#\//, "")
+        .split("/")
+        .map((seg) => seg.replace(/~1/g, "/").replace(/~0/g, "~"));
+    let current: any = root;
+    for (const part of path) {
+        if (current === undefined || current === null) {
+            return undefined;
+        }
+        current = current[part];
+    }
+    return current;
+}
+
+function normalizeSchemaName(filePart: string, pointerPart: string): string {
+    let baseName = "";
+    if (pointerPart && pointerPart !== "#" && pointerPart !== "#/") {
+        const parts = pointerPart.replace(/^#\/?/, "").split("/");
+        baseName = parts[parts.length - 1]!;
+    } else {
+        const filename = filePart
+            .split("/")
+            .pop()!
+            .replace(/\.(json|ya?ml)$/, "");
+        baseName = filename;
+    }
+    return baseName.replace(/[^a-zA-Z0-9_$]/g, "_");
+}
+
+/**
+ * Bundles a multi-file OpenAPI document, resolving all external file and URL references
+ * into a self-contained document while preserving canonical schemas.
+ */
+export async function bundleOpenApiDocument(
+    entryPathOrUrl: string,
+    cache = new Map<string, unknown>(),
+): Promise<unknown> {
+    async function loadDocument(filePathOrUrl: string): Promise<unknown> {
+        if (cache.has(filePathOrUrl)) {
+            return cache.get(filePathOrUrl);
+        }
+        let text: string;
+        if (filePathOrUrl.startsWith("http://") || filePathOrUrl.startsWith("https://")) {
+            const res = await fetch(filePathOrUrl);
+            if (!res.ok) {
+                throw new Error(`Failed to fetch ${filePathOrUrl}: HTTP ${res.status}`);
+            }
+            text = await res.text();
+        } else {
+            text = await Bun.file(filePathOrUrl).text();
+        }
+        const extension = filePathOrUrl.slice(filePathOrUrl.lastIndexOf(".") + 1).toLowerCase();
+        const format = EXTENSION_FORMATS[extension];
+        const parsed = parseApiDocument(text, format);
+        cache.set(filePathOrUrl, parsed);
+        return parsed;
+    }
+
+    const rootDoc = await loadDocument(entryPathOrUrl);
+    if (!isObject(rootDoc)) {
+        return rootDoc;
+    }
+
+    rootDoc.components = isObject(rootDoc.components) ? rootDoc.components : {};
+    const components = rootDoc.components as Record<string, any>;
+    components.schemas = isObject(components.schemas) ? components.schemas : {};
+    const schemasRegistry = components.schemas as Record<string, any>;
+
+    const hoistedSchemas = new Map<string, string>();
+
+    function resolveTargetLocation(
+        ref: string,
+        currentFile: string,
+    ): { targetFile: string; pointerPart: string; isExternal: boolean } {
+        const hashIdx = ref.indexOf("#");
+        const filePart = hashIdx !== -1 ? ref.slice(0, hashIdx) : ref;
+        const pointerPart = hashIdx !== -1 ? ref.slice(hashIdx) : "";
+
+        let targetFile: string;
+        if (!filePart) {
+            targetFile = currentFile;
+        } else if (filePart.startsWith("http://") || filePart.startsWith("https://")) {
+            targetFile = filePart;
+        } else if (currentFile.startsWith("http://") || currentFile.startsWith("https://")) {
+            targetFile = new URL(filePart, currentFile).toString();
+        } else {
+            targetFile = isAbsolute(filePart) ? filePart : join(dirname(currentFile), filePart);
+        }
+
+        const isExternal = targetFile !== entryPathOrUrl || !ref.startsWith("#/components/");
+        return { targetFile, pointerPart, isExternal };
+    }
+
+    async function resolveValue(
+        val: unknown,
+        currentFile: string,
+        isSchemaContext: boolean,
+        seen = new Set<string>(),
+    ): Promise<unknown> {
+        if (Array.isArray(val)) {
+            return Promise.all(val.map((item) => resolveValue(item, currentFile, isSchemaContext, seen)));
+        }
+        if (!isObject(val)) {
+            return val;
+        }
+
+        if (typeof val.$ref === "string") {
+            const ref = val.$ref;
+            const { targetFile, pointerPart, isExternal } = resolveTargetLocation(ref, currentFile);
+
+            if (!isExternal && ref.startsWith("#/components/schemas/")) {
+                return val;
+            }
+
+            const targetDoc = await loadDocument(targetFile);
+            const resolved = pointerPart ? resolveJsonPointer(targetDoc, pointerPart) : targetDoc;
+            if (resolved === undefined) {
+                throw new Error(`Unresolved $ref '${ref}' in ${currentFile}`);
+            }
+
+            const cycleKey = `${targetFile}${pointerPart ? `#${pointerPart.replace(/^#\/?/, "")}` : ""}`;
+            const isSchema =
+                isSchemaContext ||
+                (isObject(resolved) &&
+                    ("type" in resolved ||
+                        "properties" in resolved ||
+                        "enum" in resolved ||
+                        "oneOf" in resolved ||
+                        "anyOf" in resolved ||
+                        "allOf" in resolved ||
+                        "items" in resolved));
+
+            if (isSchema) {
+                if (!hoistedSchemas.has(cycleKey)) {
+                    let schemaName = normalizeSchemaName(targetFile, pointerPart);
+                    let counter = 1;
+                    const origName = schemaName;
+                    while (schemasRegistry[schemaName] && hoistedSchemas.get(cycleKey) !== schemaName) {
+                        schemaName = `${origName}_${counter++}`;
+                    }
+                    hoistedSchemas.set(cycleKey, schemaName);
+                    schemasRegistry[schemaName] = {};
+                    const resolvedBody = await resolveValue(resolved, targetFile, true, new Set([...seen, cycleKey]));
+                    schemasRegistry[schemaName] = resolvedBody;
+                }
+                const name = hoistedSchemas.get(cycleKey)!;
+                return { $ref: `#/components/schemas/${name}` };
+            }
+
+            if (seen.has(cycleKey)) {
+                return val;
+            }
+            return resolveValue(resolved, targetFile, isSchemaContext, new Set([...seen, cycleKey]));
+        }
+
+        const out: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(val)) {
+            const childIsSchema =
+                isSchemaContext || k === "schema" || k === "schemas" || k === "items" || k === "additionalProperties";
+            out[k] = await resolveValue(v, currentFile, childIsSchema, seen);
+        }
+        return out;
+    }
+
+    const bundledPaths = isObject(rootDoc.paths) ? await resolveValue(rootDoc.paths, entryPathOrUrl, false) : {};
+    rootDoc.paths = bundledPaths;
+    const bundledComponents = isObject(rootDoc.components)
+        ? await resolveValue(rootDoc.components, entryPathOrUrl, false)
+        : {};
+    rootDoc.components = bundledComponents;
+
+    return rootDoc;
 }
 
 const EXTENSION_FORMATS: Record<string, ExtractApiOptions["format"]> = {
@@ -1039,5 +1217,8 @@ export function extractApiIR(text: string, options: ExtractApiOptions = {}): Api
 export async function extractApiIRFromFile(path: string, options: ExtractApiOptions = {}): Promise<ApiIR> {
     const extension = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
     const format = options.format ?? EXTENSION_FORMATS[extension];
-    return extractApiIR(await Bun.file(path).text(), { ...options, format });
+    // For multi-file specs with external $refs, bundle the document tree first.
+    const bundled = await bundleOpenApiDocument(path);
+    const text = typeof bundled === "string" ? bundled : JSON.stringify(bundled);
+    return extractApiIR(text, { ...options, format: typeof bundled === "string" ? format : "json" });
 }
