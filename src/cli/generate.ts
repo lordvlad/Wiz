@@ -221,6 +221,8 @@ const GENERATOR_SHORTCUTS: Record<string, string> = {
     "java.ts": "../generators/java.ts",
     cli: "../generators/cli.ts",
     "cli.ts": "../generators/cli.ts",
+    docs: "../generators/docs.ts",
+    "docs.ts": "../generators/docs.ts",
 };
 
 async function loadGenerator(module: string): Promise<Generator<GenerateOptions>> {
@@ -306,7 +308,7 @@ export async function runGenerate(argv: string[]): Promise<number> {
         }
 
         const generator = await loadGenerator(invocation.generator);
-        const files = generate(
+        const files = await generate(
             ir,
             generator,
             {

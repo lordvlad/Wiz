@@ -35,18 +35,22 @@ export interface GeneratorContext<TOptions> {
 export interface Generator<TOptions = Record<string, never>> {
     /** Used in diagnostics, so it should name the output, not the file. */
     name: string;
-    type?(ir: TypeIR, context: GeneratorContext<TOptions>): GeneratedFiles;
-    service?(ir: ServiceIR, context: GeneratorContext<TOptions>): GeneratedFiles;
-    api?(ir: ApiIR, context: GeneratorContext<TOptions>): GeneratedFiles;
+    type?(ir: TypeIR, context: GeneratorContext<TOptions>): GeneratedFiles | Promise<GeneratedFiles>;
+    service?(ir: ServiceIR, context: GeneratorContext<TOptions>): GeneratedFiles | Promise<GeneratedFiles>;
+    api?(ir: ApiIR, context: GeneratorContext<TOptions>): GeneratedFiles | Promise<GeneratedFiles>;
 }
 
-function unsupported(generator: Generator<never>, kind: string): Error {
-    const roots = [
-        generator.type ? "a type" : undefined,
-        generator.service ? "a service" : undefined,
-        generator.api ? "an API document" : undefined,
-    ].filter((root): root is string => root !== undefined);
+export interface AsyncGenerator<TOptions = Record<string, never>> {
+    name: string;
+    type?(ir: TypeIR, context: GeneratorContext<TOptions>): Promise<GeneratedFiles>;
+    service?(ir: ServiceIR, context: GeneratorContext<TOptions>): Promise<GeneratedFiles>;
+    api?(ir: ApiIR, context: GeneratorContext<TOptions>): Promise<GeneratedFiles>;
+}
 
+function unsupported(generator: Generator<never>, kind: GeneratorInput["kind"]): Error {
+    const roots = [generator.api && "a document", generator.service && "a service", generator.type && "a type"].filter(
+        (entry): entry is string => Boolean(entry),
+    );
     return new Error(
         `[wiz] generator '${generator.name}' cannot generate from '${kind}'; ${
             roots.length > 0 ? `it reads ${roots.join(" or ")}` : "it declares no inputs at all"
@@ -62,10 +66,22 @@ function unsupported(generator: Generator<never>, kind: string): Error {
  */
 export function generate<TOptions>(
     ir: GeneratorInput,
+    generator: AsyncGenerator<TOptions>,
+    options: TOptions,
+    logger?: WizLogger,
+): Promise<GeneratedFiles>;
+export function generate<TOptions>(
+    ir: GeneratorInput,
+    generator: Generator<TOptions>,
+    options: TOptions,
+    logger?: WizLogger,
+): GeneratedFiles;
+export function generate<TOptions>(
+    ir: GeneratorInput,
     generator: Generator<TOptions>,
     options: TOptions,
     logger: WizLogger = defaultLogger,
-): GeneratedFiles {
+): GeneratedFiles | Promise<GeneratedFiles> {
     const context: GeneratorContext<TOptions> = { options, logger };
     const declared = generator as Generator<never>;
 
